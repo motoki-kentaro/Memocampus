@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Memocampus",
+  "version": "0.1.0",
+  "description": "Local-first web memory capture.",
+  "minimum_chrome_version": "116",
+  "permissions": ["webNavigation", "storage", "nativeMessaging", "tabs", "sidePanel"],
+  "action": { "default_title": "Memocampus" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "background": { "service_worker": "service-worker.js", "type": "module" },
+  "host_permissions": ["<all_urls>"]
+}

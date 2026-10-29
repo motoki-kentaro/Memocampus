@@ -1,0 +1,9 @@
+{
+  "name": "com.memocampus.vault",
+  "description": "Memocampus local SQLite vault",
+  "path": "__MEMOCAMPUS_HOST_EXE_ABSOLUTE_PATH__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://__EXTENSION_ID__/"
+  ]
+}
