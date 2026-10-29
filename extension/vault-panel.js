@@ -6,9 +6,11 @@ import { LOCATION_NOTE, VERDICT_TEXT, describeReasons, describeStatus, formatCou
 
 const $ = (selector) => document.querySelector(selector);
 
-export function createVaultPanel({ send, onVaultChanged }) {
-  const panel = $("#vault-panel");
-  const toggle = $("#vault-toggle");
+/**
+ * `reveal` brings the settings view into sight (the side panel's settings tab); `onStatus` receives
+ * every rendered status (null when the host could not be asked).
+ */
+export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onStatus = () => {} }) {
   const stateText = $("#vault-state");
   const pathText = $("#vault-path");
   const countsText = $("#vault-counts");
@@ -33,11 +35,6 @@ export function createVaultPanel({ send, onVaultChanged }) {
   let status = null;
   let busy = false;
   let pendingApproval = null;
-
-  function setOpen(open) {
-    panel.hidden = !open;
-    toggle.setAttribute("aria-expanded", String(open));
-  }
 
   function fillList(list, items) {
     list.replaceChildren(...items.map((text) => Object.assign(document.createElement("li"), { textContent: text })));
@@ -78,6 +75,7 @@ export function createVaultPanel({ send, onVaultChanged }) {
       defaultPathText.textContent = "";
     }
     updateButtons();
+    onStatus(status);
   }
 
   function setMessage(text) {
@@ -145,11 +143,6 @@ export function createVaultPanel({ send, onVaultChanged }) {
     }
   }
 
-  toggle.addEventListener("click", () => {
-    const open = panel.hidden;
-    setOpen(open);
-    if (open) void refresh();
-  });
   createDefault.addEventListener("click", () => void run("vault_create", { useDefault: true }));
   createPick.addEventListener("click", () => void run("vault_create"));
   openPick.addEventListener("click", () => void run("vault_open"));
@@ -177,7 +170,7 @@ export function createVaultPanel({ send, onVaultChanged }) {
 
   return {
     refresh,
-    open: () => setOpen(true),
+    open: reveal,
     get status() {
       return status;
     },

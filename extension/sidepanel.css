@@ -25,17 +25,97 @@
 
 * { box-sizing: border-box; }
 
+html, body { height: 100%; }
+
 body {
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   font: 13px/1.45 system-ui, "Segoe UI", "Yu Gothic UI", sans-serif;
   color: var(--fg);
   background: var(--bg);
 }
 
+/* Tabs: [URL] [Image] [settings]. Each panel scrolls on its own so switching keeps positions. */
+.tablist {
+  display: flex;
+  flex: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.tab {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 38px;
+  padding: 6px 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab:hover { background: var(--hover); }
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tab-icon-only { flex: 0 0 48px; }
+
+/* assets/settings.svg is used as a mask so the unmodified shape takes the theme's text colour. */
+.tab-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  background-color: currentColor;
+  -webkit-mask: url("assets/settings.svg") center / contain no-repeat;
+  mask: url("assets/settings.svg") center / contain no-repeat;
+}
+
+.tab-attention {
+  position: absolute;
+  top: 7px;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--error-fg);
+}
+
+@media (forced-colors: active) {
+  .tab-icon { forced-color-adjust: none; background-color: ButtonText; }
+  .tab[aria-selected="true"] .tab-icon { background-color: Highlight; }
+  .tab-attention { forced-color-adjust: none; background: Mark; }
+}
+
+.tabpanel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tabpanel-url {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.url-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.placeholder { margin: 32px 16px; color: var(--muted); text-align: center; }
+.placeholder h2 { margin: 0 0 6px; font-size: 15px; color: var(--fg); }
+.placeholder p { margin: 0; }
+
 .toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  flex: none;
   padding: 10px 10px 6px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
@@ -137,11 +217,9 @@ button.secondary { font-size: 12px; white-space: nowrap; }
 .load-more { display: block; width: calc(100% - 20px); margin: 10px; padding: 6px; }
 
 .toolbar-buttons { display: flex; gap: 6px; }
-button[aria-expanded="true"] { background: var(--hover); }
 
 .vault-panel {
   padding: 8px 10px 10px;
-  border-bottom: 1px solid var(--border);
   overflow-wrap: anywhere;
 }
 

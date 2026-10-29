@@ -57,6 +57,11 @@ export function describeStatus(status) {
   return STATE_TEXT[status.state] || "Vaultの状態を確認できません";
 }
 
+/** True when the host answered and no usable vault is active, so the settings tab needs a visit. */
+export function vaultNeedsAttention(status) {
+  return Boolean(status) && status.state !== "ready";
+}
+
 export function formatCounts(counts) {
   if (!counts) return "";
   return `閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件`;

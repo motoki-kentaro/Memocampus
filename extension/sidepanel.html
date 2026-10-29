@@ -7,63 +7,83 @@
     <link rel="stylesheet" href="sidepanel.css">
   </head>
   <body>
-    <header class="toolbar">
-      <input id="query" type="search" maxlength="200" placeholder="タイトル・URLで検索" aria-label="閲覧履歴を検索" autocomplete="off" spellcheck="false" autofocus>
-      <div class="toolbar-row">
-        <span id="summary" class="summary" role="status" aria-live="polite"></span>
-        <span class="toolbar-buttons">
-          <button id="record-tabs" type="button" class="secondary">全タブを記録</button>
-          <button id="vault-toggle" type="button" class="secondary" aria-expanded="false" aria-controls="vault-panel">Vault</button>
-        </span>
-      </div>
-      <div id="record-status" class="record-status" role="status" hidden></div>
-      <div id="queue-status" class="record-status" role="status" hidden></div>
-    </header>
-    <section id="vault-panel" class="vault-panel" aria-labelledby="vault-heading" hidden>
-      <h2 id="vault-heading">Vault</h2>
-      <p id="vault-state" class="vault-state"></p>
-      <p id="vault-path" class="vault-path" hidden></p>
-      <p id="vault-counts" class="vault-meta" hidden></p>
-      <div id="vault-location" class="vault-location" hidden>
-        <p id="vault-verdict"></p>
-        <ul id="vault-reasons"></ul>
-      </div>
-      <div class="vault-actions">
-        <button id="vault-create-default" type="button">既定の場所に新規作成</button>
-        <p id="vault-default-path" class="vault-meta"></p>
-        <button id="vault-create-pick" type="button">場所を選んで新規作成…</button>
-        <button id="vault-open-pick" type="button">既存のVaultを開く…</button>
-        <button id="vault-backup-pick" type="button">バックアップを作成…</button>
-      </div>
-      <details class="vault-manual">
-        <summary>パスを直接入力</summary>
-        <input id="vault-path-input" type="text" spellcheck="false" autocomplete="off" aria-label="Vaultまたはバックアップ先のパス" placeholder="C:\Users\…\memocampus.sqlite3">
-        <div class="vault-manual-actions">
-          <button type="button" data-manual="vault_create">このパスに新規作成</button>
-          <button type="button" data-manual="vault_open">このVaultを開く</button>
-          <button type="button" data-manual="vault_backup">このフォルダにバックアップ</button>
+    <div class="tablist" role="tablist" aria-label="Memocampus">
+      <button id="tab-url" class="tab" type="button" role="tab" aria-selected="true" aria-controls="panel-url">URL</button>
+      <button id="tab-image" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-image" tabindex="-1">Image</button>
+      <button id="tab-settings" class="tab tab-icon-only" type="button" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1" aria-label="設定" title="設定">
+        <span class="tab-icon tab-icon-settings" aria-hidden="true"></span>
+        <span id="settings-attention" class="tab-attention" aria-hidden="true" hidden></span>
+      </button>
+    </div>
+
+    <section id="panel-url" class="tabpanel tabpanel-url" role="tabpanel" aria-labelledby="tab-url">
+      <header class="toolbar">
+        <input id="query" type="search" maxlength="200" placeholder="タイトル・URLで検索" aria-label="閲覧履歴を検索" autocomplete="off" spellcheck="false">
+        <div class="toolbar-row">
+          <span id="summary" class="summary" role="status" aria-live="polite"></span>
+          <span class="toolbar-buttons">
+            <button id="record-tabs" type="button" class="secondary">全タブを記録</button>
+          </span>
         </div>
-      </details>
-      <div id="vault-approval" class="vault-approval" role="alertdialog" aria-labelledby="vault-approval-title" hidden>
-        <p id="vault-approval-title"></p>
-        <ul id="vault-approval-reasons"></ul>
-        <button id="vault-approve" type="button">注意を理解して続行</button>
-        <button id="vault-approve-cancel" type="button">やめる</button>
-      </div>
-      <p id="vault-message" class="vault-message" role="status" aria-live="polite"></p>
-      <p class="vault-meta" id="vault-note"></p>
-      <p class="vault-meta">別のVaultに切り替えても、データは移行されず、元のVaultは削除されません。</p>
+        <div id="record-status" class="record-status" role="status" hidden></div>
+        <div id="queue-status" class="record-status" role="status" hidden></div>
+      </header>
+      <main id="url-scroll" class="url-scroll">
+        <div id="error" class="error" role="alert" hidden>
+          <p id="error-message"></p>
+          <button id="retry" type="button">再試行</button>
+          <button id="open-vault-settings" type="button" hidden>Vault設定を開く</button>
+        </div>
+        <p id="empty" class="empty" hidden></p>
+        <ul id="results" class="results" aria-label="検索結果"></ul>
+        <button id="load-more" type="button" class="load-more" hidden>さらに読み込む</button>
+      </main>
     </section>
-    <main>
-      <div id="error" class="error" role="alert" hidden>
-        <p id="error-message"></p>
-        <button id="retry" type="button">再試行</button>
-        <button id="open-vault-settings" type="button" hidden>Vault設定を開く</button>
+
+    <section id="panel-image" class="tabpanel" role="tabpanel" aria-labelledby="tab-image" tabindex="0" hidden>
+      <div class="placeholder">
+        <h2>画像ライブラリ</h2>
+        <p>画像保存機能は今後実装予定です。</p>
       </div>
-      <p id="empty" class="empty" hidden></p>
-      <ul id="results" class="results" aria-label="検索結果"></ul>
-      <button id="load-more" type="button" class="load-more" hidden>さらに読み込む</button>
-    </main>
+    </section>
+
+    <section id="panel-settings" class="tabpanel" role="tabpanel" aria-labelledby="tab-settings" hidden>
+      <section id="vault-panel" class="vault-panel" aria-labelledby="vault-heading">
+        <h2 id="vault-heading">Vault</h2>
+        <p id="vault-state" class="vault-state"></p>
+        <p id="vault-path" class="vault-path" hidden></p>
+        <p id="vault-counts" class="vault-meta" hidden></p>
+        <div id="vault-location" class="vault-location" hidden>
+          <p id="vault-verdict"></p>
+          <ul id="vault-reasons"></ul>
+        </div>
+        <div class="vault-actions">
+          <button id="vault-create-default" type="button">既定の場所に新規作成</button>
+          <p id="vault-default-path" class="vault-meta"></p>
+          <button id="vault-create-pick" type="button">場所を選んで新規作成…</button>
+          <button id="vault-open-pick" type="button">既存のVaultを開く…</button>
+          <button id="vault-backup-pick" type="button">バックアップを作成…</button>
+        </div>
+        <details class="vault-manual">
+          <summary>パスを直接入力</summary>
+          <input id="vault-path-input" type="text" spellcheck="false" autocomplete="off" aria-label="Vaultまたはバックアップ先のパス" placeholder="C:\Users\…\memocampus.sqlite3">
+          <div class="vault-manual-actions">
+            <button type="button" data-manual="vault_create">このパスに新規作成</button>
+            <button type="button" data-manual="vault_open">このVaultを開く</button>
+            <button type="button" data-manual="vault_backup">このフォルダにバックアップ</button>
+          </div>
+        </details>
+        <div id="vault-approval" class="vault-approval" role="alertdialog" aria-labelledby="vault-approval-title" hidden>
+          <p id="vault-approval-title"></p>
+          <ul id="vault-approval-reasons"></ul>
+          <button id="vault-approve" type="button">注意を理解して続行</button>
+          <button id="vault-approve-cancel" type="button">やめる</button>
+        </div>
+        <p id="vault-message" class="vault-message" role="status" aria-live="polite"></p>
+        <p class="vault-meta" id="vault-note"></p>
+        <p class="vault-meta">別のVaultに切り替えても、データは移行されず、元のVaultは削除されません。</p>
+      </section>
+    </section>
     <script type="module" src="sidepanel.js"></script>
   </body>
 </html>

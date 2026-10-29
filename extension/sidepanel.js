@@ -2,6 +2,8 @@ import { PAGE_SIZE, MAX_QUERY_CHARS, SearchError, VAULT_UNAVAILABLE_CODES, chrom
 import { displayUrl, formatFullDate, formatShortDate } from "./format.js";
 import { createVaultPanel } from "./vault-panel.js";
 import { describeQueueStatus, describeRecordResult } from "./queue-text.js";
+import { createTabs } from "./tabs.js";
+import { vaultNeedsAttention } from "./vault-client.js";
 
 const DEBOUNCE_MS = 200;
 
@@ -17,12 +19,46 @@ const recordButton = document.querySelector("#record-tabs");
 const recordStatus = document.querySelector("#record-status");
 const openVaultSettings = document.querySelector("#open-vault-settings");
 const queueStatus = document.querySelector("#queue-status");
+const urlScroll = document.querySelector("#url-scroll");
+const settingsAttention = document.querySelector("#settings-attention");
+const settingsTab = document.querySelector("#tab-settings");
 
 const send = chromeNativeTransport(chrome.runtime);
 const gate = createLatestGate();
+const tabs = createTabs(
+  [
+    { id: "url", tab: document.querySelector("#tab-url"), panel: document.querySelector("#panel-url"), scroller: urlScroll },
+    { id: "image", tab: document.querySelector("#tab-image"), panel: document.querySelector("#panel-image") },
+    { id: "settings", tab: settingsTab, panel: document.querySelector("#panel-settings") },
+  ],
+  {
+    onChange: (id, previous) => {
+      if (id === "settings" && previous !== null) void vaultPanel.refresh();
+    },
+  },
+);
+
+function showVaultAttention(needed) {
+  settingsAttention.hidden = !needed;
+  // The dot is decorative (aria-hidden); the accessible name and tooltip carry the same message.
+  const label = needed ? "設定（Vaultの確認が必要です）" : "設定";
+  settingsTab.setAttribute("aria-label", label);
+  settingsTab.title = label;
+}
+
+// Set once the user presses a key or a pointer, so the startup redirect never takes over their input.
+let userActed = false;
+for (const type of ["keydown", "pointerdown"]) {
+  document.addEventListener(type, () => { userActed = true; }, { capture: true });
+}
+
 const vaultPanel = createVaultPanel({
   send,
+  reveal: () => tabs.select("settings"),
+  onStatus: (status) => showVaultAttention(vaultNeedsAttention(status)),
   onVaultChanged: () => {
+    // Drop the previous vault's results at once so they are never shown as the new vault's.
+    clearResults();
     void runSearch();
     // Visits queued while no vault was usable can now be delivered.
     chrome.runtime
@@ -62,10 +98,8 @@ function currentQuery() {
 function showError(error) {
   const vaultUnavailable = error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code);
   showErrorText(error instanceof SearchError ? error.message : "検索に失敗しました。", vaultUnavailable);
-  if (vaultUnavailable) {
-    vaultPanel.open();
-    void vaultPanel.refresh();
-  }
+  // Point at the settings tab (badge + button) without pulling the user away from the search box.
+  if (vaultUnavailable) void vaultPanel.refresh();
 }
 
 function showErrorText(text, offerVaultSettings = false) {
@@ -129,6 +163,21 @@ function appendItems(items) {
   results.append(fragment);
 }
 
+function clearResults() {
+  gate.next(); // responses still in flight belong to the previous vault
+  results.replaceChildren();
+  state.seenUrls = new Set();
+  state.count = 0;
+  state.offset = 0;
+  state.hasMore = false;
+  state.loadingMore = false;
+  empty.hidden = true;
+  errorBox.hidden = true;
+  loadMoreButton.hidden = true;
+  summary.textContent = "";
+  tabs.setScroll("url", 0);
+}
+
 function renderEmpty() {
   empty.hidden = state.count !== 0;
   empty.textContent = state.query ? `「${state.query}」に一致するページはありません。` : "まだ記録されたページがありません。";
@@ -155,7 +204,7 @@ async function runSearch() {
     state.hasMore = page.hasMore;
     appendItems(page.items);
     renderEmpty();
-    window.scrollTo(0, 0);
+    tabs.setScroll("url", 0);
   } catch (error) {
     if (!gate.isCurrent(token)) return;
     results.replaceChildren();
@@ -235,22 +284,19 @@ results.addEventListener("click", openResult);
 results.addEventListener("auxclick", openResult);
 retryButton.addEventListener("click", () => void (state.lastFailedAppend ? loadMore() : runSearch()));
 loadMoreButton.addEventListener("click", () => void loadMore());
-openVaultSettings.addEventListener("click", () => {
-  vaultPanel.open();
-  void vaultPanel.refresh();
-  document.querySelector("#vault-panel").scrollIntoView({ block: "start" });
-});
+openVaultSettings.addEventListener("click", () => tabs.select("settings", { focus: true }));
 
-// Load the next page automatically as the list end scrolls into view.
+// Load the next page automatically as the list end scrolls into view. The URL tab scrolls on its
+// own, so it is the observer root; while the tab is hidden nothing intersects.
 new IntersectionObserver((entries) => {
   if (entries.some((entry) => entry.isIntersecting)) void loadMore();
-}, { rootMargin: "200px" }).observe(loadMoreButton);
+}, { root: urlScroll, rootMargin: "200px" }).observe(loadMoreButton);
 
 // Pick up pages recorded while the panel stayed open but hidden, unless the user has scrolled away.
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
   void refreshQueueStatus();
-  if (!state.loadingMore && window.scrollY === 0) void runSearch();
+  if (!state.loadingMore && tabs.getScroll("url") === 0) void runSearch();
 });
 
 recordButton.addEventListener("click", async () => {
@@ -269,9 +315,12 @@ recordButton.addEventListener("click", async () => {
   }
 });
 
+tabs.select("url");
 input.focus();
 void runSearch();
 void refreshQueueStatus();
 void vaultPanel.refresh().then((status) => {
-  if (status && status.state !== "ready") vaultPanel.open();
+  // Redirect (and move focus) only if the user has not started using the panel meanwhile; otherwise
+  // the dot on the settings tab and the search error point the way without hiding what they use.
+  if (vaultNeedsAttention(status) && !userActed) tabs.select("settings", { focus: true });
 });

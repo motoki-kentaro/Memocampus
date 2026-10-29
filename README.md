@@ -8,7 +8,7 @@ Record completed top-level page navigations as URL, title, and timestamp. The MV
 
 ## Side panel search
 
-Clicking the Memocampus toolbar action opens a side panel that searches the local SQLite vault (`visits` and `tab_snapshots`, aggregated per URL) by URL or title. The panel also has the “全タブを記録” button (the former toolbar popup has been removed). See `docs/issue-002-side-panel-search.md` for the `search_pages` protocol.
+Clicking the Memocampus toolbar action opens a side panel with three tabs: **URL** (search), **Image** (placeholder for a future image library) and **⚙** (vault settings). The URL tab searches the local SQLite vault (`visits` and `tab_snapshots`, aggregated per URL) by URL or title. The panel also has the “全タブを記録” button (the former toolbar popup has been removed). See `docs/issue-002-side-panel-search.md` for the `search_pages` protocol.
 
 ## Vault
 
@@ -67,7 +67,10 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 
 ## License
 
-The Memocampus source code is released under the MIT License (see `LICENSE`).
+The Memocampus source code is released under the MIT License (see `LICENSE`). Third-party material is not covered by it:
+
+- `assets/settings.svg` (and its copy `extension/assets/settings.svg`) is the Google Material Symbols “settings” icon, licensed under the Apache License 2.0. The full license text is in `LICENSES/Apache-2.0.txt`; source and provenance are recorded in `THIRD_PARTY_NOTICES.md`.
+- The `extension/` folder carries its own `LICENSE`, `LICENSES/Apache-2.0.txt` and `THIRD_PARTY_NOTICES.md` (identical copies), so it can be distributed on its own.
 
 - Third-party Rust crates keep their own licenses (MIT, Apache-2.0, Unicode-3.0 and similar permissive licenses; SQLite, bundled through `libsqlite3-sys`, is in the public domain). Only `Cargo.lock` is committed here; anyone distributing built binaries must include the corresponding notices.
 - The icon candidate `62c5e2a1-b459-4579-a4ab-bdba9be3c89e.jpeg` was generated with Google Gemini and carries C2PA provenance metadata. It is not covered by the MIT License statement above until its terms of use have been confirmed.
