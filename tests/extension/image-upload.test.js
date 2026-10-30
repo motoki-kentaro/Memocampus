@@ -17,6 +17,7 @@ function image(bytes, overrides = {}) {
     imageUrl: "https://img.test/a.png",
     pageUrl: "https://page.test/",
     frameUrl: null,
+    incognito: false,
     thumbnail: { mimeType: "image/webp", width: 4, height: 4, generator: 1, bytes: png(4, 4) },
     ...overrides,
   };
@@ -40,7 +41,7 @@ test("a large image is sent as ordered chunks of at most 1 MiB and saved once", 
   const begin = sent(host, "image_save_begin")[0];
   assert.deepEqual(
     { protocol: begin.protocol, byteLength: begin.byteLength, sha256: begin.sha256, imageUrl: begin.imageUrl, pageUrl: begin.pageUrl },
-    { protocol: 1, byteLength: bytes.length, sha256: sha256(bytes), imageUrl: "https://img.test/a.png", pageUrl: "https://page.test/" },
+    { protocol: 2, byteLength: bytes.length, sha256: sha256(bytes), imageUrl: "https://img.test/a.png", pageUrl: "https://page.test/" },
   );
   assert.equal(sent(host, "image_save_commit")[0].thumbnail.mimeType, "image/webp");
   assert.equal(host.history.length, 1);

@@ -52,7 +52,7 @@ appeared in the vault.
 | 9 | An SVG image (e.g. a site logo in `.svg`) | Failure “SVG画像は保存できません”. No new rows. |
 | 10 | A `data:` image (e.g. an inline icon) | Saved; `image_url` is `data:image/…` without the payload. |
 | 11 | An image drawn from a `blob:` URL (e.g. image previews in web apps) | Saved via the page while the page is open, or a clear failure. |
-| 12 | Same image in an incognito window (allow Memocampus in incognito to see the menu) | Failure “シークレットウィンドウの画像は保存しません”. No new rows. |
+| 12 | Same image in an incognito window (allow Memocampus in incognito to see the menu) | Saved. A new `saved_images` row with `incognito` = 1; 保存履歴 shows “シークレット” on that row only. |
 | 13 | ⚙ → no vault configured (point the config to a missing vault or start fresh), then save | Failure “Vaultが未設定です…”. Toolbar badge shows “!” with the reason in its tooltip. |
 | 14 | Disable Chrome notifications in Windows, cause a failure (e.g. #9) | No toast, but the toolbar badge shows “!” and the tooltip names the failure. A later successful save clears it. |
 | 15 | During a large save (#7), switch the vault in ⚙ | Failure “Vaultが切り替えられました…”; the image is in neither vault. |

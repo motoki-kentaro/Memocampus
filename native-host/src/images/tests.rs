@@ -77,6 +77,7 @@ fn request(bytes: &[u8], mime: &str, width: u32, height: u32, save_id: &str) -> 
         image_url: "https://img.test/a.png".to_owned(),
         page_url: Some("https://page.test/post".to_owned()),
         frame_url: None,
+        incognito: false,
     }
 }
 
@@ -273,7 +274,7 @@ fn untagged_schema_0_vaults_migrate_too() {
     .unwrap();
     assert_eq!(
         scalar(&open_vault(&vault).unwrap(), "PRAGMA user_version"),
-        2
+        3
     );
 }
 
@@ -311,7 +312,7 @@ fn a_newer_vault_is_neither_migrated_nor_written() {
     let mut f = fixture();
     open_vault(&f.vault)
         .unwrap()
-        .execute_batch("PRAGMA user_version = 3;")
+        .execute_batch("PRAGMA user_version = 4;")
         .unwrap();
     let bytes = png(1, 1);
     assert_eq!(
@@ -320,7 +321,7 @@ fn a_newer_vault_is_neither_migrated_nor_written() {
     );
     let db = open_vault(&f.vault).unwrap();
     assert_eq!(list_images(&db, None, 5), Err(ImageError::VaultNewer));
-    assert_eq!(scalar(&db, "PRAGMA user_version"), 3);
+    assert_eq!(scalar(&db, "PRAGMA user_version"), 4);
     assert_eq!(scalar(&db, "SELECT count(*) FROM image_blobs"), 0);
 }
 
@@ -811,7 +812,7 @@ fn foreign_keys_are_enforced_on_vault_connections() {
     let f = fixture();
     let db = open_vault(&f.vault).unwrap();
     let orphan = db.execute(
-        "INSERT INTO saved_images (save_id, blob_id, image_url, saved_at) VALUES ('o', 999, 'https://a.test/', 1)",
+        "INSERT INTO saved_images (save_id, blob_id, image_url, saved_at, incognito) VALUES ('o', 999, 'https://a.test/', 1, 0)",
         [],
     );
     assert!(orphan.is_err());
@@ -1068,4 +1069,72 @@ fn a_thumbnail_whose_header_size_differs_from_the_declared_size_is_rejected() {
         ),
         0
     );
+}
+
+// --- The `incognito` column ------------------------------------------------------------------------
+
+/// Replaces `saved_images` with the given definition, as an older or foreign vault would have it.
+fn replace_history_table(vault: &Path, definition: &str, version: i64) {
+    Connection::open(vault)
+        .unwrap()
+        .execute_batch(&format!(
+            "DROP TABLE saved_images; CREATE TABLE saved_images ({definition}); PRAGMA user_version = {version};"
+        ))
+        .unwrap();
+}
+
+const V2_HISTORY: &str = "id INTEGER PRIMARY KEY, save_id TEXT NOT NULL UNIQUE, blob_id INTEGER NOT NULL, image_url TEXT NOT NULL, page_url TEXT, frame_url TEXT, saved_at INTEGER NOT NULL";
+
+#[test]
+fn a_new_vault_requires_an_explicit_origin_of_zero_or_one() {
+    let f = fixture();
+    let db = open_vault(&f.vault).unwrap();
+    assert_eq!(scalar(&db, "PRAGMA user_version"), 3);
+    db.execute_batch("INSERT INTO image_blobs (sha256, mime_type, byte_length, width, height, created_at, last_saved_at, data) VALUES (printf('%064d', 1), 'image/png', 1, 1, 1, 1, 1, x'00');").unwrap();
+    let insert = |columns: &str, values: &str| {
+        db.execute_batch(&format!(
+            "INSERT INTO saved_images (save_id, blob_id, image_url, saved_at{columns}) VALUES (lower(hex(randomblob(8))), 1, 'https://a.test/', 1{values})"
+        ))
+    };
+    assert!(insert("", "").is_err(), "no default");
+    assert!(insert(", incognito", ", NULL").is_err());
+    assert!(insert(", incognito", ", 2").is_err());
+    assert!(insert(", incognito", ", -1").is_err());
+    assert!(insert(", incognito", ", 'x'").is_err());
+    assert_eq!(scalar(&db, "SELECT count(*) FROM saved_images"), 0);
+    insert(", incognito", ", 0").unwrap();
+    insert(", incognito", ", 1").unwrap();
+    assert_eq!(scalar(&db, "SELECT count(*) FROM saved_images"), 2);
+}
+
+#[test]
+fn image_tables_without_a_required_origin_are_refused_for_reading_and_writing() {
+    let without_column = V2_HISTORY.to_owned();
+    let nullable = format!("{V2_HISTORY}, incognito INTEGER");
+    let with_default = format!("{V2_HISTORY}, incognito INTEGER NOT NULL DEFAULT 0");
+    for definition in [without_column, nullable, with_default] {
+        let mut f = fixture();
+        replace_history_table(&f.vault, &definition, 2);
+        let bytes = png(1, 1);
+        assert_eq!(
+            save(&mut f, &bytes, "image/png", (1, 1), "s1", 1),
+            Err(ImageError::SchemaMismatch),
+            "{definition}"
+        );
+        let db = open_vault(&f.vault).unwrap();
+        assert_eq!(
+            list_images(&db, None, 10).unwrap_err(),
+            ImageError::SchemaMismatch
+        );
+        assert_eq!(
+            image_sources(&db, 1, None, 10).unwrap_err(),
+            ImageError::SchemaMismatch
+        );
+        // Refused, not converted.
+        assert_eq!(scalar(&db, "PRAGMA user_version"), 2);
+        assert_eq!(
+            scalar(&db, "SELECT count(*) FROM pragma_table_info('saved_images') WHERE name = 'incognito' AND dflt_value IS NULL AND \"notnull\" = 1"),
+            0
+        );
+    }
 }

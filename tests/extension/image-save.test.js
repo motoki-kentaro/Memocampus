@@ -65,7 +65,8 @@ test("data: images store only their type as the source URL", async () => {
 
 test("incognito, bad URLs, oversize, SVG, corrupt and unreachable images fail with a reason and nothing is sent", async () => {
   const cases = [
-    [click("https://a.test/x.png"), { id: 1, incognito: true }, {}, "incognito_not_allowed"],
+    [click("https://a.test/x.png"), { id: 1 }, {}, "incognito_unknown"],
+    [click("https://a.test/x.png"), undefined, {}, "incognito_unknown"],
     [click("chrome://favicon/x"), tab, {}, "unsupported_url"],
     [click(undefined), tab, {}, "unsupported_url"],
     [click("https://a.test/x.png"), tab, { fetchImpl: async () => ({ ok: true, status: 200, headers: new Headers({ "content-length": String(32 * 1024 * 1024 + 1) }), body: null }) }, "too_large"],
@@ -95,7 +96,7 @@ test("notification texts distinguish new saves, history-only saves and failures"
   assert.deepEqual(describeImageSaveResult({ ok: true, image, saved: { deduplicated: false, replayed: false } }), { title: "Memocampusへ保存しました", message: "画像 800×600・2.0 MB" });
   assert.match(describeImageSaveResult({ ok: true, image, saved: { deduplicated: true, replayed: false } }).message, /保存履歴を追加しました/);
   assert.deepEqual(describeImageSaveResult({ ok: false, code: "http_error", details: { status: 403 } }), { title: "Memocampusへ保存できませんでした", message: "画像の取得に失敗しました（HTTP 403）。" });
-  for (const code of ["vault_not_configured", "too_large", "incognito_not_allowed", "transfer_interrupted", "decode_failed", "svg_not_supported", "host_outdated"]) {
+  for (const code of ["vault_not_configured", "too_large", "incognito_unknown", "invalid_incognito", "transfer_interrupted", "decode_failed", "svg_not_supported", "host_outdated"]) {
     const { message } = describeImageSaveResult({ ok: false, code, details: {} });
     assert.notEqual(message, "操作に失敗しました。", `${code} has a specific message`);
   }
@@ -133,15 +134,113 @@ test("the service worker registers the menu and reports a refused save visibly",
   await import(`${pathToFileURL(path.join(extensionDir, "service-worker.js")).href}?sw=${Date.now()}`);
   listeners.installed.forEach((fn) => fn());
   assert.deepEqual(calls.menus.map((m) => m.contexts), [["image"]]);
-  listeners.menuClick.forEach((fn) => fn(click("https://a.test/x.png"), { id: 1, incognito: true }));
+  listeners.menuClick.forEach((fn) => fn(click("https://a.test/x.png"), { id: 1 }));
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(calls.notifications.length, 1);
   assert.equal(calls.notifications[0].title, "Memocampusへ保存できませんでした");
   assert.match(calls.notifications[0].iconUrl, /^data:image\/png;base64,/);
-  assert.match(calls.session.imageSaveFailure, /シークレット/);
+  assert.match(calls.session.imageSaveFailure, /ウィンドウの種類/);
   assert.equal(calls.badge.at(-1), "!", "a failure stays visible on the toolbar even without notifications");
   // Other menu items are ignored.
   listeners.menuClick.forEach((fn) => fn({ menuItemId: "other" }, { id: 1 }));
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(calls.notifications.length, 1);
+});
+
+// --- Explicit saves from incognito windows ------------------------------------------------------------
+
+const incognitoTab = { id: 6, incognito: true };
+
+test("a manual save is sent with the window's origin, from either kind of window", async () => {
+  for (const tabInfo of [tab, incognitoTab]) {
+    const host = fakeImageHost();
+    const result = await saveImageFromClick(click("https://a.test/x.png"), tabInfo, deps(host, png(2, 2)));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const begin = host.received.find((m) => m.type === "image_save_begin");
+    assert.strictEqual(begin.incognito, tabInfo.incognito);
+    assert.ok(host.received.filter((m) => m.type !== "image_save_begin").every((m) => !("incognito" in m)), "only begin carries it");
+  }
+});
+
+test("a save whose origin is missing or invalid sends nothing and fetches nothing", async () => {
+  const fail = () => assert.fail("must not fetch");
+  for (const tabInfo of [undefined, null, {}, { id: 1 }, ...[undefined, null, "true", "false", 0, 1, {}].map((incognito) => ({ id: 1, incognito }))]) {
+    const host = fakeImageHost();
+    const result = await saveImageFromClick(click("https://a.test/x.png"), tabInfo, deps(host, png(2, 2), { fetchImpl: fail, executeScript: fail }));
+    assert.deepEqual([result.ok, result.code], [false, "incognito_unknown"], JSON.stringify(tabInfo));
+    assert.equal(host.received.length, 0);
+  }
+});
+
+test("the origin is fixed at the click: a retry sends the same value even if the tab object changes", async () => {
+  const host = fakeImageHost();
+  const mutable = { id: 6, incognito: true };
+  host.dropAfter = (message) => {
+    if (message.type !== "image_save_commit" || host.dropped) return false;
+    mutable.incognito = false;
+    return (host.dropped = true);
+  };
+  const result = await saveImageFromClick(click("https://a.test/x.png"), mutable, deps(host, png(2, 2)));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const begins = host.received.filter((m) => m.type === "image_save_begin");
+  assert.equal(begins.length, 2);
+  assert.ok(begins.every((m) => m.incognito === true));
+  assert.equal(begins[0].saveId, begins[1].saveId);
+});
+
+test("format and size checks apply to incognito saves as well", async () => {
+  const page = (bytes) => async () => [{ result: { ok: true, base64: bytesToBase64(bytes) } }];
+  const svg = new TextEncoder().encode("<svg/>");
+  const cases = [
+    [{ executeScript: page(svg) }, "svg_not_supported"],
+    [{ executeScript: page(new Uint8Array(0)) }, "empty_image"],
+    [{ executeScript: async () => [{ result: { ok: false, error: "too_large" } }] }, "too_large"],
+    [{ ...fakeDecoder({ broken: true }) }, "decode_failed"],
+  ];
+  for (const [overrides, code] of cases) {
+    const host = fakeImageHost();
+    const result = await saveImageFromClick(click("https://a.test/x.png"), incognitoTab, deps(host, png(2, 2), overrides));
+    assert.deepEqual([result.ok, result.code], [false, code]);
+    assert.equal(host.received.length, 0, `${code}: nothing reaches the host`);
+  }
+});
+
+test("the same image saved from both kinds of window is two save actions with their own origin", async () => {
+  const host = fakeImageHost();
+  const bytes = png(2, 2);
+  await saveImageFromClick(click("https://a.test/x.png"), tab, deps(host, bytes));
+  const second = await saveImageFromClick(click("https://a.test/x.png"), incognitoTab, deps(host, bytes));
+  assert.equal(second.ok, true);
+  const begins = host.received.filter((m) => m.type === "image_save_begin");
+  assert.deepEqual(begins.map((m) => m.incognito), [false, true]);
+  assert.equal(begins[0].sha256, begins[1].sha256);
+  assert.notEqual(begins[0].saveId, begins[1].saveId);
+});
+
+test("an incognito save never uses the normal profile's cookies or HTTP cache", async () => {
+  const bytes = png(2, 2);
+  const fetched = [];
+  const fetchImpl = async (url, options) => (fetched.push(options), { ok: true, status: 200, redirected: false, headers: new Headers(), body: new Response(bytes).body });
+
+  // The page can read the image: the worker does not fetch at all.
+  let host = fakeImageHost();
+  let injected;
+  const executeScript = async (options) => ((injected = options), [{ result: { ok: true, base64: bytesToBase64(bytes) } }]);
+  assert.equal((await saveImageFromClick(click("https://a.test/x.png"), incognitoTab, deps(host, bytes, { fetchImpl, executeScript }))).ok, true);
+  assert.deepEqual(fetched, []);
+  assert.equal(injected.target.tabId, incognitoTab.id);
+
+  // The page cannot: the worker fetches without cookies and without the cache.
+  host = fakeImageHost();
+  const refused = async () => [{ result: { ok: false, error: "network_error" } }];
+  assert.equal((await saveImageFromClick(click("https://a.test/x.png"), incognitoTab, deps(host, bytes, { fetchImpl, executeScript: refused }))).ok, true);
+  assert.equal(fetched.length, 1);
+  assert.equal(fetched[0].credentials, "omit");
+  assert.equal(fetched[0].cache, "no-store");
+
+  // A normal window keeps fetching with the site's cookies.
+  fetched.length = 0;
+  host = fakeImageHost();
+  assert.equal((await saveImageFromClick(click("https://a.test/x.png"), tab, deps(host, bytes, { fetchImpl }))).ok, true);
+  assert.equal(fetched[0].credentials, "include");
 });

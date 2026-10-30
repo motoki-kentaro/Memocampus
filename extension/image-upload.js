@@ -3,7 +3,7 @@
 
 import { ImageSaveError, bytesToBase64 } from "./image-format.js";
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const MAX_CHUNK_BYTES = 1024 * 1024;
 export const STEP_TIMEOUT_MS = 30_000;
 /** Ports opened for one save action at most (first try + thumbnail-less retry + one reconnect). */
@@ -99,6 +99,7 @@ async function attempt(image, { connect, runtime, timeoutMs, withThumbnail, stat
       imageUrl: image.imageUrl,
       pageUrl: image.pageUrl ?? null,
       frameUrl: image.frameUrl ?? null,
+      incognito: image.incognito,
       ...(state.vaultToken ? { vaultToken: state.vaultToken } : {}),
     });
     const first = await reader.next(timeoutMs);
@@ -139,6 +140,7 @@ async function attempt(image, { connect, runtime, timeoutMs, withThumbnail, stat
  * another one). At most MAX_ATTEMPTS ports are opened.
  */
 export async function uploadImage(image, { connect, runtime, timeoutMs = STEP_TIMEOUT_MS }) {
+  if (typeof image.incognito !== "boolean") throw new ImageSaveError("incognito_unknown");
   const state = { vaultToken: null };
   let withThumbnail = true;
   let retriedTransfer = false;

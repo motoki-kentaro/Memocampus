@@ -53,6 +53,7 @@ fn save(f: &mut Fixture, bytes: &[u8], width: u32, save_id: &str, now: i64) -> (
         image_url: "https://img.test/a.png".into(),
         page_url: Some("https://page.test/".into()),
         frame_url: None,
+        incognito: false,
     };
     let ticket = f.session.ticket().unwrap();
     let outcome =

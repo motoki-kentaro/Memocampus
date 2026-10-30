@@ -29,12 +29,14 @@ const webUrl = (value) => {
  */
 export async function saveImageFromClick(info, tab, deps) {
   try {
-    if (tab?.incognito) throw new ImageSaveError("incognito_not_allowed");
+    // Fixed at the click: every attempt of this save action reports the same origin.
+    const incognito = tab?.incognito;
+    if (typeof incognito !== "boolean") throw new ImageSaveError("incognito_unknown");
     const srcUrl = info?.srcUrl;
     if (typeof srcUrl !== "string" || srcUrl === "") throw new ImageSaveError("unsupported_url");
     const target = Number.isInteger(tab?.id) && tab.id >= 0 ? { tabId: tab.id, frameIds: [Number.isInteger(info.frameId) ? info.frameId : 0] } : null;
 
-    const { bytes } = await acquireImage(srcUrl, target, deps);
+    const { bytes } = await acquireImage(srcUrl, target, deps, { incognito });
     const format = await inspectImage(bytes, deps);
     const sha256 = await sha256Hex(bytes, deps.subtle);
     const thumbnail = await makeThumbnail(bytes, format.mimeType, deps);
@@ -51,6 +53,7 @@ export async function saveImageFromClick(info, tab, deps) {
       imageUrl: srcUrl.startsWith("data:") ? `data:${format.mimeType}` : srcUrl,
       pageUrl,
       frameUrl: frameUrl && frameUrl !== pageUrl ? frameUrl : null,
+      incognito,
       thumbnail,
     };
     const saved = await uploadImage(image, deps);

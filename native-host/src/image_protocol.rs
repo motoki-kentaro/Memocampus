@@ -1,4 +1,4 @@
-//! Image upload over one `chrome.runtime.connectNative` port (protocol version 1).
+//! Image upload over one `chrome.runtime.connectNative` port (protocol version 2).
 //!
 //! A port is one host process: the extension sends `image_save_begin`, raw-byte chunks of at most
 //! 1 MiB (Base64 in JSON), then `image_save_commit`. Bytes are buffered in memory only; nothing
@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! → image_save_begin  { protocol, saveId, sha256, byteLength, mimeType, width, height, imageUrl, pageUrl?, frameUrl?,
-//!                       vaultToken? }                            vaultToken: from an earlier reply of this save action
+//!                       incognito, vaultToken? }                            vaultToken: from an earlier reply of this save action
 //! ← image_save_ready  { saveId, vaultToken, upload, chunkBytes, maxBytes }   upload=false: bytes already stored
 //! ← image_saved       { saveId, vaultToken, ..., replayed: true }            this save action was committed before
 //! → image_save_chunk  { saveId, index, data }                    index 0,1,2,…; every chunk but the last is exactly chunkBytes
@@ -19,6 +19,9 @@
 //! A retry of the same save action on a new port (after a lost connection or answer) sends the
 //! `vaultToken` it was given. If the active vault is another one by then, the retry fails with
 //! `vault_switched` before anything is looked up or written: a save never moves to another vault.
+//! `incognito` (required, true or false) is sent only with `begin` and fixed there for the upload. A
+//! chunk or commit carrying it fails the upload, and a retry of a committed save action with the
+//! other value fails with `save_id_conflict`, so a save's origin can never change.
 //! → image_save_abort  { saveId }  ← image_save_aborted { saveId }
 //! ← image_save_error  { saveId, error }                          the upload is discarded
 //! ```
@@ -33,7 +36,7 @@ use crate::images::{
 };
 use crate::vault::{Session, VaultTicket};
 
-pub const PROTOCOL_VERSION: u64 = 1;
+pub const PROTOCOL_VERSION: u64 = 2;
 /// Raw bytes per chunk (Base64 makes each chunk message about 1.4 MB, far below the 64 MiB limit).
 pub const CHUNK_BYTES: usize = 1024 * 1024;
 
@@ -46,6 +49,8 @@ enum ProtocolError {
     Image(ImageError),
     UnsupportedProtocol,
     InvalidMessage,
+    InvalidIncognito,
+    IncognitoFixedAtBegin,
     NoUpload,
     UploadInProgress,
     SaveIdMismatch,
@@ -64,6 +69,8 @@ impl ProtocolError {
             Self::Image(error) => error.code(),
             Self::UnsupportedProtocol => "unsupported_protocol",
             Self::InvalidMessage => "invalid_message",
+            Self::InvalidIncognito => "invalid_incognito",
+            Self::IncognitoFixedAtBegin => "incognito_fixed_at_begin",
             Self::NoUpload => "no_upload",
             Self::UploadInProgress => "upload_in_progress",
             Self::SaveIdMismatch => "save_id_mismatch",
@@ -166,6 +173,10 @@ fn parse_begin(message: &Value) -> Result<SaveRequest, ProtocolError> {
     if !is_uuid(&save_id) {
         return Err(ImageError::InvalidSaveId.into());
     }
+    let incognito = message
+        .get("incognito")
+        .and_then(Value::as_bool)
+        .ok_or(ProtocolError::InvalidIncognito)?;
     let request = SaveRequest {
         save_id,
         sha256: string(message, "sha256")?,
@@ -176,6 +187,7 @@ fn parse_begin(message: &Value) -> Result<SaveRequest, ProtocolError> {
         image_url: string(message, "imageUrl")?,
         page_url: optional_string(message, "pageUrl")?,
         frame_url: optional_string(message, "frameUrl")?,
+        incognito,
     };
     images::validate_request(&request)?;
     Ok(request)
@@ -243,6 +255,9 @@ impl Uploads {
     }
 
     fn current(&mut self, message: &Value) -> Result<&mut Upload, ProtocolError> {
+        if message.get("incognito").is_some() {
+            return Err(ProtocolError::IncognitoFixedAtBegin);
+        }
         let save_id = string(message, "saveId")?;
         let upload = self.active.as_mut().ok_or(ProtocolError::NoUpload)?;
         if upload.request.save_id != save_id {

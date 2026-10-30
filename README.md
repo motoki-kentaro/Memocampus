@@ -18,6 +18,30 @@ The database previously stored next to the executable (`native-host/target/relea
 
 This project never closes tabs automatically.
 
+## Incognito windows
+
+Memocampus never records browsing automatically from incognito windows, even if you allow the extension to run in
+incognito in `chrome://extensions`. An image you explicitly save from an incognito window is the one exception:
+
+- **Visits**: the tab's state is checked before anything is queued. If the tab is incognito, already closed, or its state
+  cannot be determined, the visit is not recorded (no queue entry, no dead letter). A page closed the moment it
+  finishes loading can therefore be missing from the history.
+- **全タブを記録**: only tabs known to be normal are saved and counted; incognito tabs are left out without a trace.
+- **Images**: right-clicking an image in an incognito window and choosing **Memocampusへ保存** works. The image is
+  stored permanently in the normal SQLite vault and is part of every backup: incognito does not make it temporary. Each
+  save-history row records whether it came from an incognito window (shown as “シークレット” in 保存履歴). The same image
+  saved from both kinds of window is stored once and has a row of each kind. A save whose window type cannot be
+  determined is refused. The image is fetched inside the page, or else without cookies or HTTP cache, so the normal
+  profile's cookies are not sent; an image that the page may not read and that requires a login can therefore fail.
+- **Future MCP access**: saving and publishing are separate operations. Nothing is published initially, and this
+  attribute is kept so that a future gate can use it.
+- **Native host**: as a second layer it accepts a visit or tab snapshot only if it is declared `"incognito": false`;
+  anything else is refused without being stored, and the extension discards it without keeping its URL or title. The host
+  cannot see the browser: it enforces the extension's declaration, and telling incognito tabs apart is the extension's job.
+
+Queued events without that declaration (from an earlier version) are discarded, not sent. Rows already in a vault are
+not changed or deleted.
+
 ## Images (Image Vault)
 
 **Saving.** Right-click an image on a web page and choose **Memocampusへ保存**. The extension fetches the original file
@@ -27,7 +51,7 @@ nothing behind. A notification (and, if notifications are off, a “!” badge o
 
 - Formats: PNG, JPEG, GIF, WebP, AVIF, BMP, identified from the bytes (not the file name or server header).
   Up to **32 MiB** per image.
-- Not saved: SVG (may contain scripts), images in incognito windows, `file:`/`chrome:` and other non-web URLs.
+- Not saved: SVG (may contain scripts), `file:`/`chrome:` and other non-web URLs.
   CSS background images, canvas drawings and video frames have no image context menu.
 - Each distinct file (by SHA-256) is stored once; saving it again only adds a save-history row (time, image URL,
   page URL, frame URL) and increases its save count. Cookies, tokens and response headers are never stored.

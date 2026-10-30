@@ -73,10 +73,10 @@ fn count_in(vault: &std::path::Path, table: &str) -> i64 {
 
 fn begin(save_id: &str, bytes: &[u8], width: u32, height: u32) -> Value {
     json!({
-        "type": "image_save_begin", "protocol": 1, "saveId": save_id,
+        "type": "image_save_begin", "protocol": 2, "saveId": save_id,
         "sha256": sha256_hex(bytes), "byteLength": bytes.len(), "mimeType": "image/png",
         "width": width, "height": height,
-        "imageUrl": "https://img.test/a.png", "pageUrl": "https://page.test/", "frameUrl": null,
+        "imageUrl": "https://img.test/a.png", "pageUrl": "https://page.test/", "frameUrl": null, "incognito": false,
     })
 }
 
@@ -297,7 +297,7 @@ fn begin_is_validated_strictly() {
         message
     };
     for (message, expected) in [
-        (with("protocol", json!(2)), "unsupported_protocol"),
+        (with("protocol", json!(1)), "unsupported_protocol"),
         (with("protocol", Value::Null), "unsupported_protocol"),
         (with("saveId", json!("s1")), "invalid_save_id"),
         (
@@ -554,4 +554,193 @@ fn the_vault_token_ignores_how_the_path_is_spelled() {
         crate::vault::vault_token(&h.tmp.0.join("missing.sqlite3")),
         Err(VaultError::Missing)
     );
+}
+
+// --- Origin of a save (`incognito`) ----------------------------------------------------------------
+
+fn begin_as(save_id: &str, bytes: &[u8], width: u32, incognito: bool) -> Value {
+    let mut message = begin(save_id, bytes, width, width);
+    message["incognito"] = json!(incognito);
+    message
+}
+
+/// (save_id, incognito) of every history row.
+fn origins(vault: &std::path::Path) -> Vec<(String, i64)> {
+    let db = open_vault(vault).unwrap();
+    let mut statement = db
+        .prepare("SELECT save_id, incognito FROM saved_images ORDER BY id")
+        .unwrap();
+    let rows = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap();
+    rows.collect::<Result<_, _>>().unwrap()
+}
+
+#[test]
+fn a_save_stores_the_declared_origin_and_the_history_returns_it() {
+    for incognito in [false, true] {
+        let mut h = Harness::new();
+        let bytes = png(3, 3);
+        assert_eq!(
+            h.send(begin_as(SAVE_A, &bytes, 3, incognito))["upload"],
+            true
+        );
+        upload_all(&mut h, SAVE_A, &bytes);
+        let saved = h.send(commit(SAVE_A));
+        assert_eq!(saved["type"], "image_saved", "{saved}");
+        assert_eq!(
+            origins(&h.vault),
+            [(SAVE_A.to_owned(), i64::from(incognito))]
+        );
+        let sources = crate::image_query::handle(
+            &mut h.session,
+            &json!({ "type": "image_sources", "requestId": "r", "blobId": saved["blobId"] }),
+        );
+        assert_eq!(sources["items"][0]["incognito"], incognito, "{sources}");
+    }
+}
+
+#[test]
+fn a_begin_without_a_boolean_origin_is_refused_before_anything_happens() {
+    let mut h = Harness::new();
+    let bytes = png(1, 1);
+    let mut missing = begin(SAVE_A, &bytes, 1, 1);
+    missing.as_object_mut().unwrap().remove("incognito");
+    let invalid = [
+        json!(null),
+        json!("false"),
+        json!("true"),
+        json!(0),
+        json!(1),
+    ];
+    let messages = invalid
+        .into_iter()
+        .map(|value| {
+            let mut message = begin(SAVE_A, &bytes, 1, 1);
+            message["incognito"] = value;
+            message
+        })
+        .chain([missing]);
+    for message in messages {
+        let reply = h.send(message);
+        assert_eq!(
+            reply,
+            json!({ "ok": false, "type": "image_save_error", "saveId": SAVE_A, "error": "invalid_incognito" }),
+            "the answer carries no URL"
+        );
+        assert_eq!(h.send(commit(SAVE_A))["error"], "no_upload");
+    }
+    assert_eq!((h.count("image_blobs"), h.count("saved_images")), (0, 0));
+}
+
+#[test]
+fn the_same_bytes_from_both_kinds_of_window_are_one_image_with_two_kinds_of_history() {
+    let mut h = Harness::new();
+    let bytes = png(4, 4);
+    h.send(begin_as(SAVE_A, &bytes, 4, false));
+    upload_all(&mut h, SAVE_A, &bytes);
+    h.send(commit(SAVE_A));
+    assert_eq!(h.send(begin_as(SAVE_B, &bytes, 4, true))["upload"], false);
+    assert_eq!(h.send(commit(SAVE_B))["deduplicated"], true);
+    assert_eq!((h.count("image_blobs"), h.count("saved_images")), (1, 2));
+    assert_eq!(
+        origins(&h.vault),
+        [(SAVE_A.to_owned(), 0), (SAVE_B.to_owned(), 1)]
+    );
+}
+
+#[test]
+fn a_retry_keeps_the_history_unchanged_and_may_not_change_the_origin() {
+    let mut h = Harness::new();
+    let bytes = png(5, 5);
+    h.send(begin_as(SAVE_A, &bytes, 5, true));
+    upload_all(&mut h, SAVE_A, &bytes);
+    h.send(commit(SAVE_A));
+    // The same action again, as after a lost answer.
+    assert_eq!(h.send(begin_as(SAVE_A, &bytes, 5, true))["replayed"], true);
+    assert_eq!(origins(&h.vault), [(SAVE_A.to_owned(), 1)]);
+    // The same action claiming the other origin is not a retry.
+    assert_eq!(
+        h.send(begin_as(SAVE_A, &bytes, 5, false))["error"],
+        "save_id_conflict"
+    );
+    assert_eq!(origins(&h.vault), [(SAVE_A.to_owned(), 1)]);
+}
+
+#[test]
+fn a_commit_racing_a_committed_save_with_the_other_origin_is_refused() {
+    // Both begin before either commits, so only the commit's own check can tell.
+    let mut first = Harness::new();
+    let bytes = png(6, 6);
+    first.send(begin_as(SAVE_A, &bytes, 6, false));
+    upload_all(&mut first, SAVE_A, &bytes);
+    let mut second = Uploads::default();
+    second.handle_at(
+        &mut first.session,
+        &begin_as(SAVE_A, &bytes, 6, true),
+        1_793_330_100_000,
+    );
+    first.send(commit(SAVE_A));
+    for (index, part) in bytes.chunks(CHUNK_BYTES).enumerate() {
+        second.handle_at(
+            &mut first.session,
+            &chunk(SAVE_A, index, part),
+            1_793_330_100_000,
+        );
+    }
+    let reply = second.handle_at(&mut first.session, &commit(SAVE_A), 1_793_330_100_000);
+    assert_eq!(reply["error"], "save_id_conflict");
+    assert_eq!(origins(&first.vault), [(SAVE_A.to_owned(), 0)]);
+}
+
+#[test]
+fn the_origin_cannot_be_changed_during_an_upload() {
+    let bytes = big_png(8, 8, CHUNK_BYTES + 100);
+    let (head, tail) = bytes.split_at(CHUNK_BYTES);
+    for later in ["chunk", "commit"] {
+        let mut h = Harness::new();
+        h.send(begin_as(SAVE_A, &bytes, 8, false));
+        assert_eq!(
+            h.send(chunk(SAVE_A, 0, head))["type"],
+            "image_save_chunk_ack"
+        );
+        let mut message = if later == "chunk" {
+            chunk(SAVE_A, 1, tail)
+        } else {
+            assert_eq!(
+                h.send(chunk(SAVE_A, 1, tail))["type"],
+                "image_save_chunk_ack"
+            );
+            commit(SAVE_A)
+        };
+        message["incognito"] = json!(true);
+        assert_eq!(h.send(message)["error"], "incognito_fixed_at_begin");
+        // The upload is gone with everything it had received.
+        assert_eq!(h.send(commit(SAVE_A))["error"], "no_upload");
+        assert_eq!((h.count("image_blobs"), h.count("saved_images")), (0, 0));
+    }
+    // A second begin during the upload cannot replace the first one's origin either.
+    let mut h = Harness::new();
+    h.send(begin_as(SAVE_A, &bytes, 8, false));
+    assert_eq!(
+        h.send(begin_as(SAVE_A, &bytes, 8, true))["error"],
+        "upload_in_progress"
+    );
+    assert_eq!(h.count("saved_images"), 0);
+}
+
+#[test]
+fn an_incognito_save_bound_to_another_vault_writes_nowhere() {
+    let mut h = Harness::new();
+    let bytes = png(9, 9);
+    let token = h.send(begin_as(SAVE_A, &bytes, 9, true))["vaultToken"].clone();
+    h.send(json!({ "type": "image_save_abort", "saveId": SAVE_A }));
+    let other = h.tmp.0.join("other.sqlite3");
+    create_vault(&other).unwrap();
+    configure(&h.tmp.env(), &other);
+    let mut retry = begin_as(SAVE_A, &bytes, 9, true);
+    retry["vaultToken"] = token;
+    assert_eq!(h.send(retry)["error"], "vault_switched");
+    assert_eq!(count_in(&other, "saved_images"), 0);
+    assert_eq!(count_in(&h.vault, "saved_images"), 0);
 }

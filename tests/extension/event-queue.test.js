@@ -56,7 +56,7 @@ function fakeHost() {
 }
 
 let counter = 0;
-const visit = (url = "https://a.test/", id = `e${++counter}`) => ({ type: "visit", id, url, title: "T", visitedAt: "2026-10-30T00:00:00.000Z" });
+const visit = (url = "https://a.test/", id = `e${++counter}`) => ({ type: "visit", id, url, title: "T", incognito: false, visitedAt: "2026-10-30T00:00:00.000Z" });
 const pending = (storage) => storage.data.get(QUEUE_KEY) ?? [];
 const deadLetters = (storage) => storage.data.get(DEAD_LETTER_KEY) ?? [];
 
@@ -80,8 +80,8 @@ test("an invalid URL ahead of a valid one is quarantined and the valid one is st
 
 test("malformed events are quarantined as permanent errors", async () => {
   const { storage, queue } = setup();
-  const noUrl = { type: "visit", id: "no-url", title: "T" };
-  const noId = { type: "visit", url: "https://a.test/" };
+  const noUrl = { type: "visit", id: "no-url", title: "T", incognito: false };
+  const noId = { type: "visit", url: "https://a.test/", incognito: false };
   await queue.enqueueAll([noUrl, noId, null]);
   assert.equal(await queue.flush(), null);
   assert.deepEqual(pending(storage), []);
@@ -262,5 +262,5 @@ test("record results never call queued snapshots saved", () => {
   assert.match(partial, /理由: Vaultが未設定です。/);
   assert.doesNotMatch(partial, /SQLiteに保存しました/);
   assert.match(describeRecordResult({ ok: false, error: "送信待ちキューが満杯のため、記録しませんでした（1件も登録していません）。" }), /1件も登録していません/);
-  assert.equal(describeRecordResult({ ok: true, queued: 0 }), "記録できるタブ（http/https）がありません。");
+  assert.equal(describeRecordResult({ ok: true, queued: 0 }), "記録できる通常ウィンドウのタブ（http/https）がありません。");
 });

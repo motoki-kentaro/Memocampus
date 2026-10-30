@@ -65,14 +65,14 @@ yet bound to a vault.
 | rfd's Windows save dialog does not override options, so `FOS_OVERWRITEPROMPT` (Windows default for save dialogs) stays on | `rfd-0.17.2/src/backend/win_cid/file_dialog/dialog_ffi.rs` | The OS asks before overwriting; still to be confirmed on a real machine. |
 | `SHGetKnownFolderPath(FOLDERID_Documents)` is in `windows-sys` (`Win32_UI_Shell`) | windows-sys 0.61 | Documents folder without building `C:\Users\…`. |
 
-## 1. Data model (schema v2, additive) — implemented in Slice 1
+## 1. Data model (schema v3; v3 added `saved_images.incognito` with no conversion of v2 vaults) — implemented in Slice 1
 
 The authoritative definition is `IMAGE_SCHEMA_SQL` in `native-host/src/images.rs`.
 
 | Table | Columns (in order) | Notes |
 |---|---|---|
 | `image_blobs` | `id`, `sha256` UNIQUE (64 hex), `mime_type`, `byte_length` > 0, `width` > 0, `height` > 0, `created_at`, `last_saved_at`, `save_count` > 0, **`data` last** | One row per distinct original. `data` is the last column so list queries never walk the BLOB's overflow pages. Index `image_blobs_recent (last_saved_at DESC, id DESC)`. |
-| `saved_images` | `id`, `save_id` UNIQUE, `blob_id` → `image_blobs.id` (RESTRICT), `image_url`, `page_url`, `frame_url`, `saved_at` | Append-only, one row per save action. Index `saved_images_by_blob (blob_id, saved_at DESC, id DESC)`. |
+| `saved_images` | `id`, `save_id` UNIQUE, `blob_id` → `image_blobs.id` (RESTRICT), `image_url`, `page_url`, `frame_url`, `saved_at`, `incognito` (0 or 1, required, no default) | Append-only, one row per save action. Index `saved_images_by_blob (blob_id, saved_at DESC, id DESC)`. |
 | `image_thumbnails` | `blob_id` PK → `image_blobs.id` (CASCADE), `mime_type`, `width`, `height`, `generator` > 0, **`data` last** | Derived data; replaced only by a higher `generator`. |
 
 - Times are Unix epoch **milliseconds** taken from the host clock at commit; export names use seconds.

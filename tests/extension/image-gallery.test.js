@@ -1,4 +1,5 @@
 // Runs the real side panel with the Image tab against the fake DOM and host.
+import { listSources } from "../../extension/image-client.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { imageSummary, loadSidePanel, observers, pages, settle } from "./fake-dom.js";
@@ -234,9 +235,9 @@ test("a new save refreshes the list only when that does not disturb the user", a
 
 test("the save history lists every save with URLs as text and only web URLs openable", async () => {
   const sources = [
-    { savedImageId: 3, imageUrl: "https://evil.test/<img src=x onerror=alert(1)>.png", pageUrl: "https://page.test/a", frameUrl: null, savedAt: 3_000 },
-    { savedImageId: 2, imageUrl: "data:image/png", pageUrl: null, frameUrl: null, savedAt: 2_000 },
-    { savedImageId: 1, imageUrl: "javascript:alert(1)", pageUrl: "https://page.test/b", frameUrl: "https://frame.test/", savedAt: 1_000 },
+    { savedImageId: 3, imageUrl: "https://evil.test/<img src=x onerror=alert(1)>.png", pageUrl: "https://page.test/a", frameUrl: null, savedAt: 3_000, incognito: false },
+    { savedImageId: 2, imageUrl: "data:image/png", pageUrl: null, frameUrl: null, savedAt: 2_000, incognito: false },
+    { savedImageId: 1, imageUrl: "javascript:alert(1)", pageUrl: "https://page.test/b", frameUrl: "https://frame.test/", savedAt: 1_000, incognito: false },
   ];
   const { $, host } = await openImageTab({ vaults: { A: pages("A", 1) }, active: "A", images: { A: [imageSummary(9, 3_000, { saveCount: 3, sources })] } });
   assert.equal(button(tiles($)[0]).children.at(-1).textContent, "×3");
@@ -585,4 +586,37 @@ test("a rebuild in progress during a vault switch writes nothing to either vault
   await settle(150);
   assert.equal(requests(host, "image_thumbnail_put").length, 0);
   assert.equal(host.storedThumbnails.length, 0);
+});
+
+test("the history marks each incognito save, not the image; other rows and invalid answers are not marked", async () => {
+  const sources = [
+    { savedImageId: 3, imageUrl: "https://a.test/3.png", pageUrl: null, frameUrl: null, savedAt: 3_000, incognito: true },
+    { savedImageId: 2, imageUrl: "https://a.test/2.png", pageUrl: null, frameUrl: null, savedAt: 2_000, incognito: false },
+  ];
+  const { $ } = await openImageTab({ vaults: { A: pages("A", 1) }, active: "A", images: { A: [imageSummary(9, 3_000, { saveCount: 2, sources })] } });
+  assert.ok(!button(tiles($)[0]).textContent.includes("シークレット"), "the tile describes the image, not one save");
+  $("#gallery-grid").dispatch("click", { target: button(tiles($)[0]) });
+  await settle(30);
+  const entries = $("#gallery-sources").children;
+  const marks = (li) => li.children.filter((child) => child.className === "source-origin").map((child) => child.textContent);
+  assert.deepEqual(entries.map(marks), [["シークレット"], []]);
+  assert.ok(!$("#gallery-details-meta").textContent.includes("シークレット"));
+});
+
+test("a history row without a boolean origin is not shown as a normal save", async () => {
+  const send = async () => ({
+    ok: true,
+    type: "image_sources_result",
+    requestId: "r",
+    vaultToken: "a".repeat(64),
+    blobId: 9,
+    next: null,
+    items: [
+      { savedImageId: 1, imageUrl: "https://a.test/1.png", savedAt: 1 },
+      { savedImageId: 2, imageUrl: "https://a.test/2.png", savedAt: 2, incognito: "true" },
+      { savedImageId: 3, imageUrl: "https://a.test/3.png", savedAt: 3, incognito: true },
+    ],
+  });
+  const page = await listSources(9, null, { send: (message) => send().then((reply) => ({ ...reply, requestId: message.requestId })) });
+  assert.deepEqual(page.items.map((item) => [item.savedImageId, item.incognito]), [[3, true]]);
 });

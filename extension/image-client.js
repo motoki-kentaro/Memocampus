@@ -88,8 +88,8 @@ export async function listSources(blobId, cursor, { send }) {
   const response = await callHost({ type: "image_sources", blobId, cursor: cursor ?? null }, { send, resultType: "image_sources_result" });
   if (!Array.isArray(response.items)) throw new SearchError("invalid_response");
   const items = response.items
-    .filter((item) => positiveInt(item?.savedImageId) && Number.isSafeInteger(item.savedAt) && typeof item.imageUrl === "string")
-    .map((item) => ({ savedImageId: item.savedImageId, imageUrl: item.imageUrl, pageUrl: optionalText(item.pageUrl), frameUrl: optionalText(item.frameUrl), savedAt: item.savedAt }));
+    .filter((item) => positiveInt(item?.savedImageId) && Number.isSafeInteger(item.savedAt) && typeof item.imageUrl === "string" && typeof item.incognito === "boolean")
+    .map((item) => ({ savedImageId: item.savedImageId, imageUrl: item.imageUrl, pageUrl: optionalText(item.pageUrl), frameUrl: optionalText(item.frameUrl), savedAt: item.savedAt, incognito: item.incognito }));
   return { items, next: cursorOf(response.next), vaultToken: vaultToken(response) };
 }
 

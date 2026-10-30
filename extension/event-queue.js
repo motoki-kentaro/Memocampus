@@ -9,6 +9,9 @@
 // - Every other failure (host unreachable, timeout, no vault, busy vault, unknown codes) is
 //   temporary: the event stays queued and is retried on the next flush. The host stores events
 //   with INSERT OR IGNORE by id, so a resend after a lost ACK never duplicates rows.
+// - A visit or snapshot not declared normal (`incognito: false`) is removed without a dead-letter
+//   copy, so its URL and title are not kept anywhere. The service worker never queues one; this
+//   covers events queued by an older version and a refusal by the host.
 
 export const QUEUE_KEY = "pendingVisitEvents";
 export const DEAD_LETTER_KEY = "deadLetterEvents";
@@ -19,6 +22,9 @@ export const SEND_TIMEOUT_MS = 30_000;
 
 /** Host error codes meaning "this exact event can never be stored". */
 export const PERMANENT_ERRORS = new Set(["invalid_url", "invalid_event", "invalid_message", "unknown_type"]);
+
+/** The host's refusal of an event not declared normal: discarded, never quarantined. */
+export const INCOGNITO_ERROR = "incognito_not_allowed";
 
 export class QueueError extends Error {
   constructor(code) {
@@ -37,11 +43,14 @@ export function classifyResponse(event, response) {
   if (response?.ok === true && response.eventId === event?.id) return { kind: "delivered" };
   if (response?.ok === false && typeof response.error === "string") {
     const sameEvent = response.eventId === event?.id || response.eventId === null;
+    if (response.error === INCOGNITO_ERROR && sameEvent) return { kind: "discard", code: response.error };
     if (PERMANENT_ERRORS.has(response.error) && sameEvent) return { kind: "permanent", code: response.error };
     return { kind: "temporary", code: response.error };
   }
   return { kind: "temporary", code: "invalid_ack" };
 }
+
+const isUndeclared = (event) => (event.type === "visit" || event.type === "tab_snapshot") && event.incognito !== false;
 
 const hasId = (event) => typeof event?.id === "string" && event.id !== "";
 
@@ -138,6 +147,7 @@ export function createEventQueue({ storage, send, now = () => new Date(), timeou
 
   async function deliver(event) {
     if (!event || typeof event !== "object" || Array.isArray(event)) return { kind: "permanent", code: "invalid_event" };
+    if (isUndeclared(event)) return { kind: "discard", code: INCOGNITO_ERROR };
     try {
       return classifyResponse(event, await withTimeout(Promise.resolve().then(() => send(event)), timeoutMs));
     } catch (error) {
@@ -152,7 +162,7 @@ export function createEventQueue({ storage, send, now = () => new Date(), timeou
       if (head === undefined) return null;
       const outcome = await deliver(head);
       try {
-        if (outcome.kind === "delivered") await remove(head);
+        if (outcome.kind === "delivered" || outcome.kind === "discard") await remove(head);
         else if (outcome.kind === "permanent") await quarantine(head, outcome.code);
         else return outcome.code;
       } catch (error) {

@@ -473,7 +473,14 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
         const li = document.createElement("li");
         const when = document.createElement("time");
         when.textContent = formatFullDate(new Date(source.savedAt).toISOString());
-        li.append(when, sourceLine("画像", source.imageUrl), sourceLine("ページ", source.pageUrl));
+        li.append(when);
+        if (source.incognito) {
+          const origin = document.createElement("span");
+          origin.className = "source-origin";
+          origin.textContent = "シークレット";
+          li.append(origin);
+        }
+        li.append(sourceLine("画像", source.imageUrl), sourceLine("ページ", source.pageUrl));
         if (source.frameUrl) li.append(sourceLine("フレーム", source.frameUrl));
         fragment.append(li);
       }

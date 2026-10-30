@@ -66,13 +66,24 @@ const INVALID_URL: &str = "invalid_url";
 const INVALID_EVENT: &str = "invalid_event";
 const INVALID_MESSAGE: &str = "invalid_message";
 const UNKNOWN_TYPE: &str = "unknown_type";
+/// A visit or snapshot not declared normal with `"incognito": false`. Also permanent, but the
+/// extension discards the event instead of quarantining it, so the code carries no event data.
+const INCOGNITO_NOT_ALLOWED: &str = "incognito_not_allowed";
 
 /// Stores one queued event. Every outcome is reported, so a bad event cannot stall the queue.
 fn record_event(
     session: &mut vault::Session,
     value: serde_json::Value,
 ) -> Result<(), &'static str> {
-    match value.get("type").and_then(|value| value.as_str()) {
+    let kind = value.get("type").and_then(|value| value.as_str());
+    // Checked first: a refusal for any other reason would have the extension keep the URL. The
+    // host cannot see the browser, so it can only enforce what the extension declares.
+    if matches!(kind, Some("visit" | "tab_snapshot"))
+        && value.get("incognito").and_then(|value| value.as_bool()) != Some(false)
+    {
+        return Err(INCOGNITO_NOT_ALLOWED);
+    }
+    match kind {
         Some("visit") => {
             let event: VisitEvent = serde_json::from_value(value).map_err(|_| INVALID_EVENT)?;
             if event.id.is_empty() {

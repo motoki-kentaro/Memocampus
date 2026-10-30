@@ -2,7 +2,7 @@
 
 export function describeRecordResult(result) {
   if (!result?.ok) return `記録に失敗しました。\n${result?.error || "保存に失敗しました。"}`;
-  if (result.queued === 0) return "記録できるタブ（http/https）がありません。";
+  if (result.queued === 0) return "記録できる通常ウィンドウのタブ（http/https）がありません。";
   if (result.stored === result.queued) return `${result.stored}件のタブをSQLiteに保存しました。タブは閉じていません。`;
   const lines = [`${result.queued}件のタブを送信キューに登録しました。タブは閉じていません。`, `SQLiteに保存済み: ${result.stored}件`];
   if (result.pending > 0) {

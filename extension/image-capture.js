@@ -60,10 +60,12 @@ export async function readLimited(response, maxBytes = MAX_IMAGE_BYTES) {
   return bytes;
 }
 
-export async function fetchInWorker(url, { fetchImpl, maxBytes = MAX_IMAGE_BYTES }) {
+/** `isolated`: no cookies and no HTTP cache, so nothing passes between this fetch and the normal profile. */
+export async function fetchInWorker(url, { fetchImpl, maxBytes = MAX_IMAGE_BYTES }, { isolated = false } = {}) {
   let response;
   try {
-    response = await fetchImpl(url, { credentials: "include", redirect: "follow", cache: "default" });
+    const mode = isolated ? { credentials: "omit", cache: "no-store" } : { credentials: "include", cache: "default" };
+    response = await fetchImpl(url, { ...mode, redirect: "follow" });
   } catch {
     throw new ImageSaveError("network_error");
   }
@@ -109,8 +111,15 @@ export async function fetchInPage(url, target, { executeScript, maxBytes = MAX_I
 
 const shouldTryPage = (error) => error.code === "network_error" || (error.code === "http_error" && error.details.status >= 400 && error.details.status < 500);
 
-/** Returns { bytes, via } where via is "worker", "page" or "data". */
-export async function acquireImage(srcUrl, target, deps) {
+/**
+ * Returns { bytes, via } where via is "worker", "page" or "data".
+ *
+ * The service worker runs in the normal profile even for a click in an incognito window, so its
+ * credentialed fetch would send the normal profile's cookies to the site and leave the URL in that
+ * profile's HTTP cache. An incognito click therefore fetches inside the page (with the incognito
+ * session), and if the page may not read the image, in the worker without cookies or cache.
+ */
+export async function acquireImage(srcUrl, target, deps, { incognito = false } = {}) {
   const kind = classifyImageUrl(srcUrl);
   if (kind === "data") {
     const { bytes } = await fetchInWorker(srcUrl, deps);
@@ -119,6 +128,16 @@ export async function acquireImage(srcUrl, target, deps) {
   if (kind === "blob") {
     if (!target) throw new ImageSaveError("page_access_denied");
     return { ...(await fetchInPage(srcUrl, target, deps)), via: "page" };
+  }
+  if (incognito) {
+    if (target) {
+      try {
+        return { ...(await fetchInPage(srcUrl, target, deps)), via: "page" };
+      } catch (error) {
+        if (!(error instanceof ImageSaveError) || error.code === "too_large") throw error;
+      }
+    }
+    return { ...(await fetchInWorker(srcUrl, deps, { isolated: true })), via: "worker" };
   }
   try {
     return { ...(await fetchInWorker(srcUrl, deps)), via: "worker" };

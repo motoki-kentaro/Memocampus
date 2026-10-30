@@ -65,7 +65,7 @@ function snapshotEvent(tab, recordedAt) {
     url: tab.url,
     title: typeof tab.title === "string" ? tab.title : "",
     pinned: tab.pinned === true,
-    incognito: tab.incognito === true,
+    incognito: tab.incognito,
     recordedAt,
   };
 }
@@ -77,7 +77,8 @@ function snapshotEvent(tab, recordedAt) {
 async function recordAllTabs() {
   const tabs = await chrome.tabs.query({});
   const recordedAt = new Date().toISOString();
-  const events = tabs.filter((tab) => isRecordableUrl(tab.url || "")).map((tab) => snapshotEvent(tab, recordedAt));
+  // Only tabs known to be normal: incognito tabs and tabs of unknown state leave no trace, not even a count.
+  const events = tabs.filter((tab) => tab.incognito === false && isRecordableUrl(tab.url || "")).map((tab) => snapshotEvent(tab, recordedAt));
   if (events.length === 0) return { ok: true, queued: 0, stored: 0, pending: 0, deadLettered: 0 };
   await queue.enqueueAll(events);
   const blockedBy = await queue.flush();
@@ -92,18 +93,21 @@ async function recordAllTabs() {
 
 chrome.webNavigation.onCompleted.addListener(async (details) => {
   if (details.frameId !== 0 || !isRecordableUrl(details.url)) return;
-  let title = "";
+  // webNavigation does not say whether the tab is incognito. A tab that is gone (closed meanwhile)
+  // or of unknown state is treated like an incognito one: nothing is recorded.
+  let tab;
   try {
-    const tab = await chrome.tabs.get(details.tabId);
-    title = typeof tab.title === "string" ? tab.title : "";
+    tab = await chrome.tabs.get(details.tabId);
   } catch {
-    // The navigation may finish as a tab is closed; URL capture still remains valid.
+    return;
   }
+  if (tab?.incognito !== false) return;
   const event = {
     type: "visit",
     id: crypto.randomUUID(),
     url: details.url,
-    title,
+    title: typeof tab.title === "string" ? tab.title : "",
+    incognito: tab.incognito,
     visitedAt: new Date().toISOString(),
   };
   void enqueueVisit(event);

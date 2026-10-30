@@ -43,6 +43,7 @@ fn save(
         image_url: format!("https://img.test/{}", "x".repeat(url_len)),
         page_url: Some(format!("https://page.test/{}", "y".repeat(url_len))),
         frame_url: None,
+        incognito: false,
     };
     let ticket = f.session.ticket().unwrap();
     images::save_image(
@@ -246,6 +247,7 @@ fn history_is_paged_newest_first() {
             image_url: format!("https://img.test/{i}"),
             page_url: None,
             frame_url: None,
+            incognito: false,
         };
         let ticket = f.session.ticket().unwrap();
         images::save_image(&mut f.session, &ticket, &request, Some(&bytes), None, i).unwrap();

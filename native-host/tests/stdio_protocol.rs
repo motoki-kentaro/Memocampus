@@ -97,7 +97,7 @@ fn create_default_vault(tmp: &TempDir) {
 }
 
 fn visit(id: &str, url: &str, at: &str) -> Value {
-    json!({ "type": "visit", "id": id, "url": url, "title": "Rust Book", "visitedAt": at })
+    json!({ "type": "visit", "id": id, "url": url, "title": "Rust Book", "incognito": false, "visitedAt": at })
 }
 
 fn snapshot(id: &str, url: &str, at: &str) -> Value {
@@ -399,10 +399,10 @@ fn rejected_events_are_answered_and_do_not_block_later_events() {
         &tmp,
         &[
             visit("bad-url", "javascript:alert(1)", "2026-10-29T10:00:00.000Z"),
-            json!({ "type": "visit", "id": "no-url", "title": "T", "visitedAt": "2026-10-29T10:00:00.000Z" }),
-            json!({ "type": "visit", "url": "https://a.test/", "title": "T", "visitedAt": "2026-10-29T10:00:00.000Z" }),
-            json!({ "type": "tab_snapshot", "id": "bad-snap", "url": "https://a.test/", "title": "T" }),
-            json!({ "type": "visit", "id": "", "url": "https://a.test/", "title": "T", "visitedAt": "2026-10-29T10:00:00.000Z" }),
+            json!({ "type": "visit", "id": "no-url", "title": "T", "incognito": false, "visitedAt": "2026-10-29T10:00:00.000Z" }),
+            json!({ "type": "visit", "url": "https://a.test/", "title": "T", "incognito": false, "visitedAt": "2026-10-29T10:00:00.000Z" }),
+            json!({ "type": "tab_snapshot", "id": "bad-snap", "url": "https://a.test/", "title": "T", "incognito": false }),
+            json!({ "type": "visit", "id": "", "url": "https://a.test/", "title": "T", "incognito": false, "visitedAt": "2026-10-29T10:00:00.000Z" }),
             visit("good", "https://good.test/", "2026-10-29T11:00:00.000Z"),
         ],
     );
@@ -482,12 +482,12 @@ fn image_tables(path: &Path) -> i64 {
 }
 
 #[test]
-fn vaults_created_by_the_host_start_at_schema_2_with_image_tables() {
+fn vaults_created_by_the_host_start_at_schema_3_with_image_tables() {
     let tmp = TempDir::new();
     create_default_vault(&tmp);
-    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 2);
+    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 3);
     assert_eq!(image_tables(&tmp.default_vault()), 3);
-    // Existing operations keep working on a schema 2 vault.
+    // Existing operations keep working on a schema 3 vault.
     assert_eq!(
         exchange(
             &tmp,
@@ -556,7 +556,7 @@ fn backups_of_a_vault_with_images_are_complete_and_verified() {
             ["0".repeat(64)],
         )
         .unwrap();
-        db.execute_batch("INSERT INTO saved_images (save_id, blob_id, image_url, page_url, saved_at) VALUES ('a', 1, 'https://img.test/1.png', 'https://page.test/', 1), ('b', 1, 'data:image/png', NULL, 2); INSERT INTO image_thumbnails (blob_id, mime_type, width, height, generator, data) VALUES (1, 'image/webp', 1, 1, 1, x'00');").unwrap();
+        db.execute_batch("INSERT INTO saved_images (save_id, blob_id, image_url, page_url, saved_at, incognito) VALUES ('a', 1, 'https://img.test/1.png', 'https://page.test/', 1, 0), ('b', 1, 'data:image/png', NULL, 2, 1); INSERT INTO image_thumbnails (blob_id, mime_type, width, height, generator, data) VALUES (1, 'image/webp', 1, 1, 1, x'00');").unwrap();
     }
     let dest = tmp.0.join("backups");
     std::fs::create_dir(&dest).unwrap();
@@ -570,14 +570,14 @@ fn backups_of_a_vault_with_images_are_complete_and_verified() {
         let db =
             Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         let mut statement = db
-            .prepare("SELECT 'b|' || sha256 || '|' || hex(data) || '|' || save_count FROM image_blobs UNION ALL SELECT 's|' || save_id || '|' || image_url || '|' || saved_at FROM saved_images UNION ALL SELECT 't|' || blob_id || '|' || hex(data) FROM image_thumbnails ORDER BY 1")
+            .prepare("SELECT 'b|' || sha256 || '|' || hex(data) || '|' || save_count FROM image_blobs UNION ALL SELECT 's|' || save_id || '|' || image_url || '|' || saved_at || '|' || incognito FROM saved_images UNION ALL SELECT 't|' || blob_id || '|' || hex(data) FROM image_thumbnails ORDER BY 1")
             .unwrap();
         let rows = statement.query_map([], |row| row.get(0)).unwrap();
         rows.collect::<Result<_, _>>().unwrap()
     };
     assert_eq!(dump(&copy), dump(&tmp.default_vault()));
     assert_eq!(dump(&copy).len(), 4);
-    assert_eq!(pragma(&copy, "user_version"), 2);
+    assert_eq!(pragma(&copy, "user_version"), 3);
 }
 
 const SAVE_ID: &str = "4f1d2c3b-5a6e-4d7f-8091-a2b3c4d5e6f7";
@@ -607,9 +607,9 @@ fn upload_messages(bytes: &[u8], commit: bool) -> Vec<Value> {
         .map(|b| format!("{b:02x}"))
         .collect();
     let mut messages = vec![json!({
-        "type": "image_save_begin", "protocol": 1, "saveId": SAVE_ID, "sha256": sha256,
+        "type": "image_save_begin", "protocol": 2, "saveId": SAVE_ID, "sha256": sha256,
         "byteLength": bytes.len(), "mimeType": "image/png", "width": 40, "height": 30,
-        "imageUrl": "https://img.test/x.png", "pageUrl": "https://page.test/thread/1",
+        "imageUrl": "https://img.test/x.png", "pageUrl": "https://page.test/thread/1", "incognito": false,
     })];
     for (index, part) in bytes.chunks(1024 * 1024).enumerate() {
         messages.push(json!({ "type": "image_save_chunk", "saveId": SAVE_ID, "index": index, "data": base64::engine::general_purpose::STANDARD.encode(part) }));
@@ -944,4 +944,208 @@ fn an_image_survives_save_list_read_rebuild_backup_and_vault_switches_unchanged(
     assert_eq!(reopened["ok"], true, "{reopened}");
     assert!(read_back(&tmp, &blob_id, &original_sha, &token_a).unwrap() == original);
     assert_eq!(blob_state(&vault_a), after);
+}
+
+fn undeclared_variants(kind: fn(&str, &str, &str) -> Value) -> Vec<Value> {
+    let url = "https://secret.test/private";
+    let at = "2026-10-30T10:00:00.000Z";
+    let mut events: Vec<Value> = [json!(true), json!("false"), json!(0), Value::Null]
+        .into_iter()
+        .enumerate()
+        .map(|(index, incognito)| {
+            let mut event = kind(&format!("secret-{index}"), url, at);
+            event["incognito"] = incognito;
+            event
+        })
+        .collect();
+    let mut missing = kind("secret-missing", url, at);
+    missing.as_object_mut().unwrap().remove("incognito");
+    events.push(missing);
+    events
+}
+
+fn assert_refused_without_data(response: &Value, id: &str) {
+    assert_eq!(
+        response,
+        &json!({ "ok": false, "eventId": id, "error": "incognito_not_allowed" }),
+        "the answer carries no URL or title"
+    );
+}
+
+#[test]
+fn events_not_declared_normal_are_never_stored() {
+    for kind in [visit as fn(&str, &str, &str) -> Value, snapshot] {
+        let tmp = TempDir::new();
+        create_default_vault(&tmp);
+        let events = undeclared_variants(kind);
+        let responses = exchange(&tmp, &events);
+        for (event, response) in events.iter().zip(&responses) {
+            assert_refused_without_data(response, event["id"].as_str().unwrap());
+        }
+        assert_eq!(row_dump(&tmp.default_vault()), Vec::<String>::new());
+    }
+}
+
+#[test]
+fn the_incognito_check_comes_before_any_other_refusal() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    // Otherwise the extension would quarantine these with their URL as invalid events.
+    let mut bad_url = snapshot("a", "javascript:alert(1)", "2026-10-30T10:00:00.000Z");
+    bad_url["incognito"] = json!(true);
+    let incomplete = json!({ "type": "visit", "id": "b", "url": "https://secret.test/" });
+    let responses = exchange(&tmp, &[bad_url, incomplete]);
+    assert_refused_without_data(&responses[0], "a");
+    assert_refused_without_data(&responses[1], "b");
+}
+
+#[test]
+fn a_mixed_snapshot_stores_exactly_the_normal_tabs_once_and_the_acks_match() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let at = "2026-10-30T10:00:00.000Z";
+    let mut secret = snapshot("secret", "https://secret.test/private", at);
+    secret["incognito"] = json!(true);
+    let events = [
+        snapshot("normal-1", "https://a.test/", at),
+        secret,
+        snapshot("normal-2", "https://b.test/", at),
+    ];
+    let responses = exchange(&tmp, &events);
+    assert_eq!(responses[0], json!({ "ok": true, "eventId": "normal-1" }));
+    assert_refused_without_data(&responses[1], "secret");
+    assert_eq!(responses[2], json!({ "ok": true, "eventId": "normal-2" }));
+    let expected = vec![
+        format!("s|normal-1|https://a.test/|Rust Book|{at}"),
+        format!("s|normal-2|https://b.test/|Rust Book|{at}"),
+    ];
+    let vault = tmp.default_vault();
+    assert_eq!(row_dump(&vault), expected);
+    // A resend after a lost ACK is still idempotent.
+    assert_eq!(exchange(&tmp, &events), responses);
+    assert_eq!(row_dump(&vault), expected);
+}
+
+#[test]
+fn a_failed_write_stores_nothing_and_a_refusal_does_not_depend_on_the_vault() {
+    let tmp = TempDir::new();
+    let at = "2026-10-30T10:00:00.000Z";
+    let mut secret = visit("secret", "https://secret.test/private", at);
+    secret["incognito"] = json!(true);
+    let events = [secret, visit("v", "https://a.test/", at)];
+    // No vault at all: the refusal stands, the normal event stays a temporary failure.
+    let responses = exchange(&tmp, &events);
+    assert_refused_without_data(&responses[0], "secret");
+    assert_eq!(responses[1]["ok"], false);
+    assert_ne!(responses[1]["error"], "incognito_not_allowed");
+    assert!(
+        !tmp.default_vault().exists(),
+        "nothing is created implicitly"
+    );
+
+    // A vault locked by another writer: no partial row, and the retry stores it once.
+    create_default_vault(&tmp);
+    let vault = tmp.default_vault();
+    let lock = Connection::open(&vault).unwrap();
+    lock.execute_batch("BEGIN EXCLUSIVE;").unwrap();
+    let responses = exchange(&tmp, &events);
+    assert_refused_without_data(&responses[0], "secret");
+    assert_eq!(responses[1]["ok"], false);
+    lock.execute_batch("ROLLBACK;").unwrap();
+    assert_eq!(row_dump(&vault), Vec::<String>::new());
+    let responses = exchange(&tmp, &events);
+    assert_refused_without_data(&responses[0], "secret");
+    assert_eq!(responses[1], json!({ "ok": true, "eventId": "v" }));
+    assert_eq!(row_dump(&vault).len(), 1);
+}
+
+#[test]
+fn an_incognito_image_is_saved_and_a_visit_from_incognito_still_is_not() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let vault = tmp.default_vault();
+    let bytes = png_of_size(40, 30, 2 * 1024 * 1024 + 7);
+    let mut messages = upload_messages(&bytes, true);
+    messages[0]["incognito"] = json!(true);
+    let saved = exchange(&tmp, &messages).pop().unwrap();
+    assert_eq!(saved["type"], "image_saved", "{saved}");
+    assert_eq!(image_rows(&vault), (1, 1));
+    let sources = exchange(
+        &tmp,
+        &[json!({ "type": "image_sources", "requestId": "s", "blobId": saved["blobId"] })],
+    )
+    .remove(0);
+    assert_eq!(sources["items"][0]["incognito"], true, "{sources}");
+
+    let mut secret = visit("secret", "https://secret.test/", "2026-10-30T10:00:00.000Z");
+    secret["incognito"] = json!(true);
+    assert_eq!(
+        exchange(&tmp, &[secret]).remove(0)["error"],
+        "incognito_not_allowed"
+    );
+    assert_eq!(row_dump(&vault), Vec::<String>::new());
+}
+
+/// A vault as the previous version made it: one image, no `incognito` column, schema 2.
+fn make_schema_2_vault(tmp: &TempDir) -> PathBuf {
+    create_default_vault(tmp);
+    let vault = tmp.default_vault();
+    Connection::open(&vault)
+        .unwrap()
+        .execute_batch(
+            "DROP TABLE saved_images;
+             CREATE TABLE saved_images (id INTEGER PRIMARY KEY, save_id TEXT NOT NULL UNIQUE, blob_id INTEGER NOT NULL, image_url TEXT NOT NULL, page_url TEXT, frame_url TEXT, saved_at INTEGER NOT NULL);
+             INSERT INTO image_blobs (sha256, mime_type, byte_length, width, height, created_at, last_saved_at, data) VALUES (printf('%064d', 1), 'image/png', 1, 1, 1, 1, 1, x'00');
+             INSERT INTO saved_images (save_id, blob_id, image_url, saved_at) VALUES ('old', 1, 'https://img.test/old.png', 1);
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+    vault
+}
+
+#[test]
+fn a_schema_2_vault_stops_images_with_an_explicit_error_and_is_left_unchanged() {
+    let tmp = TempDir::new();
+    let vault = make_schema_2_vault(&tmp);
+    let state = |path: &Path| -> (i64, i64, i64) {
+        let db =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        db.query_row(
+            "SELECT (SELECT user_version FROM pragma_user_version), (SELECT count(*) FROM saved_images), (SELECT count(*) FROM pragma_table_info('saved_images') WHERE name = 'incognito')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(state(&vault), (2, 1, 0));
+
+    let bytes = png_of_size(40, 30, 5000);
+    for reply in [
+        exchange(&tmp, &[json!({ "type": "image_list", "requestId": "l" })]).remove(0),
+        exchange(
+            &tmp,
+            &[json!({ "type": "image_sources", "requestId": "s", "blobId": 1 })],
+        )
+        .remove(0),
+        exchange(&tmp, &upload_messages(&bytes, false)[..1]).remove(0),
+    ] {
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert_eq!(reply["error"], "image_schema_mismatch", "{reply}");
+    }
+    assert_eq!(state(&vault), (2, 1, 0));
+
+    // URL history and a backup of the old vault keep working until the PO replaces it.
+    let visited = exchange(
+        &tmp,
+        &[visit("v", "https://a.test/", "2026-10-30T10:00:00.000Z")],
+    );
+    assert_eq!(visited[0], json!({ "ok": true, "eventId": "v" }));
+    let backups = tmp.0.join("backups");
+    std::fs::create_dir(&backups).unwrap();
+    let backup = exchange(
+        &tmp,
+        &[json!({ "type": "vault_backup", "requestId": "b", "directory": backups })],
+    )
+    .remove(0);
+    assert_eq!(backup["ok"], true, "{backup}");
 }
