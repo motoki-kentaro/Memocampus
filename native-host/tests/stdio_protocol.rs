@@ -31,6 +31,14 @@ impl Drop for TempDir {
     }
 }
 
+/// The path the host reports for an existing file: the temp path may be an alias (8.3 name,
+/// junction) of the real one, and the host resolves it when it creates a vault.
+fn real_path(path: &Path) -> String {
+    let path = std::fs::canonicalize(path).unwrap();
+    let path = path.to_string_lossy();
+    path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned()
+}
+
 /// One host process: sends all messages, closes stdin, collects every framed response.
 fn exchange_with(
     tmp: &TempDir,
@@ -200,10 +208,7 @@ fn created_vault_receives_writes_and_survives_host_restarts() {
     assert_eq!(responses[1]["error"], "invalid_limit");
     let status = &responses[2]["status"];
     assert_eq!(status["state"], "ready");
-    assert_eq!(
-        status["vaultPath"],
-        tmp.default_vault().to_string_lossy().as_ref()
-    );
+    assert_eq!(status["vaultPath"], real_path(&tmp.default_vault()));
     assert_eq!(status["counts"], json!({ "visits": 1, "snapshots": 1 }));
 }
 
@@ -346,7 +351,7 @@ fn backup_through_the_protocol_produces_a_verified_copy() {
     let status = &exchange(&tmp, &[json!({ "type": "vault_status", "requestId": "s" })])[0];
     assert_eq!(
         status["status"]["vaultPath"],
-        tmp.default_vault().to_string_lossy().as_ref(),
+        real_path(&tmp.default_vault()),
         "active vault unchanged"
     );
 }

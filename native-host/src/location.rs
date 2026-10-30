@@ -483,7 +483,12 @@ mod tests {
             .register(Hive::CurrentUser, "C", &other);
         let roots = known_sync_roots(&registry, vec![trailing]);
         assert_eq!(roots.len(), 2, "{roots:?}");
-        assert!(roots.iter().any(|root| is_within(&dir, root)));
+        // Like `probe_with`: the temp path may be an alias (8.3 name, junction) of the real one.
+        let canonical = simplify(&std::fs::canonicalize(&dir).unwrap());
+        assert!(
+            roots.iter().any(|root| is_within(&canonical, root)),
+            "dir: {dir:?}, canonical: {canonical:?}, roots: {roots:?}"
+        );
         assert!(
             roots.contains(&other),
             "unresolvable roots are kept as registered"
