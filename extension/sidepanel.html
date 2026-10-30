@@ -40,10 +40,35 @@
       </main>
     </section>
 
-    <section id="panel-image" class="tabpanel" role="tabpanel" aria-labelledby="tab-image" tabindex="0" hidden>
-      <div class="placeholder">
-        <h2>画像ライブラリ</h2>
-        <p>画像保存機能は今後実装予定です。</p>
+    <section id="panel-image" class="tabpanel tabpanel-image" role="tabpanel" aria-labelledby="tab-image" tabindex="0" hidden>
+      <div class="gallery-toolbar">
+        <span id="gallery-summary" class="summary" role="status" aria-live="polite"></span>
+        <button id="gallery-refresh" type="button" class="icon-button" aria-label="画像一覧を更新" title="画像一覧を更新">
+          <span class="button-icon icon-cached" aria-hidden="true"></span>
+          <span id="gallery-new-dot" class="new-dot" aria-hidden="true" hidden></span>
+        </button>
+      </div>
+      <p id="gallery-status" class="gallery-status" role="status" aria-live="polite"></p>
+      <div id="gallery-error" class="error" role="alert" hidden>
+        <p id="gallery-error-message"></p>
+        <button id="gallery-retry" type="button">再試行</button>
+        <button id="gallery-open-settings" type="button" hidden>Vault設定を開く</button>
+      </div>
+      <p id="gallery-empty" class="empty" hidden>保存された画像はまだありません。ページ上の画像を右クリックして「Memocampusへ保存」を選ぶと、ここに表示されます。</p>
+      <ul id="gallery-grid" class="gallery-grid" aria-label="保存した画像"></ul>
+      <button id="gallery-more" type="button" class="load-more" hidden>さらに読み込む</button>
+      <section id="gallery-details" class="gallery-details" aria-labelledby="gallery-details-title" tabindex="-1" hidden>
+        <div class="gallery-details-head">
+          <h2 id="gallery-details-title">保存履歴</h2>
+          <button id="gallery-details-close" type="button" class="secondary">閉じる</button>
+        </div>
+        <p id="gallery-details-meta" class="vault-meta"></p>
+        <ol id="gallery-sources" class="gallery-sources"></ol>
+        <button id="gallery-sources-more" type="button" class="secondary" hidden>さらに表示</button>
+      </section>
+      <div id="gallery-menu" class="context-menu" role="menu" aria-label="画像の操作" hidden>
+        <button id="gallery-menu-copy" type="button" role="menuitem" tabindex="-1">画像をコピー</button>
+        <button id="gallery-menu-export" type="button" role="menuitem" tabindex="-1">ファイルとして書き出す</button>
       </div>
     </section>
 

@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
 mod dialog;
+mod image_original;
+mod image_protocol;
+mod image_query;
+mod images;
 mod location;
 mod manage;
 mod search;
@@ -137,6 +141,9 @@ fn write_message<T: Serialize>(message: &T) -> io::Result<()> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The vault is resolved from config.json and opened lazily; nothing is created implicitly.
     let mut session = vault::Session::new(vault::Environment::from_process());
+    // Upload state lives only as long as this process, i.e. one connectNative port: when Chrome
+    // closes the port, the process exits and any unconfirmed image bytes are gone with it.
+    let mut uploads = image_protocol::Uploads::default();
     while let Some(body) = read_message()? {
         let value: serde_json::Value = match serde_json::from_slice(&body) {
             Ok(value) => value,
@@ -151,6 +158,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .read(|db| search::handle(db, &value))
                     .unwrap_or_else(|error| search::failure(&value, error.code()));
                 write_message(&response)?;
+            }
+            Some(
+                "image_save_begin" | "image_save_chunk" | "image_save_commit" | "image_save_abort",
+            ) => {
+                write_message(&uploads.handle(&mut session, &value))?;
+            }
+            Some("image_list" | "image_thumbnails" | "image_sources") => {
+                write_message(&image_query::handle(&mut session, &value))?;
+            }
+            Some("image_read" | "image_thumbnail_put" | "image_export") => {
+                write_message(&image_original::handle(
+                    &mut session,
+                    &dialog::NativeDialogs,
+                    &value,
+                ))?;
             }
             Some("vault_status" | "vault_create" | "vault_open" | "vault_backup") => {
                 write_message(&manage::handle(

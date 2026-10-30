@@ -8,15 +8,51 @@ Record completed top-level page navigations as URL, title, and timestamp. The MV
 
 ## Side panel search
 
-Clicking the Memocampus toolbar action opens a side panel with three tabs: **URL** (search), **Image** (placeholder for a future image library) and **⚙** (vault settings). The URL tab searches the local SQLite vault (`visits` and `tab_snapshots`, aggregated per URL) by URL or title. The panel also has the “全タブを記録” button (the former toolbar popup has been removed). See `docs/issue-002-side-panel-search.md` for the `search_pages` protocol.
+Clicking the Memocampus toolbar action opens a side panel with three tabs: **URL** (search), **Image** (saved images, see below) and **⚙** (vault settings). The URL tab searches the local SQLite vault (`visits` and `tab_snapshots`, aggregated per URL) by URL or title. The panel also has the “全タブを記録” button (the former toolbar popup has been removed). See `docs/issue-002-side-panel-search.md` for the `search_pages` protocol.
 
 ## Vault
 
-The vault (SQLite file) is independent of the host executable. Its path is stored in `%LOCALAPPDATA%\Memocampus\config.json`; the default vault is `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`. On first use, open the side panel's **Vault** section and create a vault explicitly (or open an existing one). Until then visits stay queued in the extension. Manual backups use the SQLite Backup API. See `docs/issue-003-vault-location.md`.
+The vault (SQLite file) is independent of the host executable. Its path is stored in `%LOCALAPPDATA%\Memocampus\config.json`; the default vault is `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`. On first use, open the side panel's **Vault** section and create a vault explicitly (or open an existing one). Until then visits stay queued in the extension. Manual backups use the SQLite Backup API and copy the whole vault, including saved images, their save history and thumbnails. Switching or opening another vault switches the images too; nothing is copied between vaults. See `docs/issue-003-vault-location.md`.
 
 The database previously stored next to the executable (`native-host/target/release/memocampus.sqlite3`) is no longer used and is left untouched.
 
 This project never closes tabs automatically.
+
+## Images (Image Vault)
+
+**Saving.** Right-click an image on a web page and choose **Memocampusへ保存**. The extension fetches the original file
+(with the browser's cookies, falling back to the page itself for hotlink-protected images), checks it and sends it to
+the native host in chunks; it is stored in the active vault in one transaction, so an interrupted transfer leaves
+nothing behind. A notification (and, if notifications are off, a “!” badge on the toolbar button) reports the result.
+
+- Formats: PNG, JPEG, GIF, WebP, AVIF, BMP, identified from the bytes (not the file name or server header).
+  Up to **32 MiB** per image.
+- Not saved: SVG (may contain scripts), images in incognito windows, `file:`/`chrome:` and other non-web URLs.
+  CSS background images, canvas drawings and video frames have no image context menu.
+- Each distinct file (by SHA-256) is stored once; saving it again only adds a save-history row (time, image URL,
+  page URL, frame URL) and increases its save count. Cookies, tokens and response headers are never stored.
+
+**Image tab.** Saved images, newest first, one tile per distinct file. The refresh icon (top right) reloads the list
+and shows a dot when new images were saved while you were scrolled down.
+
+- Click a tile (or press Enter) for its **保存履歴**: every save with date, image URL and page URL.
+- Right-click a tile (or press the context-menu key / Shift+F10) for:
+  - **画像をコピー** — puts the picture on the clipboard as PNG (other formats are converted for the copy only;
+    animated images copy their first frame). The side panel must keep the focus until “コピーしました” appears.
+  - **ファイルとして書き出す** — the native host opens the Windows Save dialog in **Documents**, suggesting
+    `<last save time in Unix seconds>.<ext>`; you can change folder and name, Windows asks before replacing a file,
+    and the stored bytes are written unchanged (through a temporary file, so a failed write leaves an existing file
+    intact). The vault itself is never modified by copying or exporting.
+- Images saved without a thumbnail show their type label; the thumbnail is rebuilt from the original when the tile
+  comes into view and added to the vault (the original and its history are not changed).
+
+Design and protocol: `docs/image-vault-design.md`. Manual test checklist: `docs/image-vault-dogfood-slice2.md`.
+
+### Permissions
+
+`contextMenus` (the save menu item), `scripting` (fetching an image inside its page when a direct fetch is refused),
+`notifications` (save results), `nativeMessaging`, `storage`, `tabs`, `webNavigation`, `sidePanel`, and host access to
+all sites (to fetch the right-clicked image with its site's cookies, and to record visits).
 
 ## Installation (Windows, developer mode)
 
@@ -51,7 +87,8 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 
 ### Updating and uninstalling
 
-- After changing the host, rebuild with `cargo build --release`. The registered manifest points at `native-host\target\release\memocampus-native-host.exe`, so `cargo clean` removes the host until you rebuild; your vault lives outside `target/` and is not affected.
+- After updating the source, rebuild the host with `cargo build --release` and reload the extension in `chrome://extensions` (accept new permissions if Chrome asks). An extension newer than the host reports “Native Hostが古い…” / “この操作に対応していません”; rebuilding fixes it. The host registration does not need to be repeated unless the extension ID or the folder changed.
+- The host is not copied anywhere: the registered manifest points at `native-host\target\release\memocampus-native-host.exe`, so `cargo clean` removes the host until you rebuild; your vault lives outside `target/` and is not affected.
 - To unregister: `powershell -NoProfile -ExecutionPolicy Bypass -File .\native-host\uninstall-native-host.ps1`, then remove the extension in `chrome://extensions`. Your vault and settings in `%LOCALAPPDATA%\Memocampus` are kept; delete that folder yourself if you no longer need the data.
 
 ## Tests
@@ -61,16 +98,25 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 
 ## Layout
 
-- `extension/` — Chrome Manifest V3 service worker and search side panel
+- `extension/` — Chrome Manifest V3 service worker (visits, image saving) and side panel (search, images, vault)
 - `native-host/` — Rust Native Messaging host and SQLite persistence
 - `docs/` — issue and slice acceptance criteria
+
+## Known limitations
+
+- Windows only (native host, dialogs and paths); Chrome 116 or later.
+- Images: hotlink-protected images on another domain, `blob:` URLs whose page is closed, and images that need a
+  login the browser's cookies do not cover can fail to save. Images above 50 megapixels are not copied or
+  thumbnailed in the panel (export still works). Copying a 32 MiB original takes a few seconds (64 host requests).
+- The Image tab keeps one element per loaded tile (thumbnails far off screen are released); very large libraries
+  have not been optimised with a virtual list yet.
+- Saved images cannot be deleted from the panel yet.
 
 ## License
 
 The Memocampus source code is released under the MIT License (see `LICENSE`). Third-party material is not covered by it:
 
-- `assets/settings.svg` (and its copy `extension/assets/settings.svg`) is the Google Material Symbols “settings” icon, licensed under the Apache License 2.0. The full license text is in `LICENSES/Apache-2.0.txt`; source and provenance are recorded in `THIRD_PARTY_NOTICES.md`.
+- `assets/settings.svg` and `assets/cached.svg` (and their copies in `extension/assets/`) are the Google Material Symbols “settings” and “cached” icons, licensed under the Apache License 2.0. The full license text is in `LICENSES/Apache-2.0.txt`; source and provenance are recorded in `THIRD_PARTY_NOTICES.md`.
 - The `extension/` folder carries its own `LICENSE`, `LICENSES/Apache-2.0.txt` and `THIRD_PARTY_NOTICES.md` (identical copies), so it can be distributed on its own.
 
 - Third-party Rust crates keep their own licenses (MIT, Apache-2.0, Unicode-3.0 and similar permissive licenses; SQLite, bundled through `libsqlite3-sys`, is in the public domain). Only `Cargo.lock` is committed here; anyone distributing built binaries must include the corresponding notices.
-- The icon candidate `62c5e2a1-b459-4579-a4ab-bdba9be3c89e.jpeg` was generated with Google Gemini and carries C2PA provenance metadata. It is not covered by the MIT License statement above until its terms of use have been confirmed.

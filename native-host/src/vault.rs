@@ -12,11 +12,13 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::images;
 use crate::SCHEMA_SQL;
 
 /// `PRAGMA application_id` of vaults created by Memocampus ("MCMP").
 pub const APP_ID: i64 = 0x4D43_4D50;
-pub const SCHEMA_VERSION: i64 = 1;
+/// Schema version written into newly created vaults (2 = with image tables, see `images`).
+pub const SCHEMA_VERSION: i64 = images::IMAGE_SCHEMA_VERSION;
 pub const CONFIG_VERSION: u32 = 1;
 const DEFAULT_VAULT_NAME: &str = "memocampus.sqlite3";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(3);
@@ -394,6 +396,8 @@ pub fn open_vault_detailed(path: &Path) -> Result<Connection, OpenFailure> {
     })?;
     db.busy_timeout(BUSY_TIMEOUT)
         .map_err(|error| OpenFailure::from_sqlite(&error))?;
+    db.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|error| OpenFailure::from_sqlite(&error))?;
     validate_schema(&db)?;
     // SQLite silently opens read-only when read-write access is denied; such a vault cannot
     // take writes or a write fence, which is a permission problem, not a format problem.
@@ -445,7 +449,8 @@ pub fn create_vault(path: &Path) -> Result<(), VaultError> {
         )
         .map_err(|_| VaultError::Db)?;
         db.execute_batch(&format!(
-            "BEGIN; PRAGMA application_id = {APP_ID}; PRAGMA user_version = {SCHEMA_VERSION}; {SCHEMA_SQL} COMMIT;"
+            "BEGIN; PRAGMA application_id = {APP_ID}; PRAGMA user_version = {SCHEMA_VERSION}; {SCHEMA_SQL} {} COMMIT;",
+            images::IMAGE_SCHEMA_SQL
         ))
         .map_err(|_| VaultError::Db)?;
         validate_schema(&db).map_err(VaultError::from)
@@ -520,6 +525,59 @@ pub fn counts(db: &Connection) -> rusqlite::Result<Counts> {
             })
         },
     )
+}
+
+/// The vault an operation started against (see `Session::ticket` / `Session::write_for`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaultTicket {
+    pub path: String,
+    /// Opaque identity of the vault file (see `vault_token`), safe to hand to the extension.
+    pub token: String,
+}
+
+/// Identifies a vault file independently of how its path is spelled (case, `\\?\` prefix,
+/// junctions): SHA-256 over the volume serial number and file index on Windows. Only the hash
+/// leaves the host, never the path. Replacing the file (e.g. restoring a backup) yields a new token.
+pub fn vault_token(path: &Path) -> Result<String, VaultError> {
+    use sha2::{Digest, Sha256};
+    let identity = file_identity(path)?;
+    Ok(Sha256::digest(identity)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+#[cfg(windows)]
+fn file_identity(path: &Path) -> Result<Vec<u8>, VaultError> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+    let file = File::open(path).map_err(|error| OpenFailure::from_io(&error).kind)?;
+    // SAFETY: the handle is valid while `file` lives and the struct is plain data.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return Err(VaultError::Io);
+    }
+    let mut identity = b"memocampus-vault-identity-v1\0".to_vec();
+    for part in [
+        info.dwVolumeSerialNumber,
+        info.nFileIndexHigh,
+        info.nFileIndexLow,
+    ] {
+        identity.extend_from_slice(&part.to_le_bytes());
+    }
+    Ok(identity)
+}
+
+#[cfg(not(windows))]
+fn file_identity(path: &Path) -> Result<Vec<u8>, VaultError> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = fs::metadata(path).map_err(|error| OpenFailure::from_io(&error).kind)?;
+    let mut identity = b"memocampus-vault-identity-v1\0".to_vec();
+    identity.extend_from_slice(&metadata.dev().to_le_bytes());
+    identity.extend_from_slice(&metadata.ino().to_le_bytes());
+    Ok(identity)
 }
 
 /// Holds the connection to the active vault for one host process.
@@ -606,6 +664,36 @@ impl Session {
         revalidate: bool,
         f: impl FnOnce(&Connection) -> rusqlite::Result<usize>,
     ) -> Result<(), VaultError> {
+        self.write_checked(revalidate, None, |db| {
+            f(db).map(|_| ()).map_err(|_| VaultError::Db)
+        })
+    }
+
+    /// Identifies the vault that is active now, for an operation that will write later (an image
+    /// transfer). Pass it to `write_for` so the write can only land in this same vault.
+    pub fn ticket(&mut self) -> Result<VaultTicket, VaultError> {
+        let (path, _) = self.open()?;
+        let path = path.to_owned();
+        let token = vault_token(Path::new(&path))?;
+        Ok(VaultTicket { path, token })
+    }
+
+    /// Like `write`, but fails with `Switched` unless the vault is still the one in `ticket`,
+    /// checked under the write lock (both the open connection and `config.json`).
+    pub fn write_for<T, E: From<VaultError>>(
+        &mut self,
+        ticket: &VaultTicket,
+        f: impl FnOnce(&Connection) -> Result<T, E>,
+    ) -> Result<T, E> {
+        self.write_checked(true, Some(&ticket.path), f)
+    }
+
+    fn write_checked<T, E: From<VaultError>>(
+        &mut self,
+        revalidate: bool,
+        expected: Option<&str>,
+        f: impl FnOnce(&Connection) -> Result<T, E>,
+    ) -> Result<T, E> {
         let overridden = self.env.db_override.is_some();
         let env = self.env.clone();
         let (path, db) = if revalidate {
@@ -614,6 +702,10 @@ impl Session {
             self.open_cached()?
         };
         let path = path.to_owned();
+        if expected.is_some_and(|expected| expected != path) {
+            self.reset();
+            return Err(VaultError::Switched.into());
+        }
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| VaultError::Busy)?;
@@ -623,12 +715,14 @@ impl Session {
                 _ => {
                     drop(tx);
                     self.reset();
-                    return Err(VaultError::Switched);
+                    return Err(VaultError::Switched.into());
                 }
             }
         }
-        f(&tx).map_err(|_| VaultError::Db)?;
-        tx.commit().map_err(|_| VaultError::Db)
+        // Any error from `f` drops `tx` uncommitted, rolling back everything `f` wrote.
+        let value = f(&tx)?;
+        tx.commit().map_err(|_| VaultError::Db)?;
+        Ok(value)
     }
 }
 
@@ -725,7 +819,10 @@ fn copy_and_verify(source: &Connection, temp: &Path) -> Result<(), VaultError> {
     source.execute_batch("BEGIN").map_err(failed)?;
     let copied = (|| {
         // Counting inside the transaction takes the shared lock that pins the snapshot.
-        let expected = counts(source).map_err(failed)?;
+        let expected = (
+            counts(source).map_err(failed)?,
+            images::table_counts(source).map_err(failed)?,
+        );
         let backup = Backup::new(source, &mut target).map_err(failed)?;
         let deadline = Instant::now() + BUSY_TIMEOUT;
         loop {
@@ -744,7 +841,11 @@ fn copy_and_verify(source: &Connection, temp: &Path) -> Result<(), VaultError> {
         .query_row("PRAGMA integrity_check", [], |row| row.get(0))
         .map_err(failed)?;
     validate_schema(&target).map_err(failed)?;
-    if integrity != "ok" || counts(&target).map_err(failed)? != expected {
+    let actual = (
+        counts(&target).map_err(failed)?,
+        images::table_counts(&target).map_err(failed)?,
+    );
+    if integrity != "ok" || actual != expected {
         return Err(VaultError::BackupFailed);
     }
     drop(target);

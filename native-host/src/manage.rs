@@ -286,6 +286,9 @@ mod tests {
             self.calls.borrow_mut().push("backup");
             self.answer.clone()
         }
+        fn choose_export_file(&self, _: &str, _: &str) -> Option<PathBuf> {
+            unreachable!("vault management never exports images")
+        }
     }
 
     fn send(session: &mut Session, dialogs: &FakeDialogs, message: Value) -> Value {

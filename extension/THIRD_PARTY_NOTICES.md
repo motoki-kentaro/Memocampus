@@ -32,3 +32,25 @@ Provenance as checked on 2026-10-30:
   lies within 0.02 units of an endpoint in this file, and the bounding boxes are identical. This file has two
   additional path points (deviating by at most 0.34 units).
 - Which Google download format or tool produced this exact encoding has not been confirmed.
+
+## Material Symbols — “cached” icon
+
+| | |
+|---|---|
+| File | `assets/cached.svg` (Image tab refresh button) |
+| Material | Material Symbols, icon “cached” (Outlined style) |
+| Provider | Google LLC |
+| Source | Google Fonts Material Symbols — https://fonts.google.com/icons (documentation: https://developers.google.com/fonts/docs/material_symbols , repository: https://github.com/google/material-design-icons ) |
+| License | Apache License, Version 2.0 — full text in `LICENSES/Apache-2.0.txt` (also at https://www.apache.org/licenses/LICENSE-2.0 ) |
+| NOTICE | Same upstream as above: no NOTICE file to carry over (checked 2026-10-30). |
+| Changes by Memocampus | None. The file is used unmodified and displayed through a CSS mask, which only sets the rendered colour. |
+
+Provenance as checked on 2026-10-30:
+
+- The file was supplied by the project owner as the Google Material Symbols “cached” icon.
+- It is **not byte-identical** to the SVG Google currently serves for this icon
+  (`https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsoutlined/cached/default/24px.svg`), which uses
+  `viewBox="0 -960 960 960"`; this one uses `viewBox="0 0 24 24"`, a differently encoded path and `fill="#1f1f1f"`.
+- Geometrically it matches that official glyph: scaled by 1/40, all 38 path endpoints of each file lie within
+  0.005 units of an endpoint in the other, and the bounding boxes are identical.
+- Which Google download format or tool produced this exact encoding has not been confirmed.

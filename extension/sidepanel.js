@@ -3,6 +3,7 @@ import { displayUrl, formatFullDate, formatShortDate } from "./format.js";
 import { createVaultPanel } from "./vault-panel.js";
 import { describeQueueStatus, describeRecordResult } from "./queue-text.js";
 import { createTabs } from "./tabs.js";
+import { createImageGallery } from "./image-gallery.js";
 import { vaultNeedsAttention } from "./vault-client.js";
 
 const DEBOUNCE_MS = 200;
@@ -34,6 +35,7 @@ const tabs = createTabs(
   {
     onChange: (id, previous) => {
       if (id === "settings" && previous !== null) void vaultPanel.refresh();
+      if (id === "image") gallery.activate();
     },
   },
 );
@@ -52,6 +54,21 @@ for (const type of ["keydown", "pointerdown"]) {
   document.addEventListener(type, () => { userActed = true; }, { capture: true });
 }
 
+const gallery = createImageGallery({
+  send,
+  isActive: () => tabs.current === "image",
+  openUrl: (url) => {
+    if (isWebUrl(url)) chrome.tabs.create({ url }).catch(() => {});
+  },
+  openSettings: () => tabs.select("settings", { focus: true }),
+  onVaultUnavailable: () => void vaultPanel.refresh(),
+});
+
+// Saves finish in the service worker; refresh the Image tab only when that does not disturb the user.
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "image-save-result" && message.ok === true) gallery.imageSaved();
+});
+
 const vaultPanel = createVaultPanel({
   send,
   reveal: () => tabs.select("settings"),
@@ -59,6 +76,7 @@ const vaultPanel = createVaultPanel({
   onVaultChanged: () => {
     // Drop the previous vault's results at once so they are never shown as the new vault's.
     clearResults();
+    gallery.vaultChanged();
     void runSearch();
     // Visits queued while no vault was usable can now be delivered.
     chrome.runtime

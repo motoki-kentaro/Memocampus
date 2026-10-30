@@ -91,25 +91,44 @@ test("sidepanel.html wires three tabs to their panels", () => {
   assert.doesNotMatch(html, /⚙/, "no Unicode gear substitute");
 });
 
-test("the Image tab is a placeholder only", () => {
+test("the Image tab hosts the gallery and ships no image or external URL of its own", () => {
   const html = read(extensionDir, "sidepanel.html").toString("utf8");
-  const panel = /<section id="panel-image"[\s\S]*?<\/section>/.exec(html)[0];
-  assert.match(panel, /画像ライブラリ/);
-  assert.match(panel, /今後実装予定/);
-  assert.doesNotMatch(panel, /<(button|input|img|a|canvas|form)\b/);
-  const manifest = JSON.parse(read(extensionDir, "manifest.json").toString("utf8"));
-  assert.ok(!manifest.permissions.includes("contextMenus"), "no context menu permission");
+  const start = html.indexOf('<section id="panel-image"');
+  const panel = html.slice(start, html.indexOf('<section id="panel-settings"'));
+  assert.match(panel, /id="gallery-grid"/);
+  assert.match(panel, /id="gallery-empty"/);
+  assert.doesNotMatch(panel, /<(img|iframe|object|embed|canvas|form)\b/, "tiles are created at run time");
+  assert.doesNotMatch(panel, /https?:\/\//, "no external URLs in the markup");
 });
 
-test("the settings icon is an unmodified copy of assets/settings.svg without active content", () => {
-  const original = read(repoRoot, "assets", "settings.svg");
-  const packaged = read(extensionDir, "assets", "settings.svg");
-  assert.ok(original.equals(packaged), "extension/assets/settings.svg must stay byte-identical to assets/settings.svg");
-  const svg = packaged.toString("utf8");
-  assert.doesNotMatch(svg, /<script|<foreignObject|\bon\w+=|href=|url\(/i);
+test("the settings and refresh icons are unmodified copies without active content", () => {
+  for (const name of ["settings.svg", "cached.svg"]) {
+    const original = read(repoRoot, "assets", name);
+    const packaged = read(extensionDir, "assets", name);
+    assert.ok(original.equals(packaged), `extension/assets/${name} must stay byte-identical to assets/${name}`);
+    const svg = packaged.toString("utf8");
+    assert.doesNotMatch(svg, /<script|<foreignObject|<image|<use|\bon\w+=|href=|url\(|@import/i, name);
+    assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"[^>]*><path d="[^"]+"\/><\/svg>$/, `${name} is a single path`);
+  }
   const css = read(extensionDir, "sidepanel.css").toString("utf8");
   for (const reference of css.matchAll(/url\("([^"]+)"\)/g)) {
     assert.ok(existsSync(path.join(extensionDir, reference[1])), `${reference[1]} is packaged`);
   }
   assert.match(css, /mask: url\("assets\/settings\.svg"\)/);
+  assert.match(css, /mask: url\("assets\/cached\.svg"\)/);
+});
+
+test("the Image tab refresh control is a 44 px icon button with an accessible name", () => {
+  const html = read(extensionDir, "sidepanel.html").toString("utf8");
+  const control = /<button id="gallery-refresh"[\s\S]*?<\/button>/.exec(html)[0];
+  assert.match(control, /aria-label="画像一覧を更新"/);
+  assert.match(control, /title="画像一覧を更新"/);
+  assert.match(control, /class="button-icon icon-cached" aria-hidden="true"/);
+  assert.match(control, /id="gallery-new-dot" class="new-dot" aria-hidden="true" hidden/);
+  assert.doesNotMatch(control, /新しい画像を表示/, "no text button any more");
+  const css = read(extensionDir, "sidepanel.css").toString("utf8");
+  const rule = /\.icon-button \{[^}]*\}/.exec(css)[0];
+  assert.match(rule, /width: 44px;/);
+  assert.match(rule, /height: 44px;/);
+  assert.match(css, /\.button-icon \{ forced-color-adjust: none; background-color: ButtonText; \}/, "high contrast colours");
 });
