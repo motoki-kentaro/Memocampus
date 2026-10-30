@@ -26,3 +26,5 @@
 *.webp  binary
 *.gif   binary
 *.db    binary
+
+LICENSES/Apache-2.0.txt text eol=lf
