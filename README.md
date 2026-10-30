@@ -101,6 +101,31 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 - `extension/` — Chrome Manifest V3 service worker (visits, image saving) and side panel (search, images, vault)
 - `native-host/` — Rust Native Messaging host and SQLite persistence
 - `docs/` — issue and slice acceptance criteria
+- `assets/icon.png` — master of the app icon; `scripts/generate-icons.py` — regenerates the icons from it
+
+## Icons
+
+`assets/icon.png` (1254×1254, opaque, dark navy background) is the only source of the app icon. Every other icon file is
+generated from it and committed, so builds need neither Python nor network access:
+
+| Generated file | Sizes | Used by |
+|---|---|---|
+| `extension/icons/icon-16.png`, `-32`, `-48`, `-128` | 16, 32, 48, 128 px | `manifest.json` `icons` (extensions page, Web Store size) and `action.default_icon` (toolbar, 16/32) |
+| `native-host/resources/memocampus.ico` | 16, 24, 32, 48, 64, 128, 256 px (PNG entries, 32-bit) | `native-host/build.rs`, which embeds it as the executable's icon (MSVC builds) |
+
+After replacing the master, regenerate and rebuild:
+
+```powershell
+python -m pip install Pillow          # once
+python scripts/generate-icons.py      # writes the files above; assets/icon.png is only read
+python scripts/generate-icons.py --check   # fails if a generated file is out of date
+cd native-host; cargo build --release
+```
+
+Each size is resized directly from the master with Lanczos resampling; the aspect ratio, colours and the opaque dark
+background are kept (the ICO entries get a fully opaque alpha channel). The generated files carry no metadata. The
+master was generated with ChatGPT (OpenAI image generation) and adopted by the project owner; it keeps its C2PA
+content credentials, which record that origin.
 
 ## Known limitations
 
@@ -120,3 +145,5 @@ The Memocampus source code is released under the MIT License (see `LICENSE`). Th
 - The `extension/` folder carries its own `LICENSE`, `LICENSES/Apache-2.0.txt` and `THIRD_PARTY_NOTICES.md` (identical copies), so it can be distributed on its own.
 
 - Third-party Rust crates keep their own licenses (MIT, Apache-2.0, Unicode-3.0 and similar permissive licenses; SQLite, bundled through `libsqlite3-sys`, is in the public domain). Only `Cargo.lock` is committed here; anyone distributing built binaries must include the corresponding notices.
+
+- The Memocampus icon was generated using OpenAI's image generation service. The icon assets are distributed under the project's MIT License.

@@ -5,7 +5,8 @@
   "description": "Local-first web memory capture.",
   "minimum_chrome_version": "116",
   "permissions": ["webNavigation", "storage", "nativeMessaging", "tabs", "sidePanel", "contextMenus", "scripting", "notifications"],
-  "action": { "default_title": "Memocampus" },
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  "action": { "default_title": "Memocampus", "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" } },
   "side_panel": { "default_path": "sidepanel.html" },
   "background": { "service_worker": "service-worker.js", "type": "module" },
   "host_permissions": ["<all_urls>"]
