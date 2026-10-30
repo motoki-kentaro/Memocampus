@@ -120,6 +120,30 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 - Native host: `cargo test` in `native-host/` (unit tests plus a stdio protocol test against the built binary).
 - Extension modules: `npm test` at the repository root (Node's built-in test runner, no dependencies).
 
+## Continuous Integration
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on pull requests targeting `main`, on pushes to `main`, and on manual runs. It only has read access to the repository contents, uses no secrets, and uploads no artifacts.
+
+- **JavaScript** (`ubuntu-latest`, Node.js 24): `npm ci`, `npm test`. The extension tests use fake Chrome APIs and need no Windows.
+- **Rust** (`windows-latest`, stable MSVC toolchain): format check, tests, Clippy and a release build. The host calls Windows APIs, embeds its icon through the MSVC linker, and has tests that only run on Windows/MSVC, so a Linux run would not verify it.
+
+Run the same checks locally:
+
+```powershell
+npm ci
+npm test
+
+cd native-host
+cargo fmt --all -- --check
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
+cargo build --release --locked
+```
+
+The release build replaces the executable Chrome uses; close Chrome first, or add `--target-dir` with another folder to leave it in place.
+
+CI does not cover Chrome itself: loading the extension, the host registration and the file dialogs are still checked by hand in Chrome (dogfooding).
+
 ## Layout
 
 - `extension/` — Chrome Manifest V3 service worker (visits, image saving) and side panel (search, images, vault)
