@@ -7,6 +7,7 @@ mod image_original;
 mod image_protocol;
 mod image_query;
 mod images;
+mod launch;
 mod location;
 mod manage;
 mod search;
@@ -139,6 +140,10 @@ fn write_message<T: Serialize>(message: &T) -> io::Result<()> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Double-clicked in Explorer: explain and exit before touching stdin, stdout or the vault.
+    if launch::guide_if_direct() {
+        return Ok(());
+    }
     // The vault is resolved from config.json and opened lazily; nothing is created implicitly.
     let mut session = vault::Session::new(vault::Environment::from_process());
     // Upload state lives only as long as this process, i.e. one connectNative port: when Chrome
