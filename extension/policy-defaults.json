@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": 1,
+  "revision": 1,
+  "categories": {
+    "authentication": true,
+    "credentials": true,
+    "government": true,
+    "webmail": true,
+    "aiChats": true
+  },
+  "layers": {
+    "neverSave": { "enabled": true, "rules": [] },
+    "saveButNoMcp": { "enabled": true, "rules": [] }
+  }
+}

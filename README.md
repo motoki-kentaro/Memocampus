@@ -175,6 +175,13 @@ background are kept (the ICO entries get a fully opaque alpha channel). The gene
 master was generated with ChatGPT (OpenAI image generation) and adopted by the project owner; it keeps its C2PA
 content credentials, which record that origin.
 
+## Privacy policy foundation (#10)
+
+The independent Rust/JavaScript policy engine and Native Host policy store are implemented as
+library APIs. They are not yet connected to recording or MCP, and do not initialize user settings
+on application startup. See [the policy contract](docs/issue-010-privacy-policy.md) for initial
+presets, editable rules, URL normalization, fail-closed recovery, concurrency, and test coverage.
+
 ## Known limitations
 
 - Windows only (native host, dialogs and paths); Chrome 116 or later.
