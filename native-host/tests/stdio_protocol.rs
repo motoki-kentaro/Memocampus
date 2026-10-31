@@ -1,11 +1,15 @@
 //! Drives the real host binary over stdio with Native Messaging framing.
 //! Every test uses its own temp directory as `MEMOCAMPUS_APP_DIR`; no user data is touched.
 
+use memocampus_native_host::policy_store::PolicyStore;
 use rusqlite::Connection;
 use serde_json::{json, Value};
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 struct TempDir(PathBuf);
 
@@ -96,7 +100,20 @@ fn exchange(tmp: &TempDir, messages: &[Value]) -> Vec<Value> {
     exchange_with(tmp, |_| {}, messages)
 }
 
+/// Explicit first-use step; repeating it is harmless because it never replaces the policy.
+fn initialize_policy(tmp: &TempDir) {
+    let response = &exchange(
+        tmp,
+        &[json!({ "type": "policy_initialize", "requestId": "p" })],
+    )[0];
+    assert!(
+        response["ok"] == true || response["error"] == "policy_already_initialized",
+        "{response}"
+    );
+}
+
 fn create_default_vault(tmp: &TempDir) {
+    initialize_policy(tmp);
     let response = &exchange(
         tmp,
         &[json!({ "type": "vault_create", "requestId": "c", "useDefault": true })],
@@ -141,11 +158,11 @@ fn first_run_requires_an_explicit_vault_and_creates_nothing_implicitly() {
     assert_eq!(responses[0]["status"]["state"], "not_configured");
     assert_eq!(
         responses[1],
-        json!({ "ok": false, "eventId": "v1", "error": "vault_not_configured" })
+        json!({ "ok": false, "eventId": "v1", "error": "policy_not_initialized" })
     );
     assert_eq!(
         responses[2],
-        json!({ "ok": false, "eventId": "s1", "error": "vault_not_configured" })
+        json!({ "ok": false, "eventId": "s1", "error": "policy_not_initialized" })
     );
     assert_eq!(
         responses[3],
@@ -259,6 +276,7 @@ fn a_legacy_database_in_the_working_directory_is_ignored_and_untouched() {
     drop(db);
     let before = std::fs::read(&legacy).unwrap();
 
+    initialize_policy(&tmp);
     assert_eq!(
         exchange(
             &tmp,
@@ -360,6 +378,7 @@ fn backup_through_the_protocol_produces_a_verified_copy() {
 fn development_override_writes_there_and_disables_management() {
     let tmp = TempDir::new();
     let dev = tmp.0.join("dev.sqlite3");
+    initialize_policy(&tmp);
     // Prepared as a valid vault through the host itself, then used via MEMOCAMPUS_DB.
     let created = &exchange(
         &tmp,
@@ -513,6 +532,7 @@ fn vaults_created_by_the_host_start_at_schema_3_with_image_tables() {
 fn ordinary_operations_never_migrate_a_schema_1_vault() {
     let tmp = TempDir::new();
     let old = tmp.0.join("before-images.sqlite3");
+    initialize_policy(&tmp);
     let db = Connection::open(&old).unwrap();
     db.execute_batch("CREATE TABLE visits (event_id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL, visited_at TEXT NOT NULL); CREATE TABLE tab_snapshots (event_id TEXT PRIMARY KEY, window_id INTEGER NOT NULL, tab_index INTEGER NOT NULL, url TEXT NOT NULL, title TEXT NOT NULL, pinned INTEGER NOT NULL, incognito INTEGER NOT NULL, recorded_at TEXT NOT NULL); PRAGMA application_id = 1296256336; PRAGMA user_version = 1;").unwrap();
     drop(db);
@@ -1153,4 +1173,416 @@ fn a_schema_2_vault_stops_images_with_an_explicit_error_and_is_left_unchanged() 
     )
     .remove(0);
     assert_eq!(backup["ok"], true, "{backup}");
+}
+
+// --- Privacy policy at the recording entrance (Issue #11) ----------------------------------------
+
+const AT: &str = "2026-10-30T10:00:00.000Z";
+const AUTH_URL: &str = "https://accounts.google.com/signin/secret-path";
+const TOKEN_URL: &str = "https://a.test/page?access_token=SECRET-VALUE";
+const B_URL: &str = "https://mail.google.com/mail/u/0/";
+
+fn dropped(id: &str) -> Value {
+    json!({ "ok": true, "eventId": id, "dropped": "policy" })
+}
+
+fn stored(id: &str) -> Value {
+    json!({ "ok": true, "eventId": id })
+}
+
+fn store_of(tmp: &TempDir) -> PolicyStore {
+    PolicyStore::new(tmp.app_dir()).unwrap()
+}
+
+fn add_never_save_rule(tmp: &TempDir, rule: &str) {
+    let store = store_of(tmp);
+    let current = store.load().unwrap();
+    let mut edited = current.policy.clone();
+    edited.layers.never_save.rules.push(rule.into());
+    store.update(&current, edited).unwrap();
+}
+
+/// The failure answers exactly `code`: not a success, not a drop, and no URL or title in it.
+fn assert_policy_failure(response: &Value, id: &str, code: &str) {
+    assert_eq!(
+        response,
+        &json!({ "ok": false, "eventId": id, "error": code }),
+        "a failure is never a success or a drop, and carries no event data"
+    );
+}
+
+#[test]
+fn a_refused_url_is_acknowledged_as_dropped_and_allowed_ones_are_stored() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let responses = exchange(
+        &tmp,
+        &[
+            visit("auth", AUTH_URL, AT),
+            visit("token", TOKEN_URL, AT),
+            visit("malformed", "https://a.test/?q=%FF", AT),
+            visit("search", "https://www.google.com/search?q=rust", AT),
+            visit("normal", "https://normal.test/", AT),
+            visit("layer-b", B_URL, AT),
+        ],
+    );
+    assert_eq!(
+        responses,
+        [
+            dropped("auth"),
+            dropped("token"),
+            dropped("malformed"),
+            stored("search"),
+            stored("normal"),
+            stored("layer-b"),
+        ]
+    );
+    let rows = row_dump(&tmp.default_vault());
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    let all = rows.join("\n");
+    for secret in ["accounts.google.com", "SECRET-VALUE", "%FF"] {
+        assert!(!all.contains(secret));
+    }
+}
+
+#[test]
+fn a_refused_url_is_dropped_even_when_the_event_is_otherwise_invalid() {
+    // Answering `invalid_event` would have an older extension quarantine the URL.
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let incomplete = json!({ "type": "visit", "id": "bad", "url": AUTH_URL, "incognito": false });
+    assert_eq!(exchange(&tmp, &[incomplete]).remove(0), dropped("bad"));
+    assert_eq!(row_dump(&tmp.default_vault()), Vec::<String>::new());
+}
+
+#[test]
+fn tab_snapshots_are_judged_member_by_member() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let members = [
+        snapshot("s-normal", "https://normal.test/", AT),
+        snapshot("s-auth", AUTH_URL, AT),
+        snapshot("s-b", B_URL, AT),
+        snapshot("s-token", TOKEN_URL, AT),
+    ];
+    let expected = [
+        stored("s-normal"),
+        dropped("s-auth"),
+        stored("s-b"),
+        dropped("s-token"),
+    ];
+    assert_eq!(exchange(&tmp, &members), expected);
+    let vault = tmp.default_vault();
+    let rows = row_dump(&vault);
+    assert_eq!(
+        rows,
+        [
+            format!("s|s-b|{B_URL}|Rust Book|{AT}"),
+            format!("s|s-normal|https://normal.test/|Rust Book|{AT}"),
+        ]
+    );
+    // Event-id idempotency holds for both outcomes.
+    assert_eq!(exchange(&tmp, &members), expected);
+    assert_eq!(row_dump(&vault), rows);
+
+    // Every member refused: nothing at all is stored.
+    let other = TempDir::new();
+    create_default_vault(&other);
+    let all = [snapshot("a", AUTH_URL, AT), snapshot("b", TOKEN_URL, AT)];
+    assert_eq!(exchange(&other, &all), [dropped("a"), dropped("b")]);
+    assert_eq!(row_dump(&other.default_vault()), Vec::<String>::new());
+}
+
+#[test]
+fn an_uninitialized_policy_stores_nothing_and_never_answers_success() {
+    let tmp = TempDir::new();
+    // A vault exists, but the policy was never initialized.
+    let vault = tmp.0.join("v.sqlite3");
+    let created = &exchange(
+        &tmp,
+        &[json!({ "type": "vault_create", "requestId": "c", "path": vault })],
+    )[0];
+    assert_eq!(created["ok"], true, "{created}");
+    let responses = exchange(
+        &tmp,
+        &[
+            visit("normal", "https://normal.test/", AT),
+            visit("auth", AUTH_URL, AT),
+            snapshot("snap", "https://normal.test/", AT),
+            json!({ "type": "policy_status", "requestId": "s" }),
+        ],
+    );
+    assert_policy_failure(&responses[0], "normal", "policy_not_initialized");
+    assert_policy_failure(&responses[1], "auth", "policy_not_initialized");
+    assert_policy_failure(&responses[2], "snap", "policy_not_initialized");
+    assert_eq!(
+        responses[3],
+        json!({ "ok": true, "type": "policy_result", "requestId": "s", "state": "uninitialized" })
+    );
+    assert_eq!(row_dump(&vault), Vec::<String>::new());
+    let app = tmp.app_dir();
+    assert!(
+        !app.join("policy.json").exists(),
+        "never created implicitly"
+    );
+    assert!(!app.join("policy.initialized").exists());
+}
+
+#[test]
+fn explicit_initialization_starts_recording_and_never_replaces_a_policy() {
+    let tmp = TempDir::new();
+    let responses = exchange(
+        &tmp,
+        &[
+            json!({ "type": "policy_initialize", "requestId": "i1" }),
+            json!({ "type": "policy_status", "requestId": "s" }),
+            json!({ "type": "policy_initialize", "requestId": "i2" }),
+            json!({ "type": "policy_status" }),
+        ],
+    );
+    assert_eq!(responses[0]["ok"], true, "{}", responses[0]);
+    assert_eq!(responses[0]["state"], "ready");
+    assert_eq!(responses[0]["policy"]["revision"], 1);
+    assert_eq!(responses[1]["etag"], responses[0]["etag"]);
+    assert_eq!(responses[1]["policy"]["schemaVersion"], 1);
+    assert_eq!(responses[1]["policy"]["engineVersion"], 1);
+    assert_eq!(
+        responses[2],
+        json!({ "ok": false, "type": "policy_result", "requestId": "i2", "error": "policy_already_initialized" })
+    );
+    assert_eq!(responses[3]["error"], "invalid_request_id");
+    assert_eq!(store_of(&tmp).load().unwrap().policy.revision, 1);
+
+    add_never_save_rule(&tmp, "mine.test");
+    let before = std::fs::read(tmp.app_dir().join("policy.json")).unwrap();
+    let again = exchange(
+        &tmp,
+        &[json!({ "type": "policy_initialize", "requestId": "i3" })],
+    );
+    assert_eq!(again[0]["error"], "policy_already_initialized");
+    assert_eq!(
+        std::fs::read(tmp.app_dir().join("policy.json")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn every_policy_failure_stops_recording_keeps_the_files_and_recovers() {
+    let at_app = |tmp: &TempDir, name: &str| tmp.app_dir().join(name);
+    type Damage = fn(&Path);
+    let cases: [(&str, Damage, &str); 6] = [
+        (
+            "policy.json",
+            |p| std::fs::write(p, b"{broken").unwrap(),
+            "invalid",
+        ),
+        (
+            "policy.json",
+            |p| std::fs::write(p, br#"{"schemaVersion":2}"#).unwrap(),
+            "invalid",
+        ),
+        (
+            "policy.json",
+            |p| std::fs::remove_file(p).unwrap(),
+            "invalid",
+        ),
+        (
+            "policy.initialized",
+            |p| std::fs::remove_file(p).unwrap(),
+            "invalid",
+        ),
+        (
+            "policy.initialized",
+            |p| std::fs::write(p, b"unfinished").unwrap(),
+            "invalid",
+        ),
+        (
+            "policy.lock",
+            |p| std::fs::remove_file(p).unwrap(),
+            "invalid",
+        ),
+    ];
+    for (name, damage, state) in cases {
+        let tmp = TempDir::new();
+        create_default_vault(&tmp);
+        let path = at_app(&tmp, name);
+        let original = std::fs::read(&path).unwrap();
+        damage(&path);
+        let after_damage = std::fs::read(&path).ok();
+
+        let responses = exchange(
+            &tmp,
+            &[
+                visit("normal", "https://normal.test/", AT),
+                visit("auth", AUTH_URL, AT),
+                snapshot("snap", "https://normal.test/", AT),
+                json!({ "type": "policy_status", "requestId": "s" }),
+                json!({ "type": "policy_initialize", "requestId": "i" }),
+            ],
+        );
+        for (response, id) in responses.iter().zip(["normal", "auth", "snap"]) {
+            assert_policy_failure(response, id, "policy_invalid");
+        }
+        assert_eq!(responses[3]["state"], state, "{name}");
+        assert!(responses[3].get("policy").is_none());
+        // The lone lock file is the one thing a writer may recreate; policy and marker never.
+        if name != "policy.lock" {
+            assert_eq!(
+                responses[4]["ok"], false,
+                "{name}: no reset: {}",
+                responses[4]
+            );
+            assert_eq!(
+                std::fs::read(&path).ok(),
+                after_damage,
+                "{name} is left as found"
+            );
+        }
+        assert_eq!(row_dump(&tmp.default_vault()), Vec::<String>::new());
+
+        // Restored by hand: the same event is stored, once.
+        std::fs::write(&path, &original).unwrap();
+        let retry = visit("normal", "https://normal.test/", AT);
+        assert_eq!(
+            exchange(&tmp, &[retry]).remove(0),
+            stored("normal"),
+            "{name}"
+        );
+        assert_eq!(row_dump(&tmp.default_vault()).len(), 1);
+    }
+}
+
+#[test]
+fn a_held_policy_lock_is_a_failure_not_a_refusal() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(tmp.app_dir().join("policy.lock"))
+        .unwrap();
+    lock.try_lock().unwrap();
+    let responses = exchange(
+        &tmp,
+        &[
+            visit("auth", AUTH_URL, AT),
+            visit("normal", "https://normal.test/", AT),
+            json!({ "type": "policy_status", "requestId": "s" }),
+        ],
+    );
+    assert_policy_failure(&responses[0], "auth", "policy_busy");
+    assert_policy_failure(&responses[1], "normal", "policy_busy");
+    assert_eq!(responses[2]["state"], "busy");
+    assert_eq!(row_dump(&tmp.default_vault()), Vec::<String>::new());
+    drop(lock);
+    let retry = visit("normal", "https://normal.test/", AT);
+    assert_eq!(exchange(&tmp, &[retry]).remove(0), stored("normal"));
+}
+
+#[test]
+fn the_latest_policy_applies_to_every_event_and_to_a_resend() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let url = "https://becomes-private.test/x";
+    assert_eq!(
+        exchange(&tmp, &[visit("v1", url, AT)]).remove(0),
+        stored("v1")
+    );
+    add_never_save_rule(&tmp, "becomes-private.test");
+    // No restart of anything: each host process reads the policy for each decision.
+    assert_eq!(
+        exchange(&tmp, &[visit("v2", url, AT)]).remove(0),
+        dropped("v2")
+    );
+    assert_eq!(
+        row_dump(&tmp.default_vault()).len(),
+        1,
+        "rows stored before the change are not rewritten"
+    );
+}
+
+#[test]
+fn the_policy_is_global_across_vault_switches() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    add_never_save_rule(&tmp, "private.test");
+    let other = tmp.0.join("other.sqlite3");
+    let created = &exchange(
+        &tmp,
+        &[json!({ "type": "vault_create", "requestId": "c", "path": other })],
+    )[0];
+    assert_eq!(created["ok"], true, "{created}");
+    let opened = exchange(
+        &tmp,
+        &[
+            visit("in-other-1", "https://private.test/", AT),
+            visit("in-other-2", "https://normal.test/", AT),
+        ],
+    );
+    assert_eq!(opened, [dropped("in-other-1"), stored("in-other-2")]);
+    let rows = row_dump(&other);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].contains("normal.test"));
+    assert_eq!(row_dump(&tmp.default_vault()), Vec::<String>::new());
+}
+
+#[test]
+fn recording_during_policy_updates_never_fakes_success_or_drops_an_allowed_url() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let app = tmp.app_dir();
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            let store = PolicyStore::new(app).unwrap();
+            let mut updates = 0;
+            while !stop.load(Ordering::Relaxed) {
+                if let Ok(current) = store.load() {
+                    let policy = current.policy.clone();
+                    if store.update(&current, policy).is_ok() {
+                        updates += 1;
+                    }
+                }
+            }
+            updates
+        })
+    };
+    let mut delivered = std::collections::BTreeSet::new();
+    for round in 0..15 {
+        let events: Vec<Value> = (0..5)
+            .map(|index| visit(&format!("e{index}"), "https://normal.test/", AT))
+            .collect();
+        for (response, event) in exchange(&tmp, &events).iter().zip(&events) {
+            let id = event["id"].as_str().unwrap();
+            if response["ok"] == true {
+                assert_eq!(
+                    response,
+                    &stored(id),
+                    "round {round}: an allowed URL is never dropped"
+                );
+                delivered.insert(id.to_owned());
+            } else {
+                assert_policy_failure(response, id, "policy_busy");
+            }
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    assert!(writer.join().unwrap() > 0, "the updates really ran");
+    assert_eq!(
+        row_dump(&tmp.default_vault()).len(),
+        delivered.len(),
+        "acknowledged means stored"
+    );
+}
+
+#[test]
+fn manual_image_saves_do_not_depend_on_the_policy() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    std::fs::remove_file(tmp.app_dir().join("policy.json")).unwrap();
+    let bytes = png_of_size(40, 30, 5000);
+    let responses = exchange(&tmp, &upload_messages(&bytes, true));
+    assert_eq!(responses.last().unwrap()["type"], "image_saved");
+    assert_eq!(image_rows(&tmp.default_vault()), (1, 1));
 }

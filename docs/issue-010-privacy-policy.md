@@ -6,6 +6,7 @@ The Native Host crate now exposes a `policy` and `policy_store` library. The ext
 a pure `policy.js` evaluator. These APIs are **not connected** to event collection, queues,
 image saving, native messaging dispatch, search results, or MCP. No GUI is added. Merely
 starting the current application does not initialize or enforce this policy yet (#11/#12).
+(Since #11, automatic recording enforces it; see `issue-011-privacy-ingress.md`.)
 
 Inspection of the existing implementation:
 

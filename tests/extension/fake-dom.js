@@ -139,7 +139,7 @@ export function createDocument() {
   });
   // Initial `hidden` state as written in sidepanel.html.
   for (const id of [
-    "panel-image", "panel-settings", "settings-attention", "error", "empty", "load-more", "open-vault-settings", "record-status", "queue-status", "vault-approval",
+    "panel-image", "panel-settings", "settings-attention", "error", "empty", "load-more", "open-vault-settings", "record-status", "queue-status", "policy-status", "policy-initialize", "vault-approval",
     "gallery-new-dot", "gallery-error", "gallery-open-settings", "gallery-empty", "gallery-more", "gallery-details", "gallery-sources-more", "gallery-menu",
   ]) {
     document.querySelector(`#${id}`).hidden = true;
@@ -184,8 +184,9 @@ const PNG_THUMBNAIL = Buffer.from("89504e470d0a1a0a0000000d494844520000000400000
  * Native host stand-in: `vaults` maps a vault path to its pages; `active` is the open vault.
  * `images` maps a vault path to its image summaries (newest first) for the Image tab.
  */
-export function createHost({ vaults, active, statusDelay = 0, images = {} }) {
+export function createHost({ vaults, active, statusDelay = 0, images = {}, policyStatus = null }) {
   const host = {
+    policyStatus,
     vaults,
     active,
     images,
@@ -287,6 +288,12 @@ function createChrome(host) {
     async sendMessage(message) {
       if (message.type === "queue-status") return { ok: true, pending: 0, deadLetters: 0, dropped: 0, blockedReason: null };
       if (message.type === "flush-queue") return { ok: true, blockedBy: null };
+      if (message.type === "policy-status") return host.policyStatus ?? { ok: true, state: "ready", revision: 1, code: null, message: null };
+      if (message.type === "policy-initialize") {
+        host.policyInitializations = (host.policyInitializations ?? 0) + 1;
+        host.policyStatus = null;
+        return { ok: true, state: "ready", revision: 1, code: null, message: null };
+      }
       return { ok: false };
     },
   };

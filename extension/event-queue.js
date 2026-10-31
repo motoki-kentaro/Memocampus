@@ -9,6 +9,10 @@
 // - Every other failure (host unreachable, timeout, no vault, busy vault, unknown codes) is
 //   temporary: the event stays queued and is retried on the next flush. The host stores events
 //   with INSERT OR IGNORE by id, so a resend after a lost ACK never duplicates rows.
+// - Every flush asks the policy first. Without a valid policy nothing is sent and nothing is
+//   removed. With one, stored events it refuses are removed from the pending and dead-letter lists
+//   without a copy, whenever the policy changes, and the event at the head is checked before it is
+//   sent. The host checks again, so an event refused by a newer policy is acknowledged as dropped.
 // - A visit or snapshot not declared normal (`incognito: false`) is removed without a dead-letter
 //   copy, so its URL and title are not kept anywhere. The service worker never queues one; this
 //   covers events queued by an older version and a refusal by the host.
@@ -40,7 +44,8 @@ export class QueueError extends Error {
  * belongs to this event.
  */
 export function classifyResponse(event, response) {
-  if (response?.ok === true && response.eventId === event?.id) return { kind: "delivered" };
+  if (response?.ok === true && response.dropped === "policy" && (response.eventId === event?.id || response.eventId === null)) return { kind: "discard", code: "dropped_by_policy" };
+  if (response?.ok === true && response.dropped === undefined && response.eventId === event?.id) return { kind: "delivered" };
   if (response?.ok === false && typeof response.error === "string") {
     const sameEvent = response.eventId === event?.id || response.eventId === null;
     if (response.error === INCOGNITO_ERROR && sameEvent) return { kind: "discard", code: response.error };
@@ -51,6 +56,8 @@ export function classifyResponse(event, response) {
 }
 
 const isUndeclared = (event) => (event.type === "visit" || event.type === "tab_snapshot") && event.incognito !== false;
+
+const isRecording = (event) => event?.type === "visit" || event?.type === "tab_snapshot";
 
 const hasId = (event) => typeof event?.id === "string" && event.id !== "";
 
@@ -66,8 +73,16 @@ function withTimeout(promise, timeoutMs) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-export function createEventQueue({ storage, send, now = () => new Date(), timeoutMs = SEND_TIMEOUT_MS, onChange = () => {} }) {
+/**
+ * `policy.current({ fresh })` resolves to `{ ok: true, version, decide(url) }`, where `decide` answers
+ * "allow" or "deny", or to `{ ok: false, code }` when no decision can be made.
+ */
+export function createEventQueue({ storage, send, policy, now = () => new Date(), timeoutMs = SEND_TIMEOUT_MS, onChange = () => {} }) {
+  if (typeof policy?.current !== "function") throw new TypeError("createEventQueue needs a policy");
   let tail = Promise.resolve();
+  let sweptVersion = null;
+  // Ids removed because of the policy, so `locate` does not report them as stored.
+  const discarded = new Set();
   let flushing = null;
   let flushAgain = false;
   let lastBlockedBy = null;
@@ -125,6 +140,31 @@ export function createEventQueue({ storage, send, now = () => new Date(), timeou
     });
   }
 
+  function noteDiscarded(event) {
+    if (!hasId(event)) return;
+    if (discarded.size >= MAX_PENDING) discarded.clear();
+    discarded.add(event.id);
+  }
+
+  /** Removes everything `decide` refuses from both lists, in one write. Keeps no copy or count. */
+  function sweep(decide) {
+    const refused = (event) => isRecording(event) && decide(event.url) !== "allow";
+    return exclusive(async () => {
+      const stored = await storage.get([QUEUE_KEY, DEAD_LETTER_KEY]);
+      const list = (key) => (Array.isArray(stored?.[key]) ? stored[key] : []);
+      const queue = list(QUEUE_KEY);
+      const dead = list(DEAD_LETTER_KEY);
+      const keptQueue = queue.filter((event) => {
+        if (!refused(event)) return true;
+        noteDiscarded(event);
+        return false;
+      });
+      const keptDead = dead.filter((entry) => !refused(entry?.event));
+      if (keptQueue.length === queue.length && keptDead.length === dead.length) return;
+      await storage.set({ [QUEUE_KEY]: keptQueue, [DEAD_LETTER_KEY]: keptDead });
+    });
+  }
+
   function quarantine(event, errorCode) {
     return exclusive(async () => {
       const dead = await readList(DEAD_LETTER_KEY);
@@ -145,9 +185,10 @@ export function createEventQueue({ storage, send, now = () => new Date(), timeou
     });
   }
 
-  async function deliver(event) {
+  async function deliver(event, decide) {
     if (!event || typeof event !== "object" || Array.isArray(event)) return { kind: "permanent", code: "invalid_event" };
     if (isUndeclared(event)) return { kind: "discard", code: INCOGNITO_ERROR };
+    if (isRecording(event) && decide(event.url) !== "allow") return { kind: "discard", code: "dropped_by_policy" };
     try {
       return classifyResponse(event, await withTimeout(Promise.resolve().then(() => send(event)), timeoutMs));
     } catch (error) {
@@ -157,10 +198,28 @@ export function createEventQueue({ storage, send, now = () => new Date(), timeou
 
   /** Sends from the head until the queue is empty or delivery has to pause. */
   async function drain() {
+    // The first check of each drain asks the host; a long drain re-asks when the answer is old.
+    let fresh = true;
     for (;;) {
+      const stored = await storage.get([QUEUE_KEY, DEAD_LETTER_KEY]);
+      const pendingCount = Array.isArray(stored?.[QUEUE_KEY]) ? stored[QUEUE_KEY].length : 0;
+      const deadCount = Array.isArray(stored?.[DEAD_LETTER_KEY]) ? stored[DEAD_LETTER_KEY].length : 0;
+      if (pendingCount === 0 && (deadCount === 0 || !fresh)) return null;
+      const verdict = await policy.current({ fresh });
+      fresh = false;
+      if (verdict?.ok !== true) return pendingCount > 0 ? verdict?.code || "policy_unavailable" : null;
+      if (verdict.version !== sweptVersion) {
+        try {
+          await sweep(verdict.decide);
+        } catch {
+          return "storage_write_failed";
+        }
+        sweptVersion = verdict.version;
+      }
       const [head] = await readList(QUEUE_KEY);
       if (head === undefined) return null;
-      const outcome = await deliver(head);
+      const outcome = await deliver(head, verdict.decide);
+      if (outcome.code === "dropped_by_policy") noteDiscarded(head);
       try {
         if (outcome.kind === "delivered" || outcome.kind === "discard") await remove(head);
         else if (outcome.kind === "permanent") await quarantine(head, outcome.code);
@@ -212,11 +271,14 @@ export function createEventQueue({ storage, send, now = () => new Date(), timeou
     const deadIds = new Set((Array.isArray(stored?.[DEAD_LETTER_KEY]) ? stored[DEAD_LETTER_KEY] : []).map((entry) => entry?.eventId));
     let pending = 0;
     let deadLettered = 0;
+    let refused = 0;
     for (const id of ids) {
       if (pendingIds.has(id)) pending += 1;
       else if (deadIds.has(id)) deadLettered += 1;
+      else if (discarded.delete(id)) refused += 1;
     }
-    return { pending, deadLettered, stored: ids.length - pending - deadLettered };
+    const where = { pending, deadLettered, stored: ids.length - pending - deadLettered - refused };
+    return refused > 0 ? { ...where, refused } : where;
   }
 
   return { enqueue: (event) => enqueueAll([event]), enqueueAll, recordDropped, flush, status, locate };

@@ -285,6 +285,9 @@ body {
 
 .summary, .record-status { color: var(--muted); font-size: 12px; }
 .record-status { margin-top: 4px; white-space: pre-wrap; }
+.policy-status { margin-top: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+.policy-status p { margin: 0 0 6px; white-space: pre-wrap; }
+.policy-status[hidden] { display: none; }
 
 button {
   font: inherit;

@@ -1,7 +1,7 @@
 import { PAGE_SIZE, MAX_QUERY_CHARS, SearchError, VAULT_UNAVAILABLE_CODES, chromeNativeTransport, createLatestGate, isWebUrl, searchPages } from "./search-client.js";
 import { displayUrl, formatFullDate, formatShortDate } from "./format.js";
 import { createVaultPanel } from "./vault-panel.js";
-import { describeQueueStatus, describeRecordResult } from "./queue-text.js";
+import { describePolicyStatus, describeQueueStatus, describeRecordResult } from "./queue-text.js";
 import { createTabs } from "./tabs.js";
 import { createImageGallery } from "./image-gallery.js";
 import { vaultNeedsAttention } from "./vault-client.js";
@@ -20,6 +20,10 @@ const recordButton = document.querySelector("#record-tabs");
 const recordStatus = document.querySelector("#record-status");
 const openVaultSettings = document.querySelector("#open-vault-settings");
 const queueStatus = document.querySelector("#queue-status");
+const policyStatus = document.querySelector("#policy-status");
+const policyMessage = document.querySelector("#policy-message");
+const policyInitialize = document.querySelector("#policy-initialize");
+const policyRecheck = document.querySelector("#policy-recheck");
 const urlScroll = document.querySelector("#url-scroll");
 const settingsAttention = document.querySelector("#settings-attention");
 const settingsTab = document.querySelector("#tab-settings");
@@ -95,6 +99,31 @@ async function refreshQueueStatus() {
     queueStatus.hidden = true;
   }
 }
+
+function showPolicyStatus(status) {
+  const text = describePolicyStatus(status);
+  policyMessage.textContent = text;
+  policyStatus.hidden = text === "";
+  // Only first use can be initialized; a damaged or lost policy is never offered a reset.
+  policyInitialize.hidden = !(status?.ok === true && status.state === "uninitialized");
+}
+
+async function requestPolicy(type) {
+  policyInitialize.disabled = true;
+  policyRecheck.disabled = true;
+  try {
+    showPolicyStatus(await chrome.runtime.sendMessage({ type }));
+  } catch {
+    showPolicyStatus(null);
+  } finally {
+    policyInitialize.disabled = false;
+    policyRecheck.disabled = false;
+    void refreshQueueStatus();
+  }
+}
+
+policyInitialize.addEventListener("click", () => void requestPolicy("policy-initialize"));
+policyRecheck.addEventListener("click", () => void requestPolicy("policy-status"));
 
 const state = {
   token: 0,
@@ -313,7 +342,7 @@ new IntersectionObserver((entries) => {
 // Pick up pages recorded while the panel stayed open but hidden, unless the user has scrolled away.
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
-  void refreshQueueStatus();
+  void requestPolicy("policy-status");
   if (!state.loadingMore && tabs.getScroll("url") === 0) void runSearch();
 });
 
@@ -329,14 +358,14 @@ recordButton.addEventListener("click", async () => {
     recordStatus.textContent = describeRecordResult({ ok: false, error: error.message });
   } finally {
     recordButton.disabled = false;
-    void refreshQueueStatus();
+    void requestPolicy("policy-status");
   }
 });
 
 tabs.select("url");
 input.focus();
 void runSearch();
-void refreshQueueStatus();
+void requestPolicy("policy-status");
 void vaultPanel.refresh().then((status) => {
   // Redirect (and move focus) only if the user has not started using the panel meanwhile; otherwise
   // the dot on the settings tab and the search error point the way without hiding what they use.

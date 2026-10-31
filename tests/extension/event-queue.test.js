@@ -55,6 +55,8 @@ function fakeHost() {
   return host;
 }
 
+const allowAll = { current: async () => ({ ok: true, version: "v", decide: () => "allow" }) };
+
 let counter = 0;
 const visit = (url = "https://a.test/", id = `e${++counter}`) => ({ type: "visit", id, url, title: "T", incognito: false, visitedAt: "2026-10-30T00:00:00.000Z" });
 const pending = (storage) => storage.data.get(QUEUE_KEY) ?? [];
@@ -63,7 +65,7 @@ const deadLetters = (storage) => storage.data.get(DEAD_LETTER_KEY) ?? [];
 function setup(options = {}) {
   const storage = options.storage ?? fakeStorage(options);
   const host = options.host ?? fakeHost();
-  const queue = createEventQueue({ storage, send: host.send, now: () => new Date("2026-10-30T01:02:03.000Z"), timeoutMs: options.timeoutMs ?? 1000 });
+  const queue = createEventQueue({ storage, send: host.send, policy: options.policy ?? allowAll, now: () => new Date("2026-10-30T01:02:03.000Z"), timeoutMs: options.timeoutMs ?? 1000 });
   return { storage, host, queue };
 }
 

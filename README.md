@@ -12,7 +12,7 @@ Clicking the Memocampus toolbar action opens a side panel with three tabs: **URL
 
 ## Vault
 
-The vault (SQLite file) is independent of the host executable. Its path is stored in `%LOCALAPPDATA%\Memocampus\config.json`; the default vault is `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`. On first use, open the side panel's **Vault** section and create a vault explicitly (or open an existing one). Until then visits stay queued in the extension. Manual backups use the SQLite Backup API and copy the whole vault, including saved images, their save history and thumbnails. Switching or opening another vault switches the images too; nothing is copied between vaults. See `docs/issue-003-vault-location.md`.
+The vault (SQLite file) is independent of the host executable. Its path is stored in `%LOCALAPPDATA%\Memocampus\config.json`; the default vault is `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`. On first use, open the side panel's **Vault** section and create a vault explicitly (or open an existing one). Automatic recording also needs the privacy policy to be initialized (see [Privacy policy](#privacy-policy)). Manual backups use the SQLite Backup API and copy the whole vault, including saved images, their save history and thumbnails. Switching or opening another vault switches the images too; nothing is copied between vaults. See `docs/issue-003-vault-location.md`.
 
 The database previously stored next to the executable (`native-host/target/release/memocampus.sqlite3`) is no longer used and is left untouched.
 
@@ -41,6 +41,27 @@ incognito in `chrome://extensions`. An image you explicitly save from an incogni
 
 Queued events without that declaration (from an earlier version) are discarded, not sent. Rows already in a vault are
 not changed or deleted.
+
+## Privacy policy
+
+Automatic recording (visits and **全タブを記録**) is judged against `%LOCALAPPDATA%\Memocampus\policy.json`, which is global and does not change with the vault.
+
+- **Layer A (`neverSave`)**: not recorded at all. Initially authentication hosts and paths, and URLs carrying credentials (`access_token` and the like). A malformed URL is treated the same way.
+- **Layer B (`saveButNoMcp`)**: recorded locally as usual. The MCP gate that will use this layer is not connected yet, and no MCP server exists.
+
+**First use**: nothing is created implicitly. Until you press **プライバシー設定を初期化** at the top of the side panel's URL tab, automatic recording is stopped. The button is offered only if the policy was never initialized.
+
+The check happens three times, with the same rules:
+
+1. **Before the queue**: the extension asks the host for the current policy for every visit and every 全タブを記録. A refused URL or tab is not written anywhere (queue, dead letters, logs) and is not counted.
+2. **Before sending**: every flush re-reads the policy. Refused events are removed from the queue and from the dead letters, without a copy, whenever the policy has changed; then each event is checked before it is sent.
+3. **In the host**: `record_event` judges each visit and snapshot against the policy on disk before any `INSERT`. A refused one is answered `{"ok": true, "eventId": ..., "dropped": "policy"}`, so that an older client stops resending it.
+
+**When the policy cannot be read** (never initialized, missing, damaged, unsupported version, locked, or the host is unreachable), that is not a refusal: new visits are not recorded and not kept, 全タブを記録 stops, queued events stay unsent and are not removed, and the host answers an error (`policy_not_initialized`, `policy_invalid`, `policy_busy`, `policy_unavailable`), never success. Visits made during that time are not recorded later.
+
+To find the cause, look at the toolbar badge and the message at the top of the URL tab; **再確認** reads the state again, and delivery resumes by itself once the policy is readable. A policy that was initialized and then lost or damaged is never reset for you, and the button is not offered: restore the file, or, if you accept losing your rules, close Chrome and move `policy.json`, `policy.initialized` and `policy.lock` out of `%LOCALAPPDATA%\Memocampus` yourself, which makes it first use again.
+
+**Manual image saves** are explicit, are not automatic recording, and do not depend on the policy. Rows already in a vault are not changed when rules change. See `docs/issue-011-privacy-ingress.md`.
 
 ## Images (Image Vault)
 
@@ -102,7 +123,7 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
    The script fills `native-host/com.memocampus.vault.template.json` with the absolute path of *your* built `memocampus-native-host.exe` and your extension ID, writes `native-host/com.memocampus.vault.json` (git-ignored), and sets `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.memocampus.vault` to that file. It does not touch HKLM or your vault, can be run again safely, and refuses to re-point an existing registration that uses a different manifest unless you pass `-Replace`. Add `-WhatIf` to see what it would do.
 5. **Reload the extension** in `chrome://extensions`.
 6. **Check the connection**: click the Memocampus toolbar button to open the side panel, then open **Vault**. A status such as “Vaultが未設定です” means Chrome reached the native host. “Native Hostに接続できません” means the registration or manifest is wrong; check it with `reg query "HKCU\Software\Google\Chrome\NativeMessagingHosts\com.memocampus.vault"` and re-run step 4.
-7. **Create your vault** in the **Vault** section (default location `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`, or choose another folder), or open an existing one. Visits are queued in the extension until a vault exists.
+7. **Create your vault** in the **Vault** section (default location `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`, or choose another folder), or open an existing one. Visits are queued in the extension until a vault exists. Then press **プライバシー設定を初期化** in the URL tab; automatic recording starts only after that.
 
 ### About the extension ID
 

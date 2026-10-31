@@ -13,6 +13,12 @@ export function describeRecordResult(result) {
   return lines.join("\n");
 }
 
+/** The policy state for the side panel, or "" when automatic recording is running. */
+export function describePolicyStatus(status) {
+  if (status?.ok !== true) return "プライバシー設定の状態を確認できないため、自動記録が止まっている可能性があります。";
+  return status.state === "ready" ? "" : status.message || "自動記録を停止しています。";
+}
+
 /** One line for the side panel, or "" when nothing needs attention. */
 export function describeQueueStatus(status) {
   if (!status?.ok) return "";
