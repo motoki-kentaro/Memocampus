@@ -1,0 +1,2364 @@
+{
+  "decisions": [
+    {
+      "name": "ordinary",
+      "url": "https://example.com/article",
+      "expected": "none"
+    },
+    {
+      "name": "search token text",
+      "url": "https://www.google.com/search?q=token+reset+password",
+      "expected": "none"
+    },
+    {
+      "name": "article token",
+      "url": "https://example.com/docs/token/reset",
+      "expected": "none"
+    },
+    {
+      "name": "article reset",
+      "url": "https://example.com/articles/reset-password",
+      "expected": "none"
+    },
+    {
+      "name": "auth host",
+      "url": "https://ACCOUNTS.GOOGLE.COM.:443/",
+      "expected": "neverSave"
+    },
+    {
+      "name": "auth host suffix attack",
+      "url": "https://accounts.google.com.evil.test/",
+      "expected": "none"
+    },
+    {
+      "name": "www is distinct",
+      "url": "https://www.accounts.google.com/",
+      "expected": "none"
+    },
+    {
+      "name": "government root",
+      "url": "https://myna.go.jp/",
+      "expected": "saveButNoMcp"
+    },
+    {
+      "name": "government subdomain",
+      "url": "https://sub.myna.go.jp/",
+      "expected": "saveButNoMcp"
+    },
+    {
+      "name": "government suffix attack",
+      "url": "https://notmyna.go.jp/",
+      "expected": "none"
+    },
+    {
+      "name": "webmail",
+      "url": "https://mail.google.com/",
+      "expected": "saveButNoMcp"
+    },
+    {
+      "name": "ai chat",
+      "url": "https://chatgpt.com/c/test",
+      "expected": "saveButNoMcp"
+    },
+    {
+      "name": "A wins over B",
+      "url": "https://chatgpt.com/?access_token=secret",
+      "expected": "neverSave"
+    },
+    {
+      "name": "query key",
+      "url": "https://example.com/?%61ccess_token=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "empty credential",
+      "url": "https://example.com/?TOKEN=",
+      "expected": "neverSave"
+    },
+    {
+      "name": "credential as query value",
+      "url": "https://example.com/?q=access_token",
+      "expected": "none"
+    },
+    {
+      "name": "key boundary",
+      "url": "https://example.com/?tokenizer=x",
+      "expected": "none"
+    },
+    {
+      "name": "fragment token",
+      "url": "https://example.com/#access_token=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "hash router",
+      "url": "https://example.com/#/return?id_token=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "oauth callback",
+      "url": "https://example.com/callback?code=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "oauth code state",
+      "url": "https://example.com/?code=x&state=y",
+      "expected": "neverSave"
+    },
+    {
+      "name": "article code",
+      "url": "https://example.com/docs?code=rust",
+      "expected": "none"
+    },
+    {
+      "name": "userinfo",
+      "url": "https://alice:secret@example.com/",
+      "expected": "neverSave"
+    },
+    {
+      "name": "auth path",
+      "url": "https://example.com/reset-password/abc",
+      "expected": "neverSave"
+    },
+    {
+      "name": "path boundary",
+      "url": "https://example.com/reset-password-guide",
+      "expected": "none"
+    },
+    {
+      "name": "encoded auth path",
+      "url": "https://example.com/%6cogin",
+      "expected": "neverSave"
+    },
+    {
+      "name": "encoded slash",
+      "url": "https://example.com/oauth%2ftoken",
+      "expected": "neverSave"
+    },
+    {
+      "name": "encoded traversal",
+      "url": "https://example.com/a%2f..%2flogin",
+      "expected": "neverSave"
+    },
+    {
+      "name": "blob inner",
+      "url": "blob:https://mail.google.com/1234",
+      "expected": "saveButNoMcp"
+    },
+    {
+      "name": "nested blob",
+      "url": "blob:blob:https://example.com/id",
+      "expected": "neverSave"
+    },
+    {
+      "name": "opaque blob",
+      "url": "blob:null/id",
+      "expected": "neverSave"
+    },
+    {
+      "name": "unsupported",
+      "url": "file:///tmp/private",
+      "expected": "neverSave"
+    },
+    {
+      "name": "relative",
+      "url": "/article",
+      "expected": "neverSave"
+    },
+    {
+      "name": "malformed percent",
+      "url": "https://example.com/%ZZ",
+      "expected": "neverSave"
+    },
+    {
+      "name": "double encoded path",
+      "url": "https://example.com/%256cogin",
+      "expected": "neverSave"
+    },
+    {
+      "name": "double encoded query",
+      "url": "https://example.com/?%2561ccess_token=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "invalid UTF8",
+      "url": "https://example.com/%FF",
+      "expected": "neverSave"
+    },
+    {
+      "name": "raw space",
+      "url": " https://example.com/",
+      "expected": "neverSave"
+    },
+    {
+      "name": "newline",
+      "url": "https://example.com/\n",
+      "expected": "neverSave"
+    },
+    {
+      "name": "backslash",
+      "url": "https://example.com\\login",
+      "expected": "neverSave"
+    },
+    {
+      "name": "exact rule",
+      "url": "https://private.test:8443/a",
+      "expected": "neverSave",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "exact subdomain excluded",
+      "url": "https://sub.private.test/",
+      "expected": "none",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wildcard root",
+      "url": "http://bank.test/",
+      "expected": "neverSave",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wildcard deep",
+      "url": "https://a.b.bank.test/",
+      "expected": "neverSave",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wildcard boundary",
+      "url": "https://evilbank.test/",
+      "expected": "none",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "path rule",
+      "url": "https://example.com/private/a",
+      "expected": "neverSave",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "path directory slash",
+      "url": "https://example.com/private/",
+      "expected": "neverSave",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "path bare directory",
+      "url": "https://example.com/private",
+      "expected": "none",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "path boundary rule",
+      "url": "https://example.com/private-other/a",
+      "expected": "none",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "path case",
+      "url": "https://example.com/Private/a",
+      "expected": "none",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "IDN path",
+      "url": "https://xn--r8jz45g.xn--zckzah/%E7%A7%98%E5%AF%86/a",
+      "expected": "neverSave",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "custom B",
+      "url": "http://notes.test/",
+      "expected": "saveButNoMcp",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "disable authentication",
+      "url": "https://accounts.google.com/",
+      "expected": "none",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": false,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "disable credentials",
+      "url": "https://example.com/?token=x",
+      "expected": "none",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": false,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "disable government",
+      "url": "https://myna.go.jp/",
+      "expected": "none",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": false,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "disable webmail",
+      "url": "https://mail.google.com/",
+      "expected": "none",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": false,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "disable aiChats",
+      "url": "https://chatgpt.com/",
+      "expected": "none",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": false
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "A disabled B applies",
+      "url": "https://private.test/",
+      "expected": "saveButNoMcp",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": false,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid URL even A disabled",
+      "url": "data:text/plain,x",
+      "expected": "neverSave",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": false,
+            "rules": [
+              "private.test",
+              "*.bank.test",
+              "example.com/private/*",
+              "例え.テスト/秘密/*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": [
+              "private.test",
+              "notes.test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "B disabled",
+      "url": "https://chatgpt.com/",
+      "expected": "none",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": false,
+            "rules": []
+          }
+        }
+      }
+    }
+  ],
+  "normalization": [
+    {
+      "url": "HTTPS://ExAmPlE.COM.:443/a",
+      "expected": {
+        "host": "example.com",
+        "port": null,
+        "path": "/a",
+        "userinfo": false,
+        "query": "",
+        "fragment": ""
+      }
+    },
+    {
+      "url": "http://example.com:80/",
+      "expected": {
+        "host": "example.com",
+        "port": null,
+        "path": "/",
+        "userinfo": false,
+        "query": "",
+        "fragment": ""
+      }
+    },
+    {
+      "url": "https://example.com:8443/",
+      "expected": {
+        "host": "example.com",
+        "port": "8443",
+        "path": "/",
+        "userinfo": false,
+        "query": "",
+        "fragment": ""
+      }
+    },
+    {
+      "url": "https://例え.テスト/%E7%A7%98%E5%AF%86",
+      "expected": {
+        "host": "xn--r8jz45g.xn--zckzah",
+        "port": null,
+        "path": "/秘密",
+        "userinfo": false,
+        "query": "",
+        "fragment": ""
+      }
+    },
+    {
+      "url": "https://www.example.com/a/../b",
+      "expected": {
+        "host": "www.example.com",
+        "port": null,
+        "path": "/b",
+        "userinfo": false,
+        "query": "",
+        "fragment": ""
+      }
+    },
+    {
+      "url": "https://user:pass@example.com/a?q=1#x",
+      "expected": {
+        "host": "example.com",
+        "port": null,
+        "path": "/a",
+        "userinfo": true,
+        "query": "q=1",
+        "fragment": "x"
+      }
+    },
+    {
+      "url": "blob:https://example.com/id",
+      "expected": {
+        "host": "example.com",
+        "port": null,
+        "path": "/id",
+        "userinfo": false,
+        "query": "",
+        "fragment": ""
+      }
+    },
+    {
+      "url": "https://[::1]:443/",
+      "expected": {
+        "host": "[::1]",
+        "port": null,
+        "path": "/",
+        "userinfo": false,
+        "query": "",
+        "fragment": ""
+      }
+    },
+    {
+      "url": "http://127.1/",
+      "expected": {
+        "host": "127.0.0.1",
+        "port": null,
+        "path": "/",
+        "userinfo": false,
+        "query": "",
+        "fragment": ""
+      }
+    },
+    {
+      "url": "not a url",
+      "expected": null
+    },
+    {
+      "url": "ftp://example.com/",
+      "expected": null
+    },
+    {
+      "url": "https://example.com/%",
+      "expected": null
+    },
+    {
+      "url": "https://example.com/?q=%FF",
+      "expected": null
+    },
+    {
+      "url": "https://example.com/#%00",
+      "expected": null
+    },
+    {
+      "url": "blob:null/id",
+      "expected": null
+    }
+  ],
+  "rules": [
+    {
+      "rule": "example.com",
+      "valid": true
+    },
+    {
+      "rule": "*.example.com",
+      "valid": true
+    },
+    {
+      "rule": "example.com/path/*",
+      "valid": true
+    },
+    {
+      "rule": "*.example.com/path/*",
+      "valid": true
+    },
+    {
+      "rule": "例え.テスト/秘密/*",
+      "valid": true
+    },
+    {
+      "rule": "EXAMPLE.COM.",
+      "valid": true
+    },
+    {
+      "rule": "127.0.0.1",
+      "valid": true
+    },
+    {
+      "rule": "",
+      "valid": false
+    },
+    {
+      "rule": "*",
+      "valid": false
+    },
+    {
+      "rule": "*/reset-password/*",
+      "valid": false
+    },
+    {
+      "rule": "https://example.com",
+      "valid": false
+    },
+    {
+      "rule": "example.com:8443",
+      "valid": false
+    },
+    {
+      "rule": "example.com/path",
+      "valid": false
+    },
+    {
+      "rule": "example.com/*/x/*",
+      "valid": false
+    },
+    {
+      "rule": "example.com?x",
+      "valid": false
+    },
+    {
+      "rule": "user@example.com",
+      "valid": false
+    },
+    {
+      "rule": "example.com/#x",
+      "valid": false
+    },
+    {
+      "rule": "example.com/abc%ZZ/*",
+      "valid": false
+    },
+    {
+      "rule": "example.com/%25/*",
+      "valid": false
+    },
+    {
+      "rule": " example.com",
+      "valid": false
+    },
+    {
+      "rule": "[::1]",
+      "valid": false
+    }
+  ],
+  "invalidPolicies": [
+    {
+      "name": "future schema",
+      "policy": {
+        "schemaVersion": 2,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "future engine",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 2,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "zero revision",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 0,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "unsafe integer",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 9007199254740992,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "negative revision",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": -1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "fractional revision",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1.5,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "missing layer",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {}
+      }
+    },
+    {
+      "name": "nonboolean",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": "true",
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid rule",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "*"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "too many rules",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": [
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test",
+              "a.test"
+            ]
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    },
+    {
+      "name": "unknown field",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "credentials": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        },
+        "unknown": true
+      }
+    },
+    {
+      "name": "missing category",
+      "policy": {
+        "schemaVersion": 1,
+        "engineVersion": 1,
+        "revision": 1,
+        "categories": {
+          "authentication": true,
+          "government": true,
+          "webmail": true,
+          "aiChats": true
+        },
+        "layers": {
+          "neverSave": {
+            "enabled": true,
+            "rules": []
+          },
+          "saveButNoMcp": {
+            "enabled": true,
+            "rules": []
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "authentication": ["accounts.google.com", "login.microsoftonline.com", "auth.openai.com", "accounts.apple.com", "appleid.apple.com"],
+  "government": ["*.myna.go.jp", "*.nta.go.jp"],
+  "webmail": ["mail.google.com", "outlook.live.com", "outlook.office.com"],
+  "aiChats": ["chatgpt.com", "claude.ai", "gemini.google.com"],
+  "credentialKeys": ["access_token", "refresh_token", "id_token", "token", "password", "passwd", "api_key", "apikey", "client_secret", "authorization", "credential", "signature", "sig", "x-amz-signature", "x-goog-signature"],
+  "authPaths": ["/login", "/signin", "/sign-in", "/oauth/authorize", "/oauth/token", "/oauth2/authorize", "/oauth2/token", "/reset-password", "/password-reset", "/password/reset"],
+  "callbackPaths": ["/callback", "/oauth/callback", "/oauth2/callback", "/signin-oidc"]
+}
