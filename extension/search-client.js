@@ -41,6 +41,12 @@ const ERROR_MESSAGES = {
   storage_write_failed: "拡張機能のストレージへの保存に失敗しました。",
   dead_letter_full: "隔離領域が満杯のため、送信を一時停止しています。",
   dead_letter_write_failed: "隔離領域への保存に失敗したため、送信を一時停止しています。",
+  // Privacy policy
+  policy_not_initialized: "プライバシー設定が初期化されていないため、自動記録を停止しています。",
+  policy_invalid: "プライバシー設定を読み取れない（欠落・破損・未対応の版）ため、自動記録を停止しています。設定は上書きしていません。",
+  policy_busy: "プライバシー設定が使用中のため、自動記録を一時停止しています。",
+  policy_unavailable: "プライバシー設定にアクセスできないため、自動記録を停止しています。",
+  policy_already_initialized: "プライバシー設定は初期化済みです。既存の設定は上書きしません。",
   // Image saving
   incognito_unknown: "保存元のウィンドウの種類を確認できないため、保存しませんでした。",
   invalid_incognito: "保存元のウィンドウの種類を確認できないため、保存しませんでした。",

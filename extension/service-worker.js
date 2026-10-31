@@ -1,5 +1,7 @@
 import { describeErrorCode } from "./search-client.js";
 import { QueueError, createEventQueue } from "./event-queue.js";
+import { createPolicyGate } from "./policy-gate.js";
+import { chromeNativeTransport } from "./search-client.js";
 import { bytesToBase64 } from "./image-format.js";
 import { SAVE_IMAGE_MENU_ID, describeImageSaveResult, registerImageMenu, saveImageFromClick } from "./image-save.js";
 
@@ -34,6 +36,8 @@ async function updateBadge() {
     // The last failed image save stays visible until an image is saved successfully.
     const imageFailure = (await chrome.storage.session.get(IMAGE_FAILURE_KEY))[IMAGE_FAILURE_KEY];
     const titles = [];
+    const policyProblem = policy.problem();
+    if (policyProblem) titles.push(describeErrorCode(policyProblem));
     if (problems > 0) titles.push(`記録できなかったイベント ${status.deadLetters}件・破棄 ${status.dropped}件`);
     if (imageFailure) titles.push(`画像を保存できませんでした: ${imageFailure}`);
     await chrome.action.setBadgeText({ text: titles.length > 0 ? "!" : "" });
@@ -43,7 +47,15 @@ async function updateBadge() {
   }
 }
 
-const queue = createEventQueue({ storage: chrome.storage.local, send: sendNative, onChange: () => void updateBadge() });
+const policy = createPolicyGate({ send: chromeNativeTransport(chrome.runtime), onChange: () => void updateBadge() });
+const queue = createEventQueue({ storage: chrome.storage.local, send: sendNative, policy, onChange: () => void updateBadge() });
+
+/** A policy failure the host reported while delivering also stops collection at once. */
+async function flushQueue() {
+  const blockedBy = await queue.flush();
+  if (typeof blockedBy === "string" && blockedBy.startsWith("policy_")) policy.reportFailure(blockedBy);
+  return blockedBy;
+}
 
 async function enqueueVisit(event) {
   try {
@@ -53,7 +65,7 @@ async function enqueueVisit(event) {
     await queue.recordDropped().catch(() => {});
     return;
   }
-  await queue.flush();
+  await flushQueue();
 }
 
 function snapshotEvent(tab, recordedAt) {
@@ -75,17 +87,22 @@ function snapshotEvent(tab, recordedAt) {
  * "queued" from "stored in SQLite" so the UI never reports unsaved snapshots as saved.
  */
 async function recordAllTabs() {
+  // Without a valid policy no tab can be judged, so nothing is recorded at all.
+  const verdict = await policy.current({ maxAgeMs: 0 });
+  if (!verdict.ok) throw new QueueError(verdict.code);
   const tabs = await chrome.tabs.query({});
   const recordedAt = new Date().toISOString();
-  // Only tabs known to be normal: incognito tabs and tabs of unknown state leave no trace, not even a count.
-  const events = tabs.filter((tab) => tab.incognito === false && isRecordableUrl(tab.url || "")).map((tab) => snapshotEvent(tab, recordedAt));
+  // Only tabs known to be normal and allowed by the policy: the others leave no trace, not even a count.
+  const events = tabs
+    .filter((tab) => tab.incognito === false && isRecordableUrl(tab.url || "") && verdict.decide(tab.url) === "allow")
+    .map((tab) => snapshotEvent(tab, recordedAt));
   if (events.length === 0) return { ok: true, queued: 0, stored: 0, pending: 0, deadLettered: 0 };
   await queue.enqueueAll(events);
-  const blockedBy = await queue.flush();
-  const where = await queue.locate(events.map((event) => event.id));
+  const blockedBy = await flushQueue();
+  const { refused = 0, ...where } = await queue.locate(events.map((event) => event.id));
   return {
     ok: true,
-    queued: events.length,
+    queued: events.length - refused,
     ...where,
     reason: where.pending > 0 && blockedBy ? describeErrorCode(blockedBy) : null,
   };
@@ -102,6 +119,9 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     return;
   }
   if (tab?.incognito !== false) return;
+  // Decided before anything is written: a refused or undecidable visit is not kept anywhere.
+  const verdict = await policy.current({ maxAgeMs: 0 });
+  if (!verdict.ok || verdict.decide(details.url) !== "allow") return;
   const event = {
     type: "visit",
     id: crypto.randomUUID(),
@@ -113,9 +133,9 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
   void enqueueVisit(event);
 });
 
-chrome.runtime.onStartup.addListener(() => void queue.flush());
+chrome.runtime.onStartup.addListener(() => void flushQueue());
 chrome.runtime.onInstalled.addListener(() => {
-  void queue.flush();
+  void flushQueue();
   registerImageMenu(chrome.contextMenus, chrome.runtime);
 });
 
@@ -188,8 +208,20 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 void updateBadge();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "policy-status" || message?.type === "policy-initialize") {
+    const request = message.type === "policy-initialize" ? policy.initialize() : policy.current({ maxAgeMs: 0 }).then((verdict) => policy.view(verdict));
+    request.then(
+      async (view) => {
+        // A policy that became usable releases what was held back while it was not.
+        if (view.state === "ready") await flushQueue().catch(() => {});
+        sendResponse({ ok: true, ...view, message: view.code ? describeErrorCode(view.code) : null });
+      },
+      () => sendResponse({ ok: false }),
+    );
+    return true;
+  }
   if (message?.type === "flush-queue") {
-    queue.flush().then(
+    flushQueue().then(
       (blockedBy) => sendResponse({ ok: true, blockedBy }),
       () => sendResponse({ ok: false }),
     );
@@ -212,5 +244,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 function queueErrorText(error) {
   if (error?.code === "queue_full") return "送信待ちキューが満杯のため、記録しませんでした（1件も登録していません）。";
   if (error?.code === "storage_write_failed") return "キューへの保存に失敗したため、記録しませんでした（1件も登録していません）。";
+  if (typeof error?.code === "string") return `${describeErrorCode(error.code)}（1件も登録していません）`;
   return error?.message || "記録に失敗しました。";
 }

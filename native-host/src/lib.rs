@@ -1,3 +1,3 @@
-//! Privacy foundation. Not yet connected to recording or MCP request handling.
+//! Privacy foundation. Connected to automatic recording (`policy_gate`), not to MCP.
 pub mod policy;
 pub mod policy_store;

@@ -89,6 +89,14 @@ impl PolicyStore {
         let bytes = read_regular(&self.policy_path())?;
         snapshot(&bytes)
     }
+    /// True only before any initialization attempt. A lost policy or marker is not first use, and
+    /// a lone `policy.lock` proves nothing either way.
+    pub fn never_initialized(&self) -> bool {
+        let absent = |path: PathBuf| {
+            fs::symlink_metadata(path).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        };
+        absent(self.marker_path()) && absent(self.policy_path())
+    }
     pub fn evaluate(&self, url: &str) -> Decision {
         self.load()
             .map_or(Decision::NeverSave, |s| s.policy.evaluate(url))

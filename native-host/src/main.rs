@@ -1,3 +1,4 @@
+use memocampus_native_host::policy::Decision;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
@@ -10,6 +11,7 @@ mod images;
 mod launch;
 mod location;
 mod manage;
+mod policy_gate;
 mod search;
 mod vault;
 
@@ -48,14 +50,26 @@ struct Ack<'a> {
     /// Set only on failure, so successful acknowledgements are unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<&'static str>,
+    /// `"policy"` only for an event a valid policy refused: nothing was stored, and resending is
+    /// pointless. A policy that could not be evaluated is an `error`, never this.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dropped: Option<&'static str>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Recorded {
+    Stored,
+    DroppedByPolicy,
 }
 
 impl<'a> Ack<'a> {
-    fn from_result(event_id: Option<&'a str>, result: Result<(), &'static str>) -> Self {
+    fn from_result(event_id: Option<&'a str>, result: Result<Recorded, &'static str>) -> Self {
+        let dropped = matches!(result, Ok(Recorded::DroppedByPolicy)).then_some("policy");
         Self {
             ok: result.is_ok(),
             event_id,
             error: result.err(),
+            dropped,
         }
     }
 }
@@ -73,8 +87,9 @@ const INCOGNITO_NOT_ALLOWED: &str = "incognito_not_allowed";
 /// Stores one queued event. Every outcome is reported, so a bad event cannot stall the queue.
 fn record_event(
     session: &mut vault::Session,
+    gate: &policy_gate::PolicyGate,
     value: serde_json::Value,
-) -> Result<(), &'static str> {
+) -> Result<Recorded, &'static str> {
     let kind = value.get("type").and_then(|value| value.as_str());
     // Checked first: a refusal for any other reason would have the extension keep the URL. The
     // host cannot see the browser, so it can only enforce what the extension declares.
@@ -82,6 +97,15 @@ fn record_event(
         && value.get("incognito").and_then(|value| value.as_bool()) != Some(false)
     {
         return Err(INCOGNITO_NOT_ALLOWED);
+    }
+    // Before the event is parsed: a refused URL must not come back as an invalid event, which the
+    // extension would quarantine with its URL. Before any INSERT, in every case.
+    if matches!(kind, Some("visit" | "tab_snapshot")) {
+        if let Some(url) = value.get("url").and_then(|url| url.as_str()) {
+            if is_recordable_url(url) && gate.decide(url)? == Decision::NeverSave {
+                return Ok(Recorded::DroppedByPolicy);
+            }
+        }
     }
     match kind {
         Some("visit") => {
@@ -94,6 +118,7 @@ fn record_event(
             }
             session
                 .write(|db| db.execute("INSERT OR IGNORE INTO visits (event_id, url, title, visited_at) VALUES (?1, ?2, ?3, ?4)", params![event.id, event.url, event.title, event.visited_at]))
+                .map(|()| Recorded::Stored)
                 .map_err(vault::VaultError::code)
         }
         Some("tab_snapshot") => {
@@ -106,6 +131,7 @@ fn record_event(
             }
             session
                 .write(|db| db.execute("INSERT OR IGNORE INTO tab_snapshots (event_id, window_id, tab_index, url, title, pinned, incognito, recorded_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", params![event.id, event.window_id, event.tab_index, event.url, event.title, event.pinned, event.incognito, event.recorded_at]))
+                .map(|()| Recorded::Stored)
                 .map_err(vault::VaultError::code)
         }
         _ => Err(UNKNOWN_TYPE),
@@ -160,6 +186,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Upload state lives only as long as this process, i.e. one connectNative port: when Chrome
     // closes the port, the process exits and any unconfirmed image bytes are gone with it.
     let mut uploads = image_protocol::Uploads::default();
+    // The policy is global, independent of the vault, and read again for every decision.
+    let gate = policy_gate::PolicyGate::from_process();
     while let Some(body) = read_message()? {
         let value: serde_json::Value = match serde_json::from_slice(&body) {
             Ok(value) => value,
@@ -197,13 +225,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &value,
                 ))?;
             }
+            Some("policy_status" | "policy_initialize") => {
+                write_message(&gate.handle(&value))?;
+            }
             // `visit`, `tab_snapshot`, and anything unrecognised.
             _ => {
                 let event_id = value
                     .get("id")
                     .and_then(|id| id.as_str())
                     .map(str::to_owned);
-                let result = record_event(&mut session, value);
+                let result = record_event(&mut session, &gate, value);
                 write_ack(&Ack::from_result(event_id.as_deref(), result))?;
             }
         }

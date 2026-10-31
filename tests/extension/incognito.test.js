@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { DEAD_LETTER_KEY, QUEUE_KEY, classifyResponse, createEventQueue } from "../../extension/event-queue.js";
 import { describeRecordResult } from "../../extension/queue-text.js";
 import { extensionDir } from "./fake-dom.js";
+import defaults from "../../extension/policy-defaults.json" with { type: "json" };
 
 const SECRET_URL = "https://secret.test/private-page";
 const SECRET_TITLE = "Private title";
@@ -26,6 +27,7 @@ async function startWorker({ tabs = {}, query = [], seed = {} } = {}) {
       connectNative() {},
       lastError: undefined,
       sendNativeMessage(_host, event, reply) {
+        if (event.type === "policy_status") return reply({ ok: true, type: "policy_result", requestId: event.requestId, state: "ready", policy: defaults, etag: "e" });
         sent.push(event);
         reply({ ok: true, eventId: event.id });
       },
@@ -160,12 +162,13 @@ test("a refusal by the host discards the event without a dead letter; a failure 
     get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter((key) => data.has(key)).map((key) => [key, data.get(key)])),
     set: async (items) => Object.entries(items).forEach(([key, value]) => data.set(key, value)),
   };
-  const refusing = createEventQueue({ storage, send: async (sent) => ({ ok: false, eventId: sent.id, error: "incognito_not_allowed" }) });
+  const policy = { current: async () => ({ ok: true, version: "v", decide: () => "allow" }) };
+  const refusing = createEventQueue({ storage, policy, send: async (sent) => ({ ok: false, eventId: sent.id, error: "incognito_not_allowed" }) });
   await refusing.enqueue(event);
   assert.equal(await refusing.flush(), null, "delivery does not pause");
   assert.deepEqual(await refusing.status(), { pending: 0, deadLetters: 0, deadLetterCodes: [], dropped: 0, blockedBy: null });
 
-  const busy = createEventQueue({ storage, send: async (sent) => ({ ok: false, eventId: sent.id, error: "vault_busy" }) });
+  const busy = createEventQueue({ storage, policy, send: async (sent) => ({ ok: false, eventId: sent.id, error: "vault_busy" }) });
   await busy.enqueue(event);
   assert.equal(await busy.flush(), "vault_busy");
   assert.equal((await busy.status()).pending, 1);
