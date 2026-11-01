@@ -68,3 +68,13 @@ test("status, reasons and counts render as Japanese text", () => {
   assert.equal(formatCounts({ visits: 1234, snapshots: 5 }), "閲覧 1,234件・スナップショット 5件");
   assert.equal(formatCounts(null), "");
 });
+
+test("a vault in an unsupported format is explained, and no conversion is offered", async () => {
+  const { describeErrorCode, VAULT_UNAVAILABLE_CODES } = await import("../../extension/search-client.js");
+  const { describeStatus, vaultNeedsAttention } = await import("../../extension/vault-client.js");
+  assert.match(describeErrorCode("vault_schema_mismatch"), /現在の形式に対応していません.*自動変換は行いません/);
+  assert.ok(VAULT_UNAVAILABLE_CODES.has("vault_schema_mismatch"));
+  const status = { state: "vault_schema_mismatch" };
+  assert.match(describeStatus(status), /自動変換は行いません/);
+  assert.equal(vaultNeedsAttention(status), true);
+});

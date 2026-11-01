@@ -13,7 +13,7 @@
 //   opens; both give it back to their tile when closed, and async results never move it.
 
 import { SearchError, VAULT_UNAVAILABLE_CODES } from "./search-client.js";
-import { THUMBNAIL_BATCH, describeSourceUrl, fetchThumbnails, listImages, listSources, shortMime } from "./image-client.js";
+import { THUMBNAIL_BATCH, describeSourceUrl, fetchThumbnails, listImages, listSources, setMcpPublic, shortMime } from "./image-client.js";
 import { formatFullDate } from "./format.js";
 import { copyImage, exportImage, rebuildThumbnail } from "./image-original.js";
 
@@ -458,6 +458,41 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     return line;
   }
 
+  function publicationToggle(source) {
+    const label = document.createElement("label");
+    label.className = "source-publication";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.className = "source-public";
+    // An incognito row is never public, whatever value is stored, so it shows and offers no choice.
+    box.checked = source.mcpPublic && !source.incognito;
+    box.disabled = source.incognito;
+    box.dataset.savedImageId = String(source.savedImageId);
+    const text = document.createElement("span");
+    text.textContent = source.incognito ? "シークレット保存のためMCP非公開" : "MCPへの公開を許可（プライバシー設定が常に優先。MCPは未実装）";
+    const failure = document.createElement("span");
+    failure.className = "source-publication-error";
+    label.append(box, text, failure);
+    return label;
+  }
+
+  async function changePublication(box) {
+    if (box.disabled) return;
+    const wanted = box.checked;
+    const failure = box.closest("label.source-publication").querySelector(".source-publication-error");
+    failure.textContent = "";
+    box.disabled = true;
+    try {
+      await setMcpPublic(Number(box.dataset.savedImageId), wanted, vaultToken, { send });
+    } catch (error) {
+      // What is stored is unchanged or unknown; never show a choice that was not confirmed.
+      box.checked = !wanted;
+      failure.textContent = error instanceof SearchError ? error.message : "公開設定を変更できませんでした。";
+    } finally {
+      box.disabled = false;
+    }
+  }
+
   async function loadSources(state) {
     const token = generation;
     sourcesMore.disabled = true;
@@ -482,6 +517,7 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
         }
         li.append(sourceLine("画像", source.imageUrl), sourceLine("ページ", source.pageUrl));
         if (source.frameUrl) li.append(sourceLine("フレーム", source.frameUrl));
+        li.append(publicationToggle(source));
         fragment.append(li);
       }
       sourcesList.append(fragment);
@@ -529,6 +565,10 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     if (!link) return;
     event.preventDefault();
     openUrl(link.href);
+  });
+  sourcesList.addEventListener("change", (event) => {
+    const box = event.target.closest?.("input.source-public");
+    if (box) void changePublication(box);
   });
   sourcesMore.addEventListener("click", () => selected && void loadSources(selected));
   detailsClose.addEventListener("click", () => closeDetails());

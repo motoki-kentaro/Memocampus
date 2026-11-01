@@ -1,0 +1,22 @@
+[package]
+name = "memocampus-visible-store"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# Not a workspace member of anything: `rusqlite` stays a private dependency of this package, and a
+# future MCP server depends on this package alone, without declaring `rusqlite`.
+[workspace]
+
+[dependencies]
+memocampus-native-host = { path = "../native-host" }
+rusqlite = { version = "0.32", features = ["bundled", "limits"] }
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+serde_json = "1"

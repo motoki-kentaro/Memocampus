@@ -190,11 +190,11 @@ pub fn handle(db: &Connection, message: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SCHEMA_SQL;
+    use memocampus_native_host::schema;
 
     fn db() -> Connection {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(SCHEMA_SQL).unwrap();
+        db.execute_batch(&schema::create_sql()).unwrap();
         db
     }
 

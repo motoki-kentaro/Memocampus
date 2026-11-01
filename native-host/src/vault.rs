@@ -13,34 +13,13 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::images;
-use crate::SCHEMA_SQL;
+use memocampus_native_host::schema::{self, SchemaError};
 
-/// `PRAGMA application_id` of vaults created by Memocampus ("MCMP").
-pub const APP_ID: i64 = 0x4D43_4D50;
-/// Schema version written into newly created vaults (2 = with image tables, see `images`).
-pub const SCHEMA_VERSION: i64 = images::IMAGE_SCHEMA_VERSION;
 pub const CONFIG_VERSION: u32 = 1;
 const DEFAULT_VAULT_NAME: &str = "memocampus.sqlite3";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(3);
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 const SIDECAR_SUFFIXES: [&str; 3] = ["-journal", "-wal", "-shm"];
-
-const EXPECTED_TABLES: [(&str, &[&str]); 2] = [
-    ("visits", &["event_id", "url", "title", "visited_at"]),
-    (
-        "tab_snapshots",
-        &[
-            "event_id",
-            "window_id",
-            "tab_index",
-            "url",
-            "title",
-            "pinned",
-            "incognito",
-            "recorded_at",
-        ],
-    ),
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaultError {
@@ -49,6 +28,7 @@ pub enum VaultError {
     ConfigInvalid,
     Missing,
     Invalid,
+    SchemaMismatch,
     Switched,
     Busy,
     ManagementDisabled,
@@ -70,6 +50,7 @@ impl VaultError {
             Self::ConfigInvalid => "config_invalid",
             Self::Missing => "vault_missing",
             Self::Invalid => "vault_invalid",
+            Self::SchemaMismatch => "vault_schema_mismatch",
             Self::Switched => "vault_switched",
             Self::Busy => "vault_busy",
             Self::ManagementDisabled => "management_disabled",
@@ -262,7 +243,9 @@ pub enum OpenCause {
     /// SQLite fell back to read-only access (e.g. read-only file attribute, missing write permission).
     ReadOnly,
     ForeignApplicationId(i64),
-    /// The named table is missing or lacks expected columns.
+    /// Untagged, or a `user_version` other than the supported one.
+    UnsupportedVersion(i64),
+    /// The named object is missing or differs from the schema definition.
     SchemaMismatch(&'static str),
     IntegrityCheckFailed,
 }
@@ -320,11 +303,14 @@ impl OpenFailure {
         use rusqlite::ErrorCode;
         match (&self.kind, &self.cause) {
             (VaultError::Missing, OpenCause::NotFound) => true,
+            (
+                VaultError::SchemaMismatch,
+                OpenCause::UnsupportedVersion(_) | OpenCause::SchemaMismatch(_),
+            ) => true,
             (VaultError::Invalid, cause) => matches!(
                 cause,
                 OpenCause::NotAFile
                     | OpenCause::ForeignApplicationId(_)
-                    | OpenCause::SchemaMismatch(_)
                     | OpenCause::Sqlite {
                         code: ErrorCode::NotADatabase | ErrorCode::DatabaseCorrupt,
                         ..
@@ -341,36 +327,21 @@ impl From<OpenFailure> for VaultError {
     }
 }
 
+/// Only schema 4 is ever used, for every operation. Older vaults are refused here, unchanged.
 fn validate_schema(db: &Connection) -> Result<(), OpenFailure> {
-    let app_id: i64 = db
-        .query_row("PRAGMA application_id", [], |row| row.get(0))
-        .map_err(|error| OpenFailure::from_sqlite(&error))?;
-    // 0 = vault created before application_id was introduced; accepted if the tables match.
-    if app_id != 0 && app_id != APP_ID {
-        return Err(OpenFailure::new(
-            VaultError::Invalid,
-            OpenCause::ForeignApplicationId(app_id),
-        ));
-    }
-    for (table, columns) in EXPECTED_TABLES {
-        let mut statement = db
-            .prepare("SELECT name FROM pragma_table_info(?1)")
-            .map_err(|error| OpenFailure::from_sqlite(&error))?;
-        let actual = statement
-            .query_map([table], |row| row.get::<_, String>(0))
-            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-            .map_err(|error| OpenFailure::from_sqlite(&error))?;
-        if !columns
-            .iter()
-            .all(|column| actual.iter().any(|name| name == column))
-        {
-            return Err(OpenFailure::new(
-                VaultError::Invalid,
-                OpenCause::SchemaMismatch(table),
-            ));
+    schema::check(db).map_err(|error| match error {
+        SchemaError::ForeignApplicationId(id) => {
+            OpenFailure::new(VaultError::Invalid, OpenCause::ForeignApplicationId(id))
         }
-    }
-    Ok(())
+        SchemaError::UnsupportedVersion(version) => OpenFailure::new(
+            VaultError::SchemaMismatch,
+            OpenCause::UnsupportedVersion(version),
+        ),
+        SchemaError::Shape(name) => {
+            OpenFailure::new(VaultError::SchemaMismatch, OpenCause::SchemaMismatch(name))
+        }
+        SchemaError::Sqlite(error) => OpenFailure::from_sqlite(&error),
+    })
 }
 
 /// Opens an existing vault. Never creates a file: SQLite's create flag is not passed.
@@ -448,11 +419,8 @@ pub fn create_vault(path: &Path) -> Result<(), VaultError> {
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(|_| VaultError::Db)?;
-        db.execute_batch(&format!(
-            "BEGIN; PRAGMA application_id = {APP_ID}; PRAGMA user_version = {SCHEMA_VERSION}; {SCHEMA_SQL} {} COMMIT;",
-            images::IMAGE_SCHEMA_SQL
-        ))
-        .map_err(|_| VaultError::Db)?;
+        db.execute_batch(&format!("BEGIN; {} COMMIT;", schema::create_sql()))
+            .map_err(|_| VaultError::Db)?;
         validate_schema(&db).map_err(VaultError::from)
     })();
     if result.is_err() {
@@ -1002,7 +970,7 @@ pub mod tests {
         let app_id: i64 = db
             .query_row("PRAGMA application_id", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(app_id, APP_ID);
+        assert_eq!(app_id, schema::APP_ID);
         insert_visit(&db, "1").unwrap();
         drop(db);
         let before = fs::read(&path).unwrap();
@@ -1037,7 +1005,7 @@ pub mod tests {
 
         let empty = tmp.0.join("empty.sqlite3");
         fs::write(&empty, b"").unwrap();
-        assert_eq!(open_vault(&empty).err(), Some(VaultError::Invalid));
+        assert_eq!(open_vault(&empty).err(), Some(VaultError::SchemaMismatch));
         assert_eq!(fs::metadata(&empty).unwrap().len(), 0);
 
         let text = tmp.0.join("text.sqlite3");
@@ -1050,27 +1018,16 @@ pub mod tests {
             .unwrap()
             .execute_batch("CREATE TABLE other (x);")
             .unwrap();
-        assert_eq!(open_vault(&foreign).err(), Some(VaultError::Invalid));
+        assert_eq!(open_vault(&foreign).err(), Some(VaultError::SchemaMismatch));
 
         let tagged = tmp.0.join("tagged.sqlite3");
         let db = Connection::open(&tagged).unwrap();
-        db.execute_batch(SCHEMA_SQL).unwrap();
+        db.execute_batch(&schema::create_sql()).unwrap();
         db.execute_batch("PRAGMA application_id = 42;").unwrap();
         drop(db);
         assert_eq!(open_vault(&tagged).err(), Some(VaultError::Invalid));
 
         assert_eq!(open_vault(&tmp.0).err(), Some(VaultError::Invalid));
-    }
-
-    #[test]
-    fn legacy_untagged_vaults_with_the_right_tables_are_accepted() {
-        let tmp = TempDir::new();
-        let legacy = tmp.0.join("legacy.sqlite3");
-        Connection::open(&legacy)
-            .unwrap()
-            .execute_batch(SCHEMA_SQL)
-            .unwrap();
-        assert!(open_vault_checked(&legacy).is_ok());
     }
 
     #[test]
@@ -1272,7 +1229,7 @@ pub mod tests {
 
         let foreign = tmp.0.join("foreign.sqlite3");
         let db = Connection::open(&foreign).unwrap();
-        db.execute_batch(SCHEMA_SQL).unwrap();
+        db.execute_batch(&schema::create_sql()).unwrap();
         db.execute_batch("PRAGMA application_id = 42;").unwrap();
         drop(db);
         assert_eq!(
@@ -1287,7 +1244,7 @@ pub mod tests {
             .unwrap();
         assert_eq!(
             open_vault_detailed(&partial).unwrap_err().cause,
-            OpenCause::SchemaMismatch("tab_snapshots")
+            OpenCause::UnsupportedVersion(0)
         );
         assert_eq!(
             open_vault_detailed(&tmp.0).unwrap_err().cause,

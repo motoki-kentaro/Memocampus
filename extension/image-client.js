@@ -89,8 +89,15 @@ export async function listSources(blobId, cursor, { send }) {
   if (!Array.isArray(response.items)) throw new SearchError("invalid_response");
   const items = response.items
     .filter((item) => positiveInt(item?.savedImageId) && Number.isSafeInteger(item.savedAt) && typeof item.imageUrl === "string" && typeof item.incognito === "boolean")
-    .map((item) => ({ savedImageId: item.savedImageId, imageUrl: item.imageUrl, pageUrl: optionalText(item.pageUrl), frameUrl: optionalText(item.frameUrl), savedAt: item.savedAt, incognito: item.incognito }));
+    .map((item) => ({ savedImageId: item.savedImageId, imageUrl: item.imageUrl, pageUrl: optionalText(item.pageUrl), frameUrl: optionalText(item.frameUrl), savedAt: item.savedAt, incognito: item.incognito, mcpPublic: item.mcpPublic === true }));
   return { items, next: cursorOf(response.next), vaultToken: vaultToken(response) };
+}
+
+/** Records the user's choice for one save history row. It permits publication; it does not publish. */
+export async function setMcpPublic(savedImageId, mcpPublic, token, { send }) {
+  const response = await callHost({ type: "image_mcp_public_set", savedImageId, mcpPublic, vaultToken: token }, { send, resultType: "image_mcp_public_set_result" });
+  if (response.savedImageId !== savedImageId || response.mcpPublic !== mcpPublic) throw new SearchError("invalid_response");
+  return mcpPublic;
 }
 
 /** How a recorded URL is shown: only http(s) URLs become openable links; the rest stay text. */

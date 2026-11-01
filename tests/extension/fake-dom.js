@@ -241,6 +241,9 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
             return { blobId, mimeType: "image/png", width: 4, height: 2, data: PNG_THUMBNAIL };
           });
           response = reply({ type, vaultToken, items, deferred: [] });
+        } else if (message.type === "image_mcp_public_set") {
+          if (host.publicationError) response = { ok: false, type, requestId: message.requestId, error: host.publicationError };
+          else response = reply({ type, vaultToken, savedImageId: message.savedImageId, mcpPublic: message.mcpPublic });
         } else if (["image_read", "image_thumbnail_put", "image_export"].includes(message.type)) {
           // Originals: `item.original` holds the bytes (see imageWithOriginal).
           const item = all.find((candidate) => candidate.blobId === message.blobId && candidate.sha256 === message.sha256);

@@ -1,0 +1,359 @@
+//! Vault schema 4: the one format this version reads and writes.
+//!
+//! Schema 4 exists only by creation. Nothing upgrades an older vault, because `visits` has no column
+//! that tells whether a row predates the incognito fix (#9), so an upgraded vault could carry such rows
+//! under a number that later code trusts. `check` compares the stored definition of every object
+//! byte for byte with the ones below, which covers types, NOT NULL, keys, UNIQUE, CHECK, DEFAULT and
+//! foreign keys at once, and any object added to or missing from the file. It is read-only.
+//!
+//! It proves the file's shape, not its history: a person editing the file by hand could forge it.
+
+use rusqlite::Connection;
+
+/// `PRAGMA application_id` of vaults created by Memocampus ("MCMP").
+pub const APP_ID: i64 = 0x4D43_4D50;
+pub const SCHEMA_VERSION: i64 = 4;
+
+/// Keep each `sql` as SQLite stores it: it keeps the text from `CREATE` on, without the final `;`.
+struct Object {
+    kind: &'static str,
+    name: &'static str,
+    table: &'static str,
+    /// None for the indexes SQLite creates itself for PRIMARY KEY and UNIQUE on non-rowid columns.
+    sql: Option<&'static str>,
+}
+
+const OBJECTS: [Object; 11] = [
+    Object {
+        kind: "table",
+        name: "visits",
+        table: "visits",
+        sql: Some(
+            "CREATE TABLE visits (event_id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL, visited_at TEXT NOT NULL)",
+        ),
+    },
+    Object {
+        kind: "index",
+        name: "sqlite_autoindex_visits_1",
+        table: "visits",
+        sql: None,
+    },
+    Object {
+        kind: "table",
+        name: "tab_snapshots",
+        table: "tab_snapshots",
+        sql: Some(
+            "CREATE TABLE tab_snapshots (event_id TEXT PRIMARY KEY, window_id INTEGER NOT NULL, tab_index INTEGER NOT NULL, url TEXT NOT NULL, title TEXT NOT NULL, pinned INTEGER NOT NULL, incognito INTEGER NOT NULL, recorded_at TEXT NOT NULL)",
+        ),
+    },
+    Object {
+        kind: "index",
+        name: "sqlite_autoindex_tab_snapshots_1",
+        table: "tab_snapshots",
+        sql: None,
+    },
+    Object {
+        kind: "table",
+        name: "image_blobs",
+        table: "image_blobs",
+        sql: Some(
+            "CREATE TABLE image_blobs (
+  id            INTEGER PRIMARY KEY,
+  sha256        TEXT    NOT NULL UNIQUE CHECK (length(sha256) = 64),
+  mime_type     TEXT    NOT NULL,
+  byte_length   INTEGER NOT NULL CHECK (byte_length > 0),
+  width         INTEGER NOT NULL CHECK (width > 0),
+  height        INTEGER NOT NULL CHECK (height > 0),
+  created_at    INTEGER NOT NULL,
+  last_saved_at INTEGER NOT NULL,
+  save_count    INTEGER NOT NULL DEFAULT 1 CHECK (save_count > 0),
+  data          BLOB    NOT NULL
+)",
+        ),
+    },
+    Object {
+        kind: "index",
+        name: "sqlite_autoindex_image_blobs_1",
+        table: "image_blobs",
+        sql: None,
+    },
+    Object {
+        kind: "index",
+        name: "image_blobs_recent",
+        table: "image_blobs",
+        sql: Some("CREATE INDEX image_blobs_recent ON image_blobs (last_saved_at DESC, id DESC)"),
+    },
+    // `incognito` and `mcp_public` belong to one save action and have no default, so a row whose
+    // origin or publication was not stated explicitly cannot exist.
+    Object {
+        kind: "table",
+        name: "saved_images",
+        table: "saved_images",
+        sql: Some(
+            "CREATE TABLE saved_images (
+  id         INTEGER PRIMARY KEY,
+  save_id    TEXT    NOT NULL UNIQUE,
+  blob_id    INTEGER NOT NULL REFERENCES image_blobs (id) ON DELETE RESTRICT,
+  image_url  TEXT    NOT NULL,
+  page_url   TEXT,
+  frame_url  TEXT,
+  saved_at   INTEGER NOT NULL,
+  incognito  INTEGER NOT NULL CHECK (incognito IN (0, 1)),
+  mcp_public INTEGER NOT NULL CHECK (mcp_public IN (0, 1))
+)",
+        ),
+    },
+    Object {
+        kind: "index",
+        name: "saved_images_by_blob",
+        table: "saved_images",
+        sql: Some(
+            "CREATE INDEX saved_images_by_blob ON saved_images (blob_id, saved_at DESC, id DESC)",
+        ),
+    },
+    Object {
+        kind: "table",
+        name: "image_thumbnails",
+        table: "image_thumbnails",
+        sql: Some(
+            "CREATE TABLE image_thumbnails (
+  blob_id    INTEGER PRIMARY KEY REFERENCES image_blobs (id) ON DELETE CASCADE,
+  mime_type  TEXT    NOT NULL,
+  width      INTEGER NOT NULL CHECK (width > 0),
+  height     INTEGER NOT NULL CHECK (height > 0),
+  generator  INTEGER NOT NULL CHECK (generator > 0),
+  data       BLOB    NOT NULL
+)",
+        ),
+    },
+    Object {
+        kind: "index",
+        name: "sqlite_autoindex_saved_images_1",
+        table: "saved_images",
+        sql: None,
+    },
+];
+
+/// Everything that makes an empty database a schema 4 vault, for one transaction. There is no form
+/// of this that can run against an existing vault: `CREATE TABLE` fails if the table exists.
+pub fn create_sql() -> String {
+    let mut sql =
+        format!("PRAGMA application_id = {APP_ID}; PRAGMA user_version = {SCHEMA_VERSION};");
+    for object in &OBJECTS {
+        if let Some(statement) = object.sql {
+            sql.push(' ');
+            sql.push_str(statement);
+            sql.push(';');
+        }
+    }
+    sql
+}
+
+/// The recorded form of a `data:` image source: `data:image/<subtype>` and never a payload. It names
+/// no location, so it is the one stored `image_url` that is not a URL to judge.
+pub fn is_data_image_marker(raw: &str) -> bool {
+    let Some(mime) = raw.strip_prefix("data:") else {
+        return false;
+    };
+    let (kind, subtype) = mime.split_once('/').unwrap_or(("", ""));
+    kind == "image"
+        && !subtype.is_empty()
+        && subtype
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'))
+}
+
+#[derive(Debug)]
+pub enum SchemaError {
+    /// Tagged by another application.
+    ForeignApplicationId(i64),
+    /// Untagged, or any `user_version` other than `SCHEMA_VERSION`.
+    UnsupportedVersion(i64),
+    /// The named object is missing or differs; `"unexpected_object"` for one that should not exist.
+    Shape(&'static str),
+    Sqlite(rusqlite::Error),
+}
+
+impl From<rusqlite::Error> for SchemaError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Sqlite(error)
+    }
+}
+
+/// Accepts exactly a vault that `create_sql` could have made. Never writes.
+pub fn check(db: &Connection) -> Result<(), SchemaError> {
+    let app_id: i64 = db.query_row("PRAGMA application_id", [], |row| row.get(0))?;
+    if app_id != APP_ID && app_id != 0 {
+        return Err(SchemaError::ForeignApplicationId(app_id));
+    }
+    let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if app_id != APP_ID || version != SCHEMA_VERSION {
+        return Err(SchemaError::UnsupportedVersion(version));
+    }
+    let mut statement = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master")?;
+    let stored = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for object in &OBJECTS {
+        let matches = stored.iter().any(|(kind, name, table, sql)| {
+            kind == object.kind
+                && name == object.name
+                && table == object.table
+                && sql.as_deref() == object.sql
+        });
+        if !matches {
+            return Err(SchemaError::Shape(object.name));
+        }
+    }
+    if stored.len() != OBJECTS.len() {
+        return Err(SchemaError::Shape("unexpected_object"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vault(extra: &str) -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(&format!("{} {extra}", create_sql()))
+            .unwrap();
+        db
+    }
+
+    fn column(db: &Connection, table: &str, name: &str) -> (String, bool, Option<String>, i64) {
+        db.query_row(
+            "SELECT type, \"notnull\", dflt_value, pk FROM pragma_table_info(?1) WHERE name = ?2",
+            [table, name],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_new_database_passes_and_has_the_stated_constraints() {
+        let db = vault("");
+        check(&db).unwrap();
+        assert_eq!(
+            column(&db, "saved_images", "mcp_public"),
+            ("INTEGER".to_owned(), true, None, 0)
+        );
+        assert_eq!(
+            column(&db, "saved_images", "incognito"),
+            ("INTEGER".to_owned(), true, None, 0)
+        );
+        assert_eq!(column(&db, "visits", "event_id").3, 1);
+        for (table, count) in [("saved_images", 2), ("image_blobs", 2)] {
+            let indexes: i64 = db
+                .query_row(
+                    "SELECT count(*) FROM pragma_index_list(?1)",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(indexes, count, "{table}");
+        }
+        let keys: i64 = db
+            .query_row(
+                "SELECT count(*) FROM pragma_foreign_key_list('saved_images')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(keys, 1);
+    }
+
+    #[test]
+    fn the_definitions_really_are_what_sqlite_stores() {
+        // Also after a rebuild of the file: backups and VACUUM keep the stored text.
+        let db = vault("");
+        db.execute_batch("VACUUM;").unwrap();
+        check(&db).unwrap();
+    }
+
+    #[test]
+    fn creating_over_an_existing_vault_fails_instead_of_filling_gaps() {
+        let db = vault("");
+        assert!(db.execute_batch(&create_sql()).is_err());
+    }
+
+    #[test]
+    fn differences_are_named_and_extras_are_refused() {
+        let replaced = |from: &str, to: &str| {
+            let db = Connection::open_in_memory().unwrap();
+            let sql = create_sql();
+            assert!(sql.contains(from), "{from}");
+            db.execute_batch(&sql.replace(from, to)).unwrap();
+            check(&db).unwrap_err()
+        };
+        assert!(matches!(
+            replaced(
+                "mcp_public INTEGER NOT NULL CHECK (mcp_public IN (0, 1))",
+                "mcp_public INTEGER NOT NULL DEFAULT 0 CHECK (mcp_public IN (0, 1))"
+            ),
+            SchemaError::Shape("saved_images")
+        ));
+        assert!(matches!(
+            replaced("(mcp_public IN (0, 1))", "(mcp_public IN (0, 1, 2))"),
+            SchemaError::Shape("saved_images")
+        ));
+        assert!(matches!(
+            replaced(
+                "url TEXT NOT NULL, title TEXT NOT NULL, visited_at",
+                "url TEXT, title TEXT NOT NULL, visited_at"
+            ),
+            SchemaError::Shape("visits")
+        ));
+        assert!(matches!(
+            replaced(
+                "sha256        TEXT    NOT NULL UNIQUE",
+                "sha256        TEXT    NOT NULL"
+            ),
+            SchemaError::Shape("image_blobs")
+        ));
+        for extra in [
+            "CREATE TABLE more (x);",
+            "CREATE VIEW v AS SELECT 1;",
+            "CREATE INDEX i ON visits (url);",
+            "CREATE TRIGGER t AFTER INSERT ON visits BEGIN SELECT 1; END;",
+        ] {
+            assert!(
+                matches!(
+                    check(&vault(extra)).unwrap_err(),
+                    SchemaError::Shape("unexpected_object")
+                ),
+                "{extra}"
+            );
+        }
+        assert!(matches!(
+            check(&vault("DROP TABLE image_thumbnails;")).unwrap_err(),
+            SchemaError::Shape("image_thumbnails")
+        ));
+    }
+
+    #[test]
+    fn versions_and_tags_are_checked_first() {
+        for (extra, expected) in [
+            ("PRAGMA user_version = 3;", 3),
+            ("PRAGMA user_version = 5;", 5),
+            ("PRAGMA application_id = 0;", 4),
+        ] {
+            assert!(
+                matches!(check(&vault(extra)).unwrap_err(), SchemaError::UnsupportedVersion(v) if v == expected),
+                "{extra}"
+            );
+        }
+        assert!(matches!(
+            check(&vault("PRAGMA application_id = 42;")).unwrap_err(),
+            SchemaError::ForeignApplicationId(42)
+        ));
+    }
+}

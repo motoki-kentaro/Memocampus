@@ -506,12 +506,12 @@ fn image_tables(path: &Path) -> i64 {
 }
 
 #[test]
-fn vaults_created_by_the_host_start_at_schema_3_with_image_tables() {
+fn vaults_created_by_the_host_start_at_schema_4_with_image_tables() {
     let tmp = TempDir::new();
     create_default_vault(&tmp);
-    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 3);
+    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 4);
     assert_eq!(image_tables(&tmp.default_vault()), 3);
-    // Existing operations keep working on a schema 3 vault.
+    // Existing operations work on it.
     assert_eq!(
         exchange(
             &tmp,
@@ -529,47 +529,6 @@ fn vaults_created_by_the_host_start_at_schema_3_with_image_tables() {
 }
 
 #[test]
-fn ordinary_operations_never_migrate_a_schema_1_vault() {
-    let tmp = TempDir::new();
-    let old = tmp.0.join("before-images.sqlite3");
-    initialize_policy(&tmp);
-    let db = Connection::open(&old).unwrap();
-    db.execute_batch("CREATE TABLE visits (event_id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL, visited_at TEXT NOT NULL); CREATE TABLE tab_snapshots (event_id TEXT PRIMARY KEY, window_id INTEGER NOT NULL, tab_index INTEGER NOT NULL, url TEXT NOT NULL, title TEXT NOT NULL, pinned INTEGER NOT NULL, incognito INTEGER NOT NULL, recorded_at TEXT NOT NULL); PRAGMA application_id = 1296256336; PRAGMA user_version = 1;").unwrap();
-    drop(db);
-    let opened = &exchange(
-        &tmp,
-        &[json!({ "type": "vault_open", "requestId": "o", "path": old })],
-    )[0];
-    assert_eq!(opened["ok"], true, "{opened}");
-    let responses = exchange(
-        &tmp,
-        &[
-            visit("v1", "https://a.test/", "2026-10-29T10:00:00.000Z"),
-            snapshot("s1", "https://a.test/", "2026-10-29T10:00:00.000Z"),
-            search("q"),
-            json!({ "type": "vault_status", "requestId": "s" }),
-        ],
-    );
-    assert_eq!(responses[0]["ok"], true);
-    assert_eq!(responses[1]["ok"], true);
-    assert_eq!(responses[2]["items"][0]["source"], "both");
-    assert_eq!(responses[3]["status"]["state"], "ready");
-    let dest = tmp.0.join("backups");
-    std::fs::create_dir(&dest).unwrap();
-    let backup = &exchange(
-        &tmp,
-        &[json!({ "type": "vault_backup", "requestId": "b", "directory": dest })],
-    )[0];
-    assert_eq!(backup["ok"], true, "{backup}");
-    assert_eq!(
-        pragma(&old, "user_version"),
-        1,
-        "no image operation ran, so no migration"
-    );
-    assert_eq!(image_tables(&old), 0);
-}
-
-#[test]
 fn backups_of_a_vault_with_images_are_complete_and_verified() {
     let tmp = TempDir::new();
     create_default_vault(&tmp);
@@ -581,7 +540,7 @@ fn backups_of_a_vault_with_images_are_complete_and_verified() {
             ["0".repeat(64)],
         )
         .unwrap();
-        db.execute_batch("INSERT INTO saved_images (save_id, blob_id, image_url, page_url, saved_at, incognito) VALUES ('a', 1, 'https://img.test/1.png', 'https://page.test/', 1, 0), ('b', 1, 'data:image/png', NULL, 2, 1); INSERT INTO image_thumbnails (blob_id, mime_type, width, height, generator, data) VALUES (1, 'image/webp', 1, 1, 1, x'00');").unwrap();
+        db.execute_batch("INSERT INTO saved_images (save_id, blob_id, image_url, page_url, saved_at, incognito, mcp_public) VALUES ('a', 1, 'https://img.test/1.png', 'https://page.test/', 1, 0, 1), ('b', 1, 'data:image/png', NULL, 2, 1, 0); INSERT INTO image_thumbnails (blob_id, mime_type, width, height, generator, data) VALUES (1, 'image/webp', 1, 1, 1, x'00');").unwrap();
     }
     let dest = tmp.0.join("backups");
     std::fs::create_dir(&dest).unwrap();
@@ -595,14 +554,14 @@ fn backups_of_a_vault_with_images_are_complete_and_verified() {
         let db =
             Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         let mut statement = db
-            .prepare("SELECT 'b|' || sha256 || '|' || hex(data) || '|' || save_count FROM image_blobs UNION ALL SELECT 's|' || save_id || '|' || image_url || '|' || saved_at || '|' || incognito FROM saved_images UNION ALL SELECT 't|' || blob_id || '|' || hex(data) FROM image_thumbnails ORDER BY 1")
+            .prepare("SELECT 'b|' || sha256 || '|' || hex(data) || '|' || save_count FROM image_blobs UNION ALL SELECT 's|' || save_id || '|' || image_url || '|' || saved_at || '|' || incognito || '|' || mcp_public FROM saved_images UNION ALL SELECT 't|' || blob_id || '|' || hex(data) FROM image_thumbnails ORDER BY 1")
             .unwrap();
         let rows = statement.query_map([], |row| row.get(0)).unwrap();
         rows.collect::<Result<_, _>>().unwrap()
     };
     assert_eq!(dump(&copy), dump(&tmp.default_vault()));
     assert_eq!(dump(&copy).len(), 4);
-    assert_eq!(pragma(&copy, "user_version"), 3);
+    assert_eq!(pragma(&copy, "user_version"), 4);
 }
 
 const SAVE_ID: &str = "4f1d2c3b-5a6e-4d7f-8091-a2b3c4d5e6f7";
@@ -1111,68 +1070,320 @@ fn an_incognito_image_is_saved_and_a_visit_from_incognito_still_is_not() {
     assert_eq!(row_dump(&vault), Vec::<String>::new());
 }
 
-/// A vault as the previous version made it: one image, no `incognito` column, schema 2.
-fn make_schema_2_vault(tmp: &TempDir) -> PathBuf {
+// --- Only schema 4 is ever used (Issue #12, Slice 2) ---------------------------------------------
+
+/// The last format before schema 4, with rows that must never surface.
+const SCHEMA_3: &str = "
+CREATE TABLE visits (event_id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL, visited_at TEXT NOT NULL);
+CREATE TABLE tab_snapshots (event_id TEXT PRIMARY KEY, window_id INTEGER NOT NULL, tab_index INTEGER NOT NULL, url TEXT NOT NULL, title TEXT NOT NULL, pinned INTEGER NOT NULL, incognito INTEGER NOT NULL, recorded_at TEXT NOT NULL);
+CREATE TABLE image_blobs (id INTEGER PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE CHECK (length(sha256) = 64), mime_type TEXT NOT NULL, byte_length INTEGER NOT NULL CHECK (byte_length > 0), width INTEGER NOT NULL CHECK (width > 0), height INTEGER NOT NULL CHECK (height > 0), created_at INTEGER NOT NULL, last_saved_at INTEGER NOT NULL, save_count INTEGER NOT NULL DEFAULT 1 CHECK (save_count > 0), data BLOB NOT NULL);
+CREATE TABLE saved_images (id INTEGER PRIMARY KEY, save_id TEXT NOT NULL UNIQUE, blob_id INTEGER NOT NULL REFERENCES image_blobs (id) ON DELETE RESTRICT, image_url TEXT NOT NULL, page_url TEXT, frame_url TEXT, saved_at INTEGER NOT NULL, incognito INTEGER NOT NULL CHECK (incognito IN (0, 1)));
+CREATE TABLE image_thumbnails (blob_id INTEGER PRIMARY KEY REFERENCES image_blobs (id) ON DELETE CASCADE, mime_type TEXT NOT NULL, width INTEGER NOT NULL CHECK (width > 0), height INTEGER NOT NULL CHECK (height > 0), generator INTEGER NOT NULL CHECK (generator > 0), data BLOB NOT NULL);
+INSERT INTO visits VALUES ('old', 'https://old.test/CANARY', 'CANARY title', '2026-10-01T00:00:00.000Z');
+INSERT INTO tab_snapshots VALUES ('old-s', 1, 0, 'https://old.test/CANARY-s', 'CANARY', 0, 0, '2026-10-01T00:00:00.000Z');
+INSERT INTO image_blobs (sha256, mime_type, byte_length, width, height, created_at, last_saved_at, data) VALUES (printf('%064d', 1), 'image/png', 1, 1, 1, 1, 1, x'00');
+INSERT INTO saved_images (save_id, blob_id, image_url, saved_at, incognito) VALUES ('old', 1, 'https://img.test/CANARY.png', 1, 0);
+";
+
+/// Replaces the active vault's file. The config keeps naming it, as after an upgrade of the host.
+fn make_active_vault_from(tmp: &TempDir, sql: &str) -> PathBuf {
+    initialize_policy(tmp);
     create_default_vault(tmp);
     let vault = tmp.default_vault();
+    std::fs::remove_file(&vault).unwrap();
     Connection::open(&vault)
         .unwrap()
-        .execute_batch(
-            "DROP TABLE saved_images;
-             CREATE TABLE saved_images (id INTEGER PRIMARY KEY, save_id TEXT NOT NULL UNIQUE, blob_id INTEGER NOT NULL, image_url TEXT NOT NULL, page_url TEXT, frame_url TEXT, saved_at INTEGER NOT NULL);
-             INSERT INTO image_blobs (sha256, mime_type, byte_length, width, height, created_at, last_saved_at, data) VALUES (printf('%064d', 1), 'image/png', 1, 1, 1, 1, 1, x'00');
-             INSERT INTO saved_images (save_id, blob_id, image_url, saved_at) VALUES ('old', 1, 'https://img.test/old.png', 1);
-             PRAGMA user_version = 2;",
-        )
+        .execute_batch(sql)
         .unwrap();
     vault
 }
 
+const VISIT_AT: &str = "2026-10-30T10:00:00.000Z";
+
 #[test]
-fn a_schema_2_vault_stops_images_with_an_explicit_error_and_is_left_unchanged() {
-    let tmp = TempDir::new();
-    let vault = make_schema_2_vault(&tmp);
-    let state = |path: &Path| -> (i64, i64, i64) {
-        let db =
-            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        db.query_row(
-            "SELECT (SELECT user_version FROM pragma_user_version), (SELECT count(*) FROM saved_images), (SELECT count(*) FROM pragma_table_info('saved_images') WHERE name = 'incognito')",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap()
+fn every_vault_other_than_schema_4_is_refused_for_every_operation_and_left_untouched() {
+    use memocampus_native_host::schema::create_sql;
+    let v3 = |app_id: i64, version: i64| {
+        format!("{SCHEMA_3} PRAGMA application_id = {app_id}; PRAGMA user_version = {version};")
     };
-    assert_eq!(state(&vault), (2, 1, 0));
+    let cases = [
+        ("schema 0, untagged", v3(0, 0)),
+        ("schema 1", v3(1296256336, 1)),
+        ("schema 2", v3(1296256336, 2)),
+        ("schema 3", v3(1296256336, 3)),
+        ("schema 3 relabelled 4", v3(1296256336, 4)),
+        ("schema 3 untagged, relabelled 4", v3(0, 4)),
+        ("future version", format!("{} PRAGMA user_version = 5;", create_sql())),
+        ("untagged schema 4", format!("{} PRAGMA application_id = 0;", create_sql())),
+        (
+            "flag with a default",
+            create_sql().replace(
+                "mcp_public INTEGER NOT NULL CHECK",
+                "mcp_public INTEGER NOT NULL DEFAULT 0 CHECK",
+            ),
+        ),
+        ("flag without CHECK", create_sql().replace(
+            "mcp_public INTEGER NOT NULL CHECK (mcp_public IN (0, 1))",
+            "mcp_public INTEGER NOT NULL",
+        )),
+        ("extra trigger", format!(
+            "{} CREATE TRIGGER t AFTER INSERT ON visits BEGIN SELECT 1; END;",
+            create_sql()
+        )),
+        ("missing index", create_sql().replace(
+            "CREATE INDEX saved_images_by_blob ON saved_images (blob_id, saved_at DESC, id DESC);",
+            "",
+        )),
+    ];
+    for (name, sql) in cases {
+        let tmp = TempDir::new();
+        let vault = make_active_vault_from(&tmp, &sql);
+        let before = std::fs::read(&vault).unwrap();
+        let config = std::fs::read(tmp.app_dir().join("config.json")).unwrap();
+        let dest = tmp.0.join("backups");
+        std::fs::create_dir(&dest).unwrap();
+        let bytes = png_of_size(40, 30, 5000);
+        let mut messages = vec![
+            visit("v", "https://a.test/", VISIT_AT),
+            snapshot("s", "https://a.test/", VISIT_AT),
+            search("q"),
+            json!({ "type": "image_list", "requestId": "l" }),
+            json!({ "type": "image_sources", "requestId": "c", "blobId": 1 }),
+            json!({ "type": "image_thumbnails", "requestId": "t", "blobIds": [1] }),
+            json!({ "type": "image_mcp_public_set", "requestId": "m", "savedImageId": 1, "mcpPublic": true, "vaultToken": "0".repeat(64) }),
+            json!({ "type": "vault_backup", "requestId": "b", "directory": dest }),
+            json!({ "type": "vault_open", "requestId": "o", "path": vault }),
+        ];
+        messages.extend(upload_messages(&bytes, false).into_iter().take(1));
+        let replies = exchange(&tmp, &messages);
+        for reply in &replies {
+            assert_eq!(reply["ok"], false, "{name}: {reply}");
+            assert_eq!(reply["error"], "vault_schema_mismatch", "{name}: {reply}");
+            assert!(!reply.to_string().contains("CANARY"), "{name}: {reply}");
+        }
+        let status = &exchange(&tmp, &[json!({ "type": "vault_status", "requestId": "s" })])[0];
+        assert_eq!(status["status"]["state"], "vault_schema_mismatch", "{name}");
+        assert_eq!(status["status"]["counts"], Value::Null, "{name}");
 
-    let bytes = png_of_size(40, 30, 5000);
-    for reply in [
-        exchange(&tmp, &[json!({ "type": "image_list", "requestId": "l" })]).remove(0),
-        exchange(
-            &tmp,
-            &[json!({ "type": "image_sources", "requestId": "s", "blobId": 1 })],
-        )
-        .remove(0),
-        exchange(&tmp, &upload_messages(&bytes, false)[..1]).remove(0),
-    ] {
-        assert_eq!(reply["ok"], false, "{reply}");
-        assert_eq!(reply["error"], "image_schema_mismatch", "{reply}");
+        assert_eq!(
+            std::fs::read(&vault).unwrap(),
+            before,
+            "{name}: file changed"
+        );
+        assert_eq!(
+            std::fs::read(tmp.app_dir().join("config.json")).unwrap(),
+            config,
+            "{name}"
+        );
+        assert_eq!(
+            std::fs::read_dir(&dest).unwrap().count(),
+            0,
+            "{name}: backup written"
+        );
+        let mut neighbours: Vec<_> = std::fs::read_dir(tmp.app_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .filter(|file| file.contains("sqlite3"))
+            .collect();
+        neighbours.sort();
+        assert_eq!(
+            neighbours,
+            ["memocampus.sqlite3"],
+            "{name}: nothing regenerated"
+        );
     }
-    assert_eq!(state(&vault), (2, 1, 0));
+}
 
-    // URL history and a backup of the old vault keep working until the PO replaces it.
-    let visited = exchange(
+#[test]
+fn from_a_refused_vault_the_user_can_still_create_a_new_one_which_inherits_nothing() {
+    let tmp = TempDir::new();
+    let old = make_active_vault_from(
         &tmp,
-        &[visit("v", "https://a.test/", "2026-10-30T10:00:00.000Z")],
+        &format!("{SCHEMA_3} PRAGMA application_id = 1296256336; PRAGMA user_version = 3;"),
     );
-    assert_eq!(visited[0], json!({ "ok": true, "eventId": "v" }));
-    let backups = tmp.0.join("backups");
-    std::fs::create_dir(&backups).unwrap();
-    let backup = exchange(
+    let before = std::fs::read(&old).unwrap();
+    let new = tmp.0.join("new.sqlite3");
+    let replies = exchange(
         &tmp,
-        &[json!({ "type": "vault_backup", "requestId": "b", "directory": backups })],
-    )
-    .remove(0);
-    assert_eq!(backup["ok"], true, "{backup}");
+        &[
+            json!({ "type": "vault_create", "requestId": "c", "path": new }),
+            visit("v", "https://a.test/", VISIT_AT),
+            search("s"),
+        ],
+    );
+    assert_eq!(replies[0]["ok"], true, "{}", replies[0]);
+    assert_eq!(replies[0]["status"]["state"], "ready");
+    assert_eq!(replies[1]["ok"], true, "{}", replies[1]);
+    assert_eq!(replies[2]["items"].as_array().unwrap().len(), 1);
+    assert!(!replies[2].to_string().contains("CANARY"));
+    assert_eq!(pragma(&new, "user_version"), 4);
+    assert_eq!(std::fs::read(&old).unwrap(), before);
+    // And the old file stays refused if it is opened again.
+    let reopened = &exchange(
+        &tmp,
+        &[json!({ "type": "vault_open", "requestId": "o", "path": old })],
+    )[0];
+    assert_eq!(reopened["error"], "vault_schema_mismatch");
+}
+
+#[test]
+fn a_missing_or_damaged_active_vault_is_refused_and_not_regenerated() {
+    let tmp = TempDir::new();
+    let vault = make_active_vault_from(&tmp, "SELECT 1;");
+    std::fs::remove_file(&vault).unwrap();
+    let reply = &exchange(&tmp, &[search("s")])[0];
+    assert_eq!(reply["error"], "vault_missing");
+    assert!(!vault.exists());
+    std::fs::write(&vault, "not a database at all ".repeat(100)).unwrap();
+    let before = std::fs::read(&vault).unwrap();
+    let reply = &exchange(&tmp, &[search("s")])[0];
+    assert_eq!(reply["error"], "vault_invalid");
+    assert_eq!(std::fs::read(&vault).unwrap(), before);
+}
+
+#[test]
+fn images_are_saved_private_and_only_an_explicit_request_changes_one_row() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let vault = tmp.default_vault();
+    let bytes = png_of_size(40, 30, 5000);
+    let upload = |save_id: &str, incognito: bool, known: bool| -> Value {
+        let mut messages = upload_messages(&bytes, true);
+        if known {
+            // The host already has these bytes: begin, then commit, without chunks.
+            let commit = messages.pop().unwrap();
+            messages.truncate(1);
+            messages.push(commit);
+        }
+        messages[0]["saveId"] = save_id.into();
+        messages[0]["incognito"] = incognito.into();
+        for message in &mut messages[1..] {
+            message["saveId"] = save_id.into();
+        }
+        let mut replies = exchange(&tmp, &messages);
+        let last = replies.pop().unwrap();
+        assert_eq!(last["ok"], true, "{last}");
+        last
+    };
+    let first = upload("11111111-1111-4111-8111-111111111111", false, false);
+    let second = upload("22222222-2222-4222-8222-222222222222", true, true);
+    let (a, b) = (
+        first["savedImageId"].as_i64().unwrap(),
+        second["savedImageId"].as_i64().unwrap(),
+    );
+    assert_eq!(
+        first["blobId"], second["blobId"],
+        "one blob, two history rows"
+    );
+    let flags = || -> Vec<(i64, i64, i64)> {
+        let db = Connection::open_with_flags(&vault, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+        let mut statement = db
+            .prepare("SELECT id, incognito, mcp_public FROM saved_images ORDER BY id")
+            .unwrap();
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap();
+        rows.collect::<Result<_, _>>().unwrap()
+    };
+    assert_eq!(flags(), [(a, 0, 0), (b, 1, 0)]);
+
+    let sources = &exchange(
+        &tmp,
+        &[json!({ "type": "image_sources", "requestId": "s", "blobId": first["blobId"] })],
+    )[0];
+    assert_eq!(sources["items"][0]["mcpPublic"], false);
+    let token = sources["vaultToken"].as_str().unwrap().to_owned();
+    let set = |extra: Value| -> Value {
+        let mut message =
+            json!({ "type": "image_mcp_public_set", "requestId": "m", "vaultToken": token });
+        for (key, value) in extra.as_object().unwrap() {
+            message[key] = value.clone();
+        }
+        exchange(&tmp, &[message]).remove(0)
+    };
+
+    for (extra, code) in [
+        (json!({ "mcpPublic": true }), "invalid_saved_image_id"),
+        (
+            json!({ "savedImageId": 0, "mcpPublic": true }),
+            "invalid_saved_image_id",
+        ),
+        (
+            json!({ "savedImageId": -1, "mcpPublic": true }),
+            "invalid_saved_image_id",
+        ),
+        (
+            json!({ "savedImageId": "1", "mcpPublic": true }),
+            "invalid_saved_image_id",
+        ),
+        (
+            json!({ "savedImageId": 1.5, "mcpPublic": true }),
+            "invalid_saved_image_id",
+        ),
+        (json!({ "savedImageId": a }), "invalid_mcp_public"),
+        (
+            json!({ "savedImageId": a, "mcpPublic": 1 }),
+            "invalid_mcp_public",
+        ),
+        (
+            json!({ "savedImageId": a, "mcpPublic": "true" }),
+            "invalid_mcp_public",
+        ),
+        (
+            json!({ "savedImageId": a, "mcpPublic": null }),
+            "invalid_mcp_public",
+        ),
+        (
+            json!({ "savedImageId": 999, "mcpPublic": true }),
+            "saved_image_not_found",
+        ),
+        (
+            json!({ "savedImageId": a, "mcpPublic": true, "vaultToken": "x" }),
+            "invalid_vault_token",
+        ),
+        (
+            json!({ "savedImageId": a, "mcpPublic": true, "vaultToken": "0".repeat(64) }),
+            "vault_switched",
+        ),
+    ] {
+        let reply = set(extra.clone());
+        assert_eq!(reply["ok"], false, "{extra}");
+        assert_eq!(reply["error"], code, "{extra}");
+    }
+    assert_eq!(
+        flags(),
+        [(a, 0, 0), (b, 1, 0)],
+        "no refused request changed anything"
+    );
+
+    let refused = set(json!({ "savedImageId": b, "mcpPublic": true }));
+    assert_eq!(
+        refused,
+        json!({ "ok": false, "type": "image_mcp_public_set_result", "requestId": "m", "error": "incognito_not_publishable" }),
+        "an incognito row stays private, with a fixed code"
+    );
+    assert_eq!(flags(), [(a, 0, 0), (b, 1, 0)]);
+    assert_eq!(
+        set(json!({ "savedImageId": b, "mcpPublic": false }))["ok"],
+        true
+    );
+
+    let done = set(json!({ "savedImageId": a, "mcpPublic": true }));
+    assert_eq!(
+        done,
+        json!({ "ok": true, "type": "image_mcp_public_set_result", "requestId": "m", "vaultToken": token, "savedImageId": a, "mcpPublic": true }),
+        "no URL or image data in the reply"
+    );
+    assert_eq!(flags(), [(a, 0, 1), (b, 1, 0)]);
+    assert_eq!(
+        set(json!({ "savedImageId": a, "mcpPublic": false }))["ok"],
+        true
+    );
+    assert_eq!(flags(), [(a, 0, 0), (b, 1, 0)]);
+    let no_id = exchange(&tmp, &[json!({ "type": "image_mcp_public_set", "savedImageId": a, "mcpPublic": true, "vaultToken": token })]).remove(0);
+    assert_eq!(no_id["error"], "invalid_request_id");
+    assert_eq!(flags(), [(a, 0, 0), (b, 1, 0)]);
 }
 
 // --- Privacy policy at the recording entrance (Issue #11) ----------------------------------------

@@ -44,3 +44,11 @@ jobs:
       - run: cargo test --locked
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo build --release --locked
+      - run: cargo fmt --all -- --check
+        working-directory: visible-store
+      - run: cargo test --locked
+        working-directory: visible-store
+      - run: cargo clippy --locked --all-targets -- -D warnings
+        working-directory: visible-store
+      - run: cargo build --release --locked
+        working-directory: visible-store
