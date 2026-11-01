@@ -3,7 +3,7 @@
 
 use crate::snapshot::RawVisit;
 use crate::{time, VisibleError, VisibleVisit, VisitPage};
-use memocampus_native_host::policy::{Decision, Policy};
+use memocampus_native_host::policy::{CompiledPolicy, Decision};
 use rusqlite::limits::Limit;
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
@@ -69,7 +69,7 @@ impl VisibleSet {
     /// A set that fails to build is dropped whole; the caller only ever sees a complete one.
     pub(crate) fn build(
         rows: Vec<RawVisit>,
-        policy: &Policy,
+        policy: &CompiledPolicy,
         key: &IdKey,
     ) -> Result<Self, VisibleError> {
         let db = Connection::open_in_memory().map_err(failed)?;

@@ -3,7 +3,7 @@
 use super::*;
 use crate::snapshot::{RawImageSave, RawVisit};
 use crate::visible_set::like_pattern;
-use memocampus_native_host::policy::Policy;
+use memocampus_native_host::policy::{CompiledPolicy, Policy};
 use memocampus_native_host::schema::{self, APP_ID, SCHEMA_VERSION as SUPPORTED_SCHEMA};
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
@@ -304,7 +304,7 @@ fn the_gate_agrees_with_the_shared_policy_vectors() {
             title: "t".into(),
             visited_at: day(1),
         };
-        let set = VisibleSet::build(vec![row], &policy, &key).unwrap();
+        let set = VisibleSet::build(vec![row], &compiled(&policy), &key).unwrap();
         let total = set.query("%", (i64::MIN, i64::MAX), 10).unwrap().total;
         assert_eq!(
             total == 1,
@@ -1300,7 +1300,7 @@ fn canary_set() -> VisibleSet {
         .save_but_no_mcp
         .rules
         .push("b-layer.test".into());
-    VisibleSet::build(rows.collect(), &policy, &[1u8; 32]).unwrap()
+    VisibleSet::build(rows.collect(), &compiled(&policy), &[1u8; 32]).unwrap()
 }
 
 #[test]
@@ -1436,6 +1436,10 @@ fn only_read_only_access_appears_in_the_snapshot() {
             .collect();
         assert!(!code.contains(banned), "{banned}");
     }
+}
+
+fn compiled(policy: &Policy) -> CompiledPolicy {
+    CompiledPolicy::compile(policy).unwrap()
 }
 
 // --- Images: fixtures ---------------------------------------------------------------------------
@@ -1616,6 +1620,56 @@ fn every_source_url_is_judged_and_any_match_makes_the_row_private() {
             "frame {bad}"
         );
     }
+}
+
+#[test]
+fn credentials_behind_extra_question_marks_and_invalid_punycode_stay_private() {
+    for bad in [
+        "https://public.test/??token=CANARY",
+        "https://public.test/???token=CANARY",
+        "https://public.test/?a?token=CANARY",
+        "https://public.test/#??token=CANARY",
+        "https://xn--a.public.test/CANARY",
+    ] {
+        for row in [
+            Save {
+                image: bad,
+                ..PUBLIC_SAVE
+            },
+            Save {
+                page: Some(bad),
+                ..PUBLIC_SAVE
+            },
+            Save {
+                frame: Some(bad),
+                ..PUBLIC_SAVE
+            },
+        ] {
+            assert!(!is_listed(row), "{bad}");
+        }
+    }
+    assert!(is_listed(Save {
+        image: "https://public.test/?q=a?token",
+        ..PUBLIC_SAVE
+    }));
+}
+
+#[test]
+fn a_policy_with_a_broken_rule_gives_no_decision_rather_than_skipping_the_rule() {
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    save(&db, blob(&db, 1), &PUBLIC_SAVE);
+    visit(&db, "v", "https://public.test/", "t", &day(1));
+    let path = f.app.join("policy.json");
+    let mut policy: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    policy["layers"]["saveButNoMcp"]["enabled"] = false.into();
+    policy["layers"]["saveButNoMcp"]["rules"] = serde_json::json!(["https://CANARY.test/*"]);
+    fs::write(&path, serde_json::to_vec(&policy).unwrap()).unwrap();
+    assert_failed(
+        f.store.search_images(&ALL_IMAGES),
+        VisibleError::PolicyUnavailable,
+    );
+    assert_failed(f.store.search_visits(&ALL), VisibleError::PolicyUnavailable);
 }
 
 #[test]
@@ -2481,7 +2535,7 @@ fn test_policy() -> Policy {
 
 #[test]
 fn the_decision_is_made_for_each_row_and_refuses_unexpected_flag_values() {
-    let policy = test_policy();
+    let policy = compiled(&test_policy());
     let public: Vec<String> = raw_saves()
         .into_iter()
         .filter(|save| visible_images::save_is_public(save, &policy))
@@ -2492,7 +2546,7 @@ fn the_decision_is_made_for_each_row_and_refuses_unexpected_flag_values() {
 
 #[test]
 fn the_image_memory_database_holds_public_values_only_and_cannot_be_written_or_attached() {
-    let set = VisibleImages::build(raw_saves(), &test_policy(), &[1u8; 32]).unwrap();
+    let set = VisibleImages::build(raw_saves(), &compiled(&test_policy()), &[1u8; 32]).unwrap();
     let mut dump = Vec::new();
     for (table, columns) in [
         (
@@ -2696,7 +2750,7 @@ fn perf_report() {
         .iter()
         .map(|r| r.event_id.len() + r.url.len() + r.title.len() + r.visited_at.len())
         .sum();
-    let set = VisibleSet::build(raw, &policy, &[0u8; 32]).unwrap();
+    let set = VisibleSet::build(raw, &compiled(&policy), &[0u8; 32]).unwrap();
     let set_bytes: i64 = set
         .db
         .query_row(
@@ -2821,6 +2875,9 @@ fn perf_images() {
     let (worst, commits, failures) = worker.join().unwrap();
 
     let raw = snapshot::read_image_saves(&f.vault, &mut |_| {}).unwrap();
+    let start = Instant::now();
+    let policy = compiled(&policy);
+    let compile = start.elapsed();
     let set = VisibleImages::build(raw, &policy, &[0u8; 32]).unwrap();
     let set_bytes: i64 = set
         .db
@@ -2831,7 +2888,7 @@ fn perf_images() {
         )
         .unwrap();
     println!(
-        "PERF-IMG rows={rows} public={percent}% rules={rules} total={total:?} lock_held={lock_held:?} judge_build={judge_build:?} query={query:?} hits={hits} set={:.1}MiB host_commits={commits} host_failures={failures} worst_commit={worst:?} reads={reads} read_busy={busy}",
+        "PERF-IMG rows={rows} public={percent}% rules={rules} compile={compile:?} total={total:?} lock_held={lock_held:?} judge_build={judge_build:?} query={query:?} hits={hits} set={:.1}MiB host_commits={commits} host_failures={failures} worst_commit={worst:?} reads={reads} read_busy={busy}",
         set_bytes as f64 / 1_048_576.0,
     );
 }

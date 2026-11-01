@@ -5,7 +5,7 @@
 use crate::snapshot::RawImageSave;
 use crate::visible_set::{failed, public_id, IdKey};
 use crate::{time, ImagePage, ImageSourcePage, VisibleError, VisibleImage, VisibleImageSource};
-use memocampus_native_host::policy::{Decision, Policy};
+use memocampus_native_host::policy::{CompiledPolicy, Decision};
 use memocampus_native_host::schema::is_data_image_marker;
 use rusqlite::limits::Limit;
 use rusqlite::{params, Connection, Row};
@@ -55,7 +55,7 @@ pub(crate) struct VisibleImages {
 /// `Decision::None` is the only public outcome, and an unusable URL is `NeverSave`. Only an absent
 /// source and the recorded marker of a `data:` image have nothing to judge, and at least one source
 /// must have been judged.
-fn sources_are_public(save: &RawImageSave, policy: &Policy) -> bool {
+fn sources_are_public(save: &RawImageSave, policy: &CompiledPolicy) -> bool {
     let image_url = (!is_data_image_marker(&save.image_url)).then_some(save.image_url.as_str());
     let judged: Vec<&str> = [
         image_url,
@@ -92,7 +92,7 @@ fn metadata_is_usable(save: &RawImageSave) -> bool {
 }
 
 /// One `saved_images` row, judged alone. An incognito row is never public, whatever its flag says.
-pub(crate) fn save_is_public(save: &RawImageSave, policy: &Policy) -> bool {
+pub(crate) fn save_is_public(save: &RawImageSave, policy: &CompiledPolicy) -> bool {
     save.mcp_public == 1
         && save.incognito == 0
         && metadata_is_usable(save)
@@ -131,7 +131,7 @@ impl VisibleImages {
     /// A set that fails to build is dropped whole; the caller only ever sees a complete one.
     pub(crate) fn build(
         rows: Vec<RawImageSave>,
-        policy: &Policy,
+        policy: &CompiledPolicy,
         key: &IdKey,
     ) -> Result<Self, VisibleError> {
         let db = Connection::open_in_memory().map_err(failed)?;

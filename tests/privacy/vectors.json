@@ -1,6 +1,116 @@
 {
   "decisions": [
     {
+      "name": "question mark before credential",
+      "url": "https://example.com/??token=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "many question marks before credential",
+      "url": "https://example.com/????token=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "name inside a query",
+      "url": "https://example.com/?a?token=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "encoded question mark before credential",
+      "url": "https://example.com/?%3Ftoken=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "encoded credential after question mark",
+      "url": "https://example.com/??%74oken=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "case after question mark",
+      "url": "https://example.com/??ToKeN=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "question mark before later credential",
+      "url": "https://example.com/?a=1&?access_token=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "fragment question mark before credential",
+      "url": "https://example.com/#??token=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "fragment nested question marks",
+      "url": "https://example.com/#a?b?token=x",
+      "expected": "neverSave"
+    },
+    {
+      "name": "question mark before state",
+      "url": "https://example.com/?code=x&?state=y",
+      "expected": "neverSave"
+    },
+    {
+      "name": "credential word in a value after question mark",
+      "url": "https://example.com/?q=a?token",
+      "expected": "none"
+    },
+    {
+      "name": "trailing question mark in a name",
+      "url": "https://example.com/?token?=x",
+      "expected": "none"
+    },
+    {
+      "name": "empty double question mark",
+      "url": "https://example.com/??",
+      "expected": "none"
+    },
+    {
+      "name": "other name after question mark",
+      "url": "https://example.com/??tokenizer=x",
+      "expected": "none"
+    },
+    {
+      "name": "question marks with credentials disabled are plain",
+      "url": "https://example.com/?q=1??",
+      "expected": "none"
+    },
+    {
+      "name": "escaped host",
+      "url": "https:///a%20b",
+      "expected": "neverSave"
+    },
+    {
+      "name": "invalid punycode label",
+      "url": "https://xn--a.example.com/",
+      "expected": "neverSave"
+    },
+    {
+      "name": "empty punycode label",
+      "url": "https://xn--.example.com/",
+      "expected": "neverSave"
+    },
+    {
+      "name": "punycode of ASCII",
+      "url": "https://xn--abc-.example.com/",
+      "expected": "neverSave"
+    },
+    {
+      "name": "punycode in a blob",
+      "url": "blob:https://xn--a.example.com/id",
+      "expected": "neverSave"
+    },
+    {
+      "name": "valid punycode",
+      "url": "https://xn--r8jz45g.xn--zckzah/",
+      "expected": "none"
+    },
+    {
+      "name": "valid punycode with sharp s",
+      "url": "https://xn--fa-hia.de/",
+      "expected": "none"
+    },
+    {
       "name": "ordinary",
       "url": "https://example.com/article",
       "expected": "none"
@@ -855,6 +965,10 @@
   ],
   "normalization": [
     {
+      "url": "https://xn--a.example.com/",
+      "expected": null
+    },
+    {
       "url": "HTTPS://ExAmPlE.COM.:443/a",
       "expected": {
         "host": "example.com",
@@ -979,6 +1093,10 @@
     }
   ],
   "rules": [
+    {
+      "rule": "xn--a.example.com",
+      "valid": false
+    },
     {
       "rule": "example.com",
       "valid": true

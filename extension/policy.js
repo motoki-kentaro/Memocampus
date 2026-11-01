@@ -5,6 +5,8 @@ const keys = (value, expected) => value !== null && typeof value === "object" &&
   && Object.keys(value).sort().join(",") === [...expected].sort().join(",");
 const categories = ["authentication", "credentials", "government", "webmail", "aiChats"];
 const asciiLower = value => value.replace(/[A-Z]/g, c => c.toLowerCase());
+// What follows the last "?" of a parameter name counts: `?token`, `??token` and `a?token` are `token`.
+const parameterName = key => asciiLower(key.slice(key.lastIndexOf("?") + 1));
 
 // Only the parser's own rejection becomes invalid_url; any other exception stays visible.
 function rejectingAs(ErrorType, parse) {
@@ -30,13 +32,57 @@ function pathOf(path) {
   return "/" + parts.join("/");
 }
 
+// RFC 3492 decoding; null when the text is not valid Punycode.
+function punycodeDecode(text) {
+  const end = text.lastIndexOf("-");
+  const output = end > 0 ? [...text.slice(0, end)].map(c => c.codePointAt(0)) : [];
+  let i = 0, n = 128, bias = 72;
+  for (let at = end > 0 ? end + 1 : 0; at < text.length;) {
+    const start = i;
+    for (let w = 1, k = 36; ; k += 36) {
+      if (at >= text.length) return null;
+      const code = text.charCodeAt(at++);
+      const digit = code >= 97 && code <= 122 ? code - 97 : code >= 48 && code <= 57 ? code - 22 : 36;
+      if (digit >= 36) return null;
+      i += digit * w;
+      const t = k <= bias ? 1 : k >= bias + 26 ? 26 : k - bias;
+      if (digit < t) break;
+      w *= 36 - t;
+      if (!Number.isSafeInteger(i) || !Number.isSafeInteger(w)) return null;
+    }
+    const size = output.length + 1;
+    let delta = start === 0 ? Math.floor((i - start) / 700) : (i - start) >> 1;
+    delta += Math.floor(delta / size);
+    let k = 0;
+    for (; delta > 455; k += 36) delta = Math.floor(delta / 35);
+    bias = k + Math.floor(36 * delta / (delta + 38));
+    n += Math.floor(i / size);
+    i %= size;
+    if (n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff)) return null;
+    output.splice(i++, 0, n);
+  }
+  return String.fromCodePoint(...output);
+}
+
+// A URL parser may pass an ASCII `xn--` label unchecked, as Node's does. Its Unicode form must parse
+// back to the same label, or the label is refused like the host's parser refuses it.
+function checkEncodedLabels(host) {
+  for (const label of host.split(".")) {
+    if (!label.startsWith("xn--")) continue;
+    const decoded = punycodeDecode(label.slice(4));
+    if (!decoded || parseUrl(`https://${decoded}/`).hostname !== label) throw new Error("invalid_url");
+  }
+}
+
 export function normalizeUrl(input) {
   if (typeof input !== "string" || input.length > 32768 || /[\x00-\x20\x7f\\]/.test(input)) throw new Error("invalid_url");
   let url = parseUrl(input);
   if (url.protocol === "blob:") url = parseUrl(input.slice(5));
   if (!["http:", "https:"].includes(url.protocol) || !url.hostname) throw new Error("invalid_url");
   const host = url.hostname.toLowerCase().replace(/\.+$/, "");
-  if (!host) throw new Error("invalid_url");
+  // Chrome keeps some characters of a host as escapes where the host's parser refuses the URL.
+  if (!host || host.includes("%")) throw new Error("invalid_url");
+  checkEncodedLabels(host);
   // Strict escape validation also covers query/fragment (URLSearchParams is otherwise forgiving).
   for (const text of [url.search, url.hash]) {
     const decoded = decodeStrict(text);
@@ -82,7 +128,7 @@ function matches(rule, url) {
 const pathMatches = (path, prefix) => path === prefix || path.startsWith(prefix + "/");
 function credentials(url) {
   const fragment = url.fragment.includes("?") ? url.fragment.slice(url.fragment.indexOf("?") + 1) : url.fragment;
-  const names = [url.query, url.fragment, fragment].flatMap(text => [...new URLSearchParams(text).keys()].map(asciiLower));
+  const names = [url.query, url.fragment, fragment].flatMap(text => [...new URLSearchParams(text).keys()].map(parameterName));
   return url.userinfo || names.some(key => builtins.credentialKeys.includes(key))
     || (names.includes("code") && (names.includes("state") || builtins.callbackPaths.some(path => pathMatches(url.path, path))));
 }

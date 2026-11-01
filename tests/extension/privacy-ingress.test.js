@@ -149,7 +149,7 @@ async function withConsoleWatch(run) {
 
 // --- Before the queue ---------------------------------------------------------------------------
 
-for (const [name, url] of [["an authentication host", AUTH_URL], ["a credential-bearing URL", TOKEN_URL], ["a malformed URL", "https://a.test/?q=%FF"]]) {
+for (const [name, url] of [["an authentication host", AUTH_URL], ["a credential-bearing URL", TOKEN_URL], ["a malformed URL", "https://a.test/?q=%FF"], ["a credential name behind a question mark", "https://a.test/??token=SECRET-VALUE"], ["invalid Punycode", "https://xn--a.a.test/"]]) {
   test(`${name} leaves no trace in the queue, dead letters, host or console`, async () => {
     const worker = await startWorker();
     const logged = await withConsoleWatch(() => worker.navigate(url));

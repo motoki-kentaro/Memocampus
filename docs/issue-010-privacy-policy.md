@@ -116,6 +116,7 @@ Both implementations use URL parsers (Rust `url`, JavaScript WHATWG `URL`):
   ASCII-case-insensitive. Hash-router query strings are inspected too. Recognized credential
   names (even with empty values) trigger A. `code` alone triggers only on known callback paths,
   or together with `state`. Values and free text are not scanned for words such as `token`.
+  Since #25, what follows the last `?` of a name counts, so `??token` is `token`.
 - Known auth paths match exact path or `/`-delimited descendants, not arbitrary occurrences
   in article paths. The detector is a conservative finite preset, not a credential scanner
   capable of recognizing every site's proprietary URL format.
@@ -125,7 +126,7 @@ Both implementations use URL parsers (Rust `url`, JavaScript WHATWG `URL`):
 Rust: `PolicyStore::from_process()` -> `load()` returns `Snapshot { policy, etag }`.
 Edit a clone of `snapshot.policy` and pass `update(&snapshot, candidate)`; do not increment
 revision yourself. `load()` returns structured errors; `store.evaluate(url)` converts a load
-failure to `NeverSave`. `Policy::evaluate` validates before evaluating. Store reads are bounded
+failure to `NeverSave`. `Policy::evaluate` compiles the policy, which validates it, before evaluating (see `issue-025-policy-engine.md`). Store reads are bounded
 to 1 MiB and reject nonregular files/symlinks at the policy/marker leaf.
 
 JavaScript: `validatePolicy(hostDocument)` and `evaluatePolicy(hostDocument, url)`; no file

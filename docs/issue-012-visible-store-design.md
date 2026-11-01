@@ -573,7 +573,7 @@ Release build, one Windows 11 machine, median of 5, temporary vaults, five saves
 
 Cost grows with public rows and rules, not with private rows: a private flag ends the decision before the policy runs. The time is mostly `Policy::evaluate`, which validates the whole policy on every call. The lock is held only for the vault read. "Lock held" also includes the policy-independent steps up to closing the vault. Memory for raw rows during a read was not measured separately.
 
-At many rules a call takes tens of seconds, which an MCP client may treat as a timeout [inferred]. No lock is held during that time, so host writes continue. **Candidates for Slice 5, none adopted:** validate the policy once per read rather than per URL; compile rules once per read. Both must keep the current fail-closed result.
+At many rules a call takes tens of seconds, which an MCP client may treat as a timeout [inferred]. No lock is held during that time, so host writes continue. **Candidates for Slice 5, none adopted:** validate the policy once per read rather than per URL; compile rules once per read. Both must keep the current fail-closed result. (Done in Issue #25 Slice 1; see `issue-025-policy-engine.md`. These figures are from before it.)
 
 ### Remaining risks
 
