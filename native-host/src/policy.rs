@@ -1,5 +1,6 @@
 //! Version 1 URL/rule contract; see docs/issue-010-privacy-policy.md.
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::LazyLock;
 use url::Url;
 
@@ -63,7 +64,7 @@ impl Policy {
         policy.validate()?;
         Ok(policy)
     }
-    pub fn validate(&self) -> Result<(), Error> {
+    fn check_header(&self) -> Result<(), Error> {
         if self.schema_version != 1
             || self.engine_version != 1
             || !(1..=MAX_REVISION).contains(&self.revision)
@@ -74,41 +75,124 @@ impl Policy {
             if layer.rules.len() > 1000 {
                 return Err(Error::InvalidPolicy);
             }
+        }
+        Ok(())
+    }
+    pub fn validate(&self) -> Result<(), Error> {
+        self.check_header()?;
+        for layer in [&self.layers.never_save, &self.layers.save_but_no_mcp] {
             for rule in &layer.rules {
                 Rule::parse(rule)?;
             }
         }
         Ok(())
     }
+    /// For one URL. To judge several, compile once and use `CompiledPolicy::evaluate`.
     /// Invalid configuration or URL always denies automatic recording and MCP disclosure.
     pub fn evaluate(&self, input: &str) -> Decision {
-        if self.validate().is_err() {
-            return Decision::NeverSave;
+        CompiledPolicy::compile(self).map_or(Decision::NeverSave, |policy| policy.evaluate(input))
+    }
+}
+
+/// Rules of one zone by host, so a URL meets only the rules of its own host and parent domains.
+/// A `None` path covers the whole host.
+#[derive(Debug, Default)]
+struct Zone {
+    exact: HashMap<String, Vec<Option<String>>>,
+    wildcard: HashMap<String, Vec<Option<String>>>,
+}
+impl Zone {
+    fn add(&mut self, rule: &str) -> Result<(), Error> {
+        let rule = Rule::parse(rule)?;
+        let hosts = if rule.wildcard {
+            &mut self.wildcard
+        } else {
+            &mut self.exact
+        };
+        hosts.entry(rule.host).or_default().push(rule.path);
+        Ok(())
+    }
+    fn add_all(&mut self, rules: &[String]) -> Result<(), Error> {
+        rules.iter().try_for_each(|rule| self.add(rule))
+    }
+    fn matches(&self, url: &NormalizedUrl) -> bool {
+        let covers = |paths: &Vec<Option<String>>| {
+            paths.iter().any(|path| {
+                path.as_ref()
+                    .is_none_or(|p| url.path.starts_with(p.as_str()))
+            })
+        };
+        if self.exact.get(&url.host).is_some_and(covers) {
+            return true;
         }
+        // The whole host, then what follows each dot: exactly the suffixes on a label boundary.
+        let mut suffix = url.host.as_str();
+        loop {
+            if self.wildcard.get(suffix).is_some_and(covers) {
+                return true;
+            }
+            match suffix.split_once('.') {
+                Some((_, rest)) => suffix = rest,
+                None => return false,
+            }
+        }
+    }
+}
+
+/// A policy prepared for judging many URLs. It exists only if every rule of the policy is valid,
+/// also those of a disabled layer, and is immutable: a change of policy means compiling again.
+#[derive(Debug)]
+pub struct CompiledPolicy {
+    blind: Zone,
+    auth_paths: bool,
+    credentials: bool,
+    private: Zone,
+}
+impl CompiledPolicy {
+    pub fn compile(policy: &Policy) -> Result<Self, Error> {
+        policy.check_header()?;
+        let a = &policy.layers.never_save;
+        let b = &policy.layers.save_but_no_mcp;
+        let c = &policy.categories;
+        let mut blind = Zone::default();
+        blind.add_all(&a.rules)?;
+        if c.authentication {
+            blind.add_all(&BUILTINS.authentication)?;
+        }
+        let mut private = Zone::default();
+        private.add_all(&b.rules)?;
+        for (enabled, rules) in [
+            (c.government, &BUILTINS.government),
+            (c.webmail, &BUILTINS.webmail),
+            (c.ai_chats, &BUILTINS.ai_chats),
+        ] {
+            if enabled {
+                private.add_all(rules)?;
+            }
+        }
+        Ok(Self {
+            blind: if a.enabled { blind } else { Zone::default() },
+            auth_paths: a.enabled && c.authentication,
+            credentials: a.enabled && c.credentials,
+            private: if b.enabled { private } else { Zone::default() },
+        })
+    }
+    /// Blind Zone first. An invalid URL is `NeverSave` whatever the layers say.
+    pub fn evaluate(&self, input: &str) -> Decision {
         let Ok(url) = normalize_url(input) else {
             return Decision::NeverSave;
         };
-        let a = &self.layers.never_save;
-        let b = &self.layers.save_but_no_mcp;
-        let c = &self.categories;
-        if a.enabled
-            && (matches_any(&a.rules, &url)
-                || (c.authentication
-                    && (matches_any(&BUILTINS.authentication, &url)
-                        || BUILTINS
-                            .auth_paths
-                            .iter()
-                            .any(|p| path_matches(&url.path, p))))
-                || (c.credentials && has_credentials(&url)))
+        if self.blind.matches(&url)
+            || (self.auth_paths
+                && BUILTINS
+                    .auth_paths
+                    .iter()
+                    .any(|p| path_matches(&url.path, p)))
+            || (self.credentials && has_credentials(&url))
         {
             return Decision::NeverSave;
         }
-        if b.enabled
-            && (matches_any(&b.rules, &url)
-                || (c.government && matches_any(&BUILTINS.government, &url))
-                || (c.webmail && matches_any(&BUILTINS.webmail, &url))
-                || (c.ai_chats && matches_any(&BUILTINS.ai_chats, &url)))
-        {
+        if self.private.matches(&url) {
             return Decision::SaveButNoMcp;
         }
         Decision::None
@@ -261,18 +345,14 @@ impl Rule {
             path,
         })
     }
-    fn matches(&self, url: &NormalizedUrl) -> bool {
-        (url.host == self.host || (self.wildcard && url.host.ends_with(&format!(".{}", self.host))))
-            && self.path.as_ref().is_none_or(|p| url.path.starts_with(p))
-    }
-}
-fn matches_any(rules: &[String], url: &NormalizedUrl) -> bool {
-    rules
-        .iter()
-        .any(|rule| Rule::parse(rule).is_ok_and(|r| r.matches(url)))
 }
 fn path_matches(path: &str, prefix: &str) -> bool {
     path == prefix || path.starts_with(&format!("{prefix}/"))
+}
+/// What follows the last `?` of a parameter name counts, so `?token`, `??token` and `a?token` are
+/// `token`: the name of a credential is not hidden by the separator of a query inside a query.
+fn parameter_name(key: &str) -> String {
+    key.rsplit('?').next().unwrap_or(key).to_ascii_lowercase()
 }
 fn has_credentials(url: &NormalizedUrl) -> bool {
     let fragment = url
@@ -282,7 +362,7 @@ fn has_credentials(url: &NormalizedUrl) -> bool {
     let names: Vec<String> = [&url.query, &url.fragment, fragment]
         .iter()
         .flat_map(|text| {
-            url::form_urlencoded::parse(text.as_bytes()).map(|(k, _)| k.to_ascii_lowercase())
+            url::form_urlencoded::parse(text.as_bytes()).map(|(k, _)| parameter_name(&k))
         })
         .collect();
     url.userinfo
@@ -294,3 +374,6 @@ fn has_credentials(url: &NormalizedUrl) -> bool {
                     .iter()
                     .any(|p| path_matches(&url.path, p))))
 }
+
+#[cfg(test)]
+mod tests;

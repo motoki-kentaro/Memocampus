@@ -42,7 +42,7 @@ mod time;
 mod visible_images;
 mod visible_set;
 
-use memocampus_native_host::policy::Policy;
+use memocampus_native_host::policy::CompiledPolicy;
 use memocampus_native_host::policy_store::{PolicyStore, Snapshot, StoreError};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -302,15 +302,18 @@ impl VisibleStore {
         &self,
         stage: &mut dyn FnMut(Stage),
         read: ReadRows<Row>,
-        build: fn(Vec<Row>, &Policy, &IdKey) -> Result<Set, VisibleError>,
+        build: fn(Vec<Row>, &CompiledPolicy, &IdKey) -> Result<Set, VisibleError>,
         query: impl Fn(&Set) -> Result<T, VisibleError>,
     ) -> Result<T, VisibleError> {
         for _ in 0..POLICY_CHANGE_ATTEMPTS {
             let policy = self.load_policy()?;
+            // Once for this attempt. A policy that does not compile gives no decision at all.
+            let compiled = CompiledPolicy::compile(&policy.policy)
+                .map_err(|_| VisibleError::PolicyUnavailable)?;
             stage(Stage::PolicyLoaded);
             let rows = read(&self.vault, stage)?;
             stage(Stage::VaultClosed);
-            let set = build(rows, &policy.policy, &self.id_key)?;
+            let set = build(rows, &compiled, &self.id_key)?;
             stage(Stage::SetBuilt);
             if self.load_policy()?.etag == policy.etag {
                 return query(&set);

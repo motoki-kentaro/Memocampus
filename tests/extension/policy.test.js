@@ -59,6 +59,26 @@ test("valid percent encoding still normalizes as before", () => {
   assert.equal(evaluatePolicy(defaults, "https://example.com/%E7%A7%98?q=%E5%AF%86#%E3%81%82"), "none");
 });
 
+test("a host kept with an escape, as Chrome can keep it, is refused", () => {
+  const RealUrl = globalThis.URL;
+  try {
+    globalThis.URL = class { protocol = "https:"; hostname = "a%20b"; port = ""; pathname = "/"; search = ""; hash = ""; username = ""; password = ""; };
+    assert.throws(() => normalizeUrl("https:///a%20b"), INVALID_URL);
+    assert.equal(evaluatePolicy(defaults, "https:///a%20b"), "neverSave");
+  } finally {
+    globalThis.URL = RealUrl;
+  }
+});
+
+test("every label encoded as xn-- must decode and encode back to itself", () => {
+  for (const host of ["xn--a.example.com", "x.xn--.example.com", "xn--abc-.test", "xn--99999999.test", "xn--A!.test".toLowerCase()]) {
+    assert.equal(evaluatePolicy(defaults, `https://${host}/`), "neverSave", host);
+  }
+  for (const host of ["xn--r8jz45g.xn--zckzah", "xn--fa-hia.de", "xn--mnchen-3ya.de", "xn--e1afmkfd.test"]) {
+    assert.equal(normalizeUrl(`https://${host}/`).host, host);
+  }
+});
+
 test("exceptions that are not URL rejections are not reported as invalid_url", () => {
   const realDecode = globalThis.decodeURIComponent;
   const RealUrl = globalThis.URL;
