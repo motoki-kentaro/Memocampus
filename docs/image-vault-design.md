@@ -95,6 +95,8 @@ The authoritative definition is `IMAGE_SCHEMA_SQL` in `native-host/src/images.rs
 
 ### Migration
 
+**Superseded by Issue #12 Slice 2: there is no migration. Only schema 4 is used, and it exists only by creation; see `docs/issue-012-visible-store-design.md`.** The text below is the history of schema 2.
+
 New vaults are created at `user_version = 2` with the image tables. Existing vaults (0 or 1) are migrated lazily by the
 first image **write**, inside its `BEGIN IMMEDIATE` transaction: existing image tables are checked first (a foreign
 table with the same name is `image_schema_mismatch`), then `CREATE TABLE/INDEX IF NOT EXISTS`, then

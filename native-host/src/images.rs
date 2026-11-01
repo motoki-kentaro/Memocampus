@@ -1,4 +1,4 @@
-//! Image vault storage (schema v3): original image bytes deduplicated by SHA-256, an append-only
+//! Image vault storage: original image bytes deduplicated by SHA-256, an append-only
 //! save history, and regenerable thumbnails.
 //!
 //! - `image_blobs` holds each distinct original exactly once (`sha256` UNIQUE). The bytes are never
@@ -7,18 +7,20 @@
 //!   makes retries of that action idempotent; a different action saving the same bytes adds a row.
 //!   `incognito` belongs to the row, not to the image: the same bytes can have rows of both kinds.
 //!   It has no default, so a save whose origin is unknown cannot be stored as a normal one.
+//!   `mcp_public` is per row too, also without a default: every save writes 0, and only the user's
+//!   choice through `set_mcp_public` changes it. It is a permission, not a publication decision.
 //! - `image_thumbnails` is derived data and may be dropped and rebuilt from the originals.
 //!
 //! Everything a save writes happens in one transaction through `Session::write_for`, so a failure
 //! leaves nothing behind and the write can only land in the vault the transfer started against.
 
+use memocampus_native_host::schema::is_data_image_marker;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::vault::{Session, VaultError, VaultTicket};
 
-pub const IMAGE_SCHEMA_VERSION: i64 = 3;
 /// Limit for one original image, counted in raw bytes (before any Base64 encoding).
 pub const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_THUMBNAIL_BYTES: usize = 256 * 1024;
@@ -27,88 +29,9 @@ pub const MAX_IMAGE_EDGE: u32 = 65_535;
 pub const MAX_URL_CHARS: usize = 8192;
 pub const MAX_PAGE_SIZE: u32 = 60;
 
-pub const IMAGE_SCHEMA_SQL: &str = "
-CREATE TABLE IF NOT EXISTS image_blobs (
-  id            INTEGER PRIMARY KEY,
-  sha256        TEXT    NOT NULL UNIQUE CHECK (length(sha256) = 64),
-  mime_type     TEXT    NOT NULL,
-  byte_length   INTEGER NOT NULL CHECK (byte_length > 0),
-  width         INTEGER NOT NULL CHECK (width > 0),
-  height        INTEGER NOT NULL CHECK (height > 0),
-  created_at    INTEGER NOT NULL,
-  last_saved_at INTEGER NOT NULL,
-  save_count    INTEGER NOT NULL DEFAULT 1 CHECK (save_count > 0),
-  data          BLOB    NOT NULL
-);
-CREATE INDEX IF NOT EXISTS image_blobs_recent ON image_blobs (last_saved_at DESC, id DESC);
-CREATE TABLE IF NOT EXISTS saved_images (
-  id         INTEGER PRIMARY KEY,
-  save_id    TEXT    NOT NULL UNIQUE,
-  blob_id    INTEGER NOT NULL REFERENCES image_blobs (id) ON DELETE RESTRICT,
-  image_url  TEXT    NOT NULL,
-  page_url   TEXT,
-  frame_url  TEXT,
-  saved_at   INTEGER NOT NULL,
-  incognito  INTEGER NOT NULL CHECK (incognito IN (0, 1))
-);
-CREATE INDEX IF NOT EXISTS saved_images_by_blob ON saved_images (blob_id, saved_at DESC, id DESC);
-CREATE TABLE IF NOT EXISTS image_thumbnails (
-  blob_id    INTEGER PRIMARY KEY REFERENCES image_blobs (id) ON DELETE CASCADE,
-  mime_type  TEXT    NOT NULL,
-  width      INTEGER NOT NULL CHECK (width > 0),
-  height     INTEGER NOT NULL CHECK (height > 0),
-  generator  INTEGER NOT NULL CHECK (generator > 0),
-  data       BLOB    NOT NULL
-);
-";
-
-const IMAGE_TABLES: [(&str, &[&str]); 3] = [
-    (
-        "image_blobs",
-        &[
-            "id",
-            "sha256",
-            "mime_type",
-            "byte_length",
-            "width",
-            "height",
-            "created_at",
-            "last_saved_at",
-            "save_count",
-            "data",
-        ],
-    ),
-    (
-        "saved_images",
-        &[
-            "id",
-            "save_id",
-            "blob_id",
-            "image_url",
-            "page_url",
-            "frame_url",
-            "saved_at",
-            "incognito",
-        ],
-    ),
-    (
-        "image_thumbnails",
-        &[
-            "blob_id",
-            "mime_type",
-            "width",
-            "height",
-            "generator",
-            "data",
-        ],
-    ),
-];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageError {
     Vault(VaultError),
-    VaultNewer,
-    SchemaMismatch,
     InvalidSaveId,
     InvalidHash,
     InvalidUrl,
@@ -125,6 +48,8 @@ pub enum ImageError {
     InvalidThumbnail,
     SaveIdConflict,
     BlobMissing,
+    SavedImageNotFound,
+    IncognitoNotPublishable,
     Db,
 }
 
@@ -132,8 +57,6 @@ impl ImageError {
     pub fn code(self) -> &'static str {
         match self {
             Self::Vault(error) => error.code(),
-            Self::VaultNewer => "vault_newer",
-            Self::SchemaMismatch => "image_schema_mismatch",
             Self::InvalidSaveId => "invalid_save_id",
             Self::InvalidHash => "invalid_hash",
             Self::InvalidUrl => "invalid_url",
@@ -150,6 +73,8 @@ impl ImageError {
             Self::InvalidThumbnail => "invalid_thumbnail",
             Self::SaveIdConflict => "save_id_conflict",
             Self::BlobMissing => "blob_missing",
+            Self::SavedImageNotFound => "saved_image_not_found",
+            Self::IncognitoNotPublishable => "incognito_not_publishable",
             Self::Db => "db_error",
         }
     }
@@ -386,13 +311,8 @@ fn valid_web_url(raw: &str) -> bool {
 
 /// `image_url` may also be a `blob:` URL or a bare `data:<mime>` marker (the payload is never stored).
 fn valid_image_url(raw: &str) -> bool {
-    if let Some(mime) = raw.strip_prefix("data:") {
-        let (kind, subtype) = mime.split_once('/').unwrap_or(("", ""));
-        return kind == "image"
-            && !subtype.is_empty()
-            && subtype
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'));
+    if raw.starts_with("data:") {
+        return is_data_image_marker(raw);
     }
     if let Some(inner) = raw.strip_prefix("blob:") {
         return raw.chars().count() <= MAX_URL_CHARS && valid_web_url(inner);
@@ -491,102 +411,12 @@ pub fn validate_thumbnail(thumbnail: &ThumbnailInput) -> Result<(), ImageError> 
     Ok(())
 }
 
-// --- Schema ------------------------------------------------------------------------------------
-
-fn user_version(db: &Connection) -> Result<i64, ImageError> {
-    Ok(db.query_row("PRAGMA user_version", [], |row| row.get(0))?)
-}
-
-fn tables_present(db: &Connection) -> Result<bool, ImageError> {
-    let count: i64 = db.query_row(
-        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('image_blobs', 'saved_images', 'image_thumbnails')",
-        [],
-        |row| row.get(0),
-    )?;
-    Ok(count == 3)
-}
-
-/// Checks the image tables' columns. With `require_all`, a missing table is also a mismatch;
-/// without it, only tables that already exist are checked (before creating the others).
-fn check_image_tables(db: &Connection, require_all: bool) -> Result<(), ImageError> {
-    for (table, columns) in IMAGE_TABLES {
-        let mut statement = db.prepare("SELECT name FROM pragma_table_info(?1)")?;
-        let actual = statement
-            .query_map([table], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        if actual.is_empty() && !require_all {
-            continue;
-        }
-        if !columns
-            .iter()
-            .all(|column| actual.iter().any(|name| name == column))
-        {
-            return Err(ImageError::SchemaMismatch);
-        }
-    }
-    let incognito: Option<(bool, Option<String>)> = db
-        .query_row(
-            "SELECT \"notnull\", dflt_value FROM pragma_table_info('saved_images') WHERE name = 'incognito'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    if matches!(incognito, Some((not_null, default)) if !not_null || default.is_some()) {
-        return Err(ImageError::SchemaMismatch);
-    }
-    Ok(())
-}
-
-fn validate_image_schema(db: &Connection) -> Result<(), ImageError> {
-    check_image_tables(db, true)
-}
-
-/// Adds the image tables to a vault without any. A vault whose image tables have another shape (a
-/// schema 2 vault, say) is refused, not converted. Must run inside a write transaction, so the new
-/// tables and the version bump commit together with the first image write (or not at all).
-/// Existing tables and rows are not touched.
-pub fn ensure_schema(db: &Connection) -> Result<(), ImageError> {
-    let version = user_version(db)?;
-    if version > IMAGE_SCHEMA_VERSION {
-        return Err(ImageError::VaultNewer);
-    }
-    // A foreign table that merely shares a name is reported, not built upon.
-    check_image_tables(db, false)?;
-    db.execute_batch(IMAGE_SCHEMA_SQL)?;
-    validate_image_schema(db)?;
-    if version < IMAGE_SCHEMA_VERSION {
-        db.pragma_update(None, "user_version", IMAGE_SCHEMA_VERSION)?;
-    }
-    Ok(())
-}
-
-/// Read-only operations never migrate: a vault without image tables simply has no images, and
-/// image tables of another shape are reported.
-fn readable(db: &Connection) -> Result<bool, ImageError> {
-    if user_version(db)? > IMAGE_SCHEMA_VERSION {
-        return Err(ImageError::VaultNewer);
-    }
-    let present = tables_present(db)?;
-    if present {
-        validate_image_schema(db)?;
-    }
-    Ok(present)
-}
-
-/// Row counts of the image tables, or None for a vault that has none yet.
-pub fn table_counts(db: &Connection) -> rusqlite::Result<Option<(i64, i64, i64)>> {
-    let present: i64 = db.query_row(
-        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('image_blobs', 'saved_images', 'image_thumbnails')",
-        [],
-        |row| row.get(0),
-    )?;
-    if present != 3 {
-        return Ok(None);
-    }
+/// Row counts of the image tables.
+pub fn table_counts(db: &Connection) -> rusqlite::Result<(i64, i64, i64)> {
     db.query_row(
         "SELECT (SELECT count(*) FROM image_blobs), (SELECT count(*) FROM saved_images), (SELECT count(*) FROM image_thumbnails)",
         [],
-        |row| Ok(Some((row.get(0)?, row.get(1)?, row.get(2)?))),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )
 }
 
@@ -642,9 +472,6 @@ fn find_blob(db: &Connection, sha256: &str) -> Result<Option<i64>, ImageError> {
 /// deduplication (`sha256`) are answered separately.
 pub fn precheck(db: &Connection, request: &SaveRequest) -> Result<Precheck, ImageError> {
     validate_request(request)?;
-    if !readable(db)? {
-        return Ok(Precheck::NeedUpload);
-    }
     if let Some((saved_image_id, blob_id, sha256, incognito)) = find_save(db, &request.save_id)? {
         if sha256 != request.sha256 || incognito != request.incognito {
             return Err(ImageError::SaveIdConflict);
@@ -671,7 +498,6 @@ fn commit_save(
     thumbnail: Option<&ThumbnailInput>,
     now_ms: i64,
 ) -> Result<SaveOutcome, ImageError> {
-    ensure_schema(db)?;
     if let Some((saved_image_id, blob_id, sha256, incognito)) = find_save(db, &request.save_id)? {
         if sha256 != request.sha256 || incognito != request.incognito {
             return Err(ImageError::SaveIdConflict);
@@ -701,7 +527,7 @@ fn commit_save(
         }
     };
     db.execute(
-        "INSERT INTO saved_images (save_id, blob_id, image_url, page_url, frame_url, saved_at, incognito) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO saved_images (save_id, blob_id, image_url, page_url, frame_url, saved_at, incognito, mcp_public) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
         params![request.save_id, blob_id, request.image_url, request.page_url, request.frame_url, now_ms, request.incognito],
     )?;
     let saved_image_id = db.last_insert_rowid();
@@ -760,9 +586,6 @@ pub struct StoredThumbnail {
 /// The stored thumbnail of one image, re-checked before it leaves the host: only PNG, JPEG or WebP
 /// whose bytes match the stored type are returned. Anything else (or none) is reported as missing.
 pub fn thumbnail(db: &Connection, blob_id: i64) -> Result<Option<StoredThumbnail>, ImageError> {
-    if !readable(db)? {
-        return Ok(None);
-    }
     let row = db
         .query_row(
             "SELECT mime_type, width, height, data FROM image_thumbnails WHERE blob_id = ?1",
@@ -841,12 +664,6 @@ pub fn list_images(
     after: Option<ImageCursor>,
     limit: u32,
 ) -> Result<Page<ImageSummary>, ImageError> {
-    if !readable(db)? {
-        return Ok(Page {
-            items: vec![],
-            next: None,
-        });
-    }
     let limit = page_limit(limit);
     let mut statement = db.prepare_cached(LIST_SQL)?;
     let rows = statement.query_map(
@@ -894,6 +711,7 @@ pub struct ImageSource {
     pub frame_url: Option<String>,
     pub saved_at: i64,
     pub incognito: bool,
+    pub mcp_public: bool,
 }
 
 /// Save history of one image, newest first, keyset paged on (saved_at, id).
@@ -903,15 +721,9 @@ pub fn image_sources(
     after: Option<ImageCursor>,
     limit: u32,
 ) -> Result<Page<ImageSource>, ImageError> {
-    if !readable(db)? {
-        return Ok(Page {
-            items: vec![],
-            next: None,
-        });
-    }
     let limit = page_limit(limit);
     let mut statement = db.prepare_cached(
-        "SELECT id, image_url, page_url, frame_url, saved_at, incognito FROM saved_images
+        "SELECT id, image_url, page_url, frame_url, saved_at, incognito, mcp_public FROM saved_images
          WHERE blob_id = ?1 AND (?2 IS NULL OR (saved_at, id) < (?2, ?3))
          ORDER BY saved_at DESC, id DESC LIMIT ?4",
     )?;
@@ -930,6 +742,7 @@ pub fn image_sources(
                 frame_url: row.get(3)?,
                 saved_at: row.get(4)?,
                 incognito: row.get(5)?,
+                mcp_public: row.get(6)?,
             })
         },
     )?;
@@ -944,6 +757,38 @@ pub fn image_sources(
         None
     };
     Ok(Page { items, next })
+}
+
+/// Records the user's choice for exactly one save history row of the vault named by `ticket`. An
+/// incognito row can never be permitted, but a value left on one can be cleared.
+pub fn set_mcp_public(
+    session: &mut Session,
+    ticket: &VaultTicket,
+    saved_image_id: i64,
+    mcp_public: bool,
+) -> Result<(), ImageError> {
+    session.write_for(ticket, |db| {
+        let changed = db.execute(
+            "UPDATE saved_images SET mcp_public = ?2 WHERE id = ?1 AND (?2 = 0 OR incognito = 0)",
+            params![saved_image_id, mcp_public],
+        )?;
+        if changed == 1 {
+            return Ok(());
+        }
+        let exists = db
+            .query_row(
+                "SELECT 1 FROM saved_images WHERE id = ?1",
+                [saved_image_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        Err(if exists {
+            ImageError::IncognitoNotPublishable
+        } else {
+            ImageError::SavedImageNotFound
+        })
+    })
 }
 
 // --- Originals (read-only) and regenerated thumbnails ---------------------------------------
@@ -964,9 +809,6 @@ pub fn original_info(
     blob_id: i64,
     sha256: &str,
 ) -> Result<OriginalInfo, ImageError> {
-    if !readable(db)? {
-        return Err(ImageError::BlobMissing);
-    }
     let info = db
         .query_row(
             "SELECT sha256, mime_type, byte_length, last_saved_at FROM image_blobs WHERE id = ?1",

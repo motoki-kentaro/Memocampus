@@ -20,6 +20,7 @@ const ERROR_MESSAGES = {
   vault_not_configured: "Vaultが未設定です。Vault設定から新規作成するか、既存のVaultを開いてください。",
   vault_missing: "Vaultファイルが見つかりません。移動・削除されていないか確認し、Vaultを開き直してください。",
   vault_invalid: "このファイルはMemocampus Vaultとして利用できません。",
+  vault_schema_mismatch: "このVaultは現在の形式に対応していません。自動変換は行いません（このVaultは変更していません）。",
   config_invalid: "設定ファイル(config.json)を読み取れません。Vaultを作成し直すか開き直すと設定が書き直されます。",
   vault_switched: "Vaultが切り替えられました。もう一度お試しください。",
   vault_busy: "Vaultが使用中です。しばらくしてからもう一度お試しください。",
@@ -63,8 +64,10 @@ const ERROR_MESSAGES = {
   transfer_interrupted: "Native Hostとの接続が途中で切れました。保存されていません。",
   host_outdated: "Native Hostが古いため画像を保存できません。Hostを更新してください。",
   save_failed: "画像の保存に失敗しました。",
-  vault_newer: "このVaultは新しいバージョンのMemocampusで作られたため、画像を保存できません。",
-  image_schema_mismatch: "このVaultの画像テーブルは古い形式か想定外の形式のため、画像を扱えません。⚙で新しいVaultを作成してください（このVaultは変更していません）。",
+  saved_image_not_found: "この保存履歴が見つかりません。一覧を更新してください。",
+  incognito_not_publishable: "シークレット保存のためMCP非公開です。",
+  invalid_saved_image_id: "保存履歴の指定が不正です。",
+  invalid_mcp_public: "公開設定の指定が不正です。",
   hash_mismatch: "転送中に画像データが変化しました。保存されていません。",
   length_mismatch: "画像データの長さが一致しません。保存されていません。",
   mime_mismatch: "画像の形式が申告と一致しません。",
@@ -108,7 +111,7 @@ export function describeErrorCode(code) {
 }
 
 /** Codes meaning "there is no usable vault" — the UI should send the user to vault settings. */
-export const VAULT_UNAVAILABLE_CODES = new Set(["vault_not_configured", "vault_missing", "vault_invalid", "config_invalid", "app_dir_unavailable"]);
+export const VAULT_UNAVAILABLE_CODES = new Set(["vault_not_configured", "vault_missing", "vault_invalid", "vault_schema_mismatch", "config_invalid", "app_dir_unavailable"]);
 
 export class SearchError extends Error {
   constructor(code, detail = "", response = null) {

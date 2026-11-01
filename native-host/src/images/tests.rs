@@ -1,7 +1,6 @@
 use super::*;
 use crate::vault::tests::TempDir;
 use crate::vault::{create_vault, open_vault, switch_active, ConfigLock, Environment};
-use crate::SCHEMA_SQL;
 use std::path::{Path, PathBuf};
 
 // Minimal, structurally valid files: the host checks headers, not pixels.
@@ -121,29 +120,6 @@ fn fixture() -> Fixture {
     }
 }
 
-/// A vault as created before images existed (no image tables).
-fn legacy_vault(path: &Path, version: i64) {
-    let db = Connection::open(path).unwrap();
-    db.execute_batch(SCHEMA_SQL).unwrap();
-    db.execute_batch(&format!(
-        "PRAGMA user_version = {version};
-         INSERT INTO visits VALUES ('v1', 'https://a.test/', 'A', '2026-10-01T00:00:00.000Z');
-         INSERT INTO tab_snapshots VALUES ('s1', 1, 0, 'https://b.test/', 'B', 0, 0, '2026-10-02T00:00:00.000Z');"
-    ))
-    .unwrap();
-}
-
-fn legacy_fixture(version: i64) -> (TempDir, Session, VaultTicket, PathBuf) {
-    let tmp = TempDir::new();
-    let env = tmp.env();
-    let vault = tmp.0.join("old.sqlite3");
-    legacy_vault(&vault, version);
-    configure(&env, &vault);
-    let mut session = Session::new(env);
-    let ticket = session.ticket().unwrap();
-    (tmp, session, ticket, vault)
-}
-
 fn save(
     f: &mut Fixture,
     bytes: &[u8],
@@ -160,22 +136,12 @@ fn scalar(db: &Connection, sql: &str) -> i64 {
     db.query_row(sql, [], |row| row.get(0)).unwrap()
 }
 
-fn row_dump(path: &Path) -> Vec<String> {
-    let db = open_vault(path).unwrap();
-    let mut statement = db
-        .prepare("SELECT event_id || url || title || visited_at FROM visits UNION ALL SELECT event_id || url || title || recorded_at FROM tab_snapshots ORDER BY 1")
-        .unwrap();
-    let rows = statement.query_map([], |row| row.get(0)).unwrap();
-    rows.collect::<rusqlite::Result<_>>().unwrap()
-}
-
 #[test]
-fn new_vaults_are_created_at_schema_2_with_image_tables() {
+fn new_vaults_are_created_at_schema_4_with_image_tables() {
     let f = fixture();
     let db = open_vault(&f.vault).unwrap();
-    assert_eq!(scalar(&db, "PRAGMA user_version"), IMAGE_SCHEMA_VERSION);
-    assert!(tables_present(&db).unwrap());
-    validate_image_schema(&db).unwrap();
+    assert_eq!(scalar(&db, "PRAGMA user_version"), 4);
+    assert_eq!(table_counts(&db).unwrap(), (0, 0, 0));
 }
 
 #[test]
@@ -215,114 +181,6 @@ fn data_is_the_last_column_and_listing_uses_the_recent_index() {
             .any(|step| step.contains("TEMP B-TREE FOR ORDER BY")),
         "{plan:?}"
     );
-}
-
-#[test]
-fn reading_a_schema_1_vault_never_migrates_it() {
-    let (_tmp, _session, _ticket, vault) = legacy_fixture(1);
-    let db = open_vault(&vault).unwrap();
-    assert_eq!(list_images(&db, None, 10).unwrap().items, vec![]);
-    assert_eq!(image_sources(&db, 1, None, 10).unwrap().items, vec![]);
-    let bytes = png(1, 1);
-    assert_eq!(
-        precheck(&db, &request(&bytes, "image/png", 1, 1, "s")),
-        Ok(Precheck::NeedUpload)
-    );
-    assert_eq!(scalar(&db, "PRAGMA user_version"), 1);
-    assert!(!tables_present(&db).unwrap());
-}
-
-#[test]
-fn the_first_image_save_migrates_a_schema_1_vault_without_touching_existing_rows() {
-    let (_tmp, mut session, ticket, vault) = legacy_fixture(1);
-    let before = row_dump(&vault);
-    let bytes = png(3, 2);
-    save_image(
-        &mut session,
-        &ticket,
-        &request(&bytes, "image/png", 3, 2, "s1"),
-        Some(&bytes),
-        None,
-        1000,
-    )
-    .unwrap();
-    let db = open_vault(&vault).unwrap();
-    assert_eq!(scalar(&db, "PRAGMA user_version"), IMAGE_SCHEMA_VERSION);
-    assert_eq!(
-        scalar(&db, "PRAGMA application_id"),
-        0,
-        "the header tag is left alone"
-    );
-    assert_eq!(row_dump(&vault), before);
-    ensure_schema(&db).unwrap(); // idempotent
-    assert_eq!(scalar(&db, "SELECT count(*) FROM image_blobs"), 1);
-    assert!(crate::vault::open_vault_checked(&vault).is_ok());
-}
-
-#[test]
-fn untagged_schema_0_vaults_migrate_too() {
-    let (_tmp, mut session, ticket, vault) = legacy_fixture(0);
-    let bytes = gif(2, 2);
-    save_image(
-        &mut session,
-        &ticket,
-        &request(&bytes, "image/gif", 2, 2, "s1"),
-        Some(&bytes),
-        None,
-        1,
-    )
-    .unwrap();
-    assert_eq!(
-        scalar(&open_vault(&vault).unwrap(), "PRAGMA user_version"),
-        3
-    );
-}
-
-#[test]
-fn a_failed_migration_rolls_back_completely() {
-    let (_tmp, mut session, ticket, vault) = legacy_fixture(1);
-    // An unrelated table that happens to be called saved_images.
-    Connection::open(&vault)
-        .unwrap()
-        .execute_batch("CREATE TABLE saved_images (something);")
-        .unwrap();
-    let bytes = png(1, 1);
-    let result = save_image(
-        &mut session,
-        &ticket,
-        &request(&bytes, "image/png", 1, 1, "s1"),
-        Some(&bytes),
-        None,
-        1,
-    );
-    assert_eq!(result, Err(ImageError::SchemaMismatch));
-    let db = open_vault(&vault).unwrap();
-    assert_eq!(scalar(&db, "PRAGMA user_version"), 1);
-    assert_eq!(
-        scalar(
-            &db,
-            "SELECT count(*) FROM sqlite_master WHERE name = 'image_blobs'"
-        ),
-        0
-    );
-}
-
-#[test]
-fn a_newer_vault_is_neither_migrated_nor_written() {
-    let mut f = fixture();
-    open_vault(&f.vault)
-        .unwrap()
-        .execute_batch("PRAGMA user_version = 4;")
-        .unwrap();
-    let bytes = png(1, 1);
-    assert_eq!(
-        save(&mut f, &bytes, "image/png", (1, 1), "s1", 1),
-        Err(ImageError::VaultNewer)
-    );
-    let db = open_vault(&f.vault).unwrap();
-    assert_eq!(list_images(&db, None, 5), Err(ImageError::VaultNewer));
-    assert_eq!(scalar(&db, "PRAGMA user_version"), 4);
-    assert_eq!(scalar(&db, "SELECT count(*) FROM image_blobs"), 0);
 }
 
 #[test]
@@ -792,7 +650,7 @@ fn a_failure_inside_the_transaction_leaves_no_blob_history_or_counter_change() {
         save(&mut f, &keep, "image/png", (2, 2), "dup", 3),
         Err(ImageError::Db)
     );
-    let db = open_vault(&f.vault).unwrap();
+    let db = Connection::open(&f.vault).unwrap();
     assert_eq!(
         scalar(&db, "SELECT count(*) FROM image_blobs"),
         1,
@@ -812,7 +670,7 @@ fn foreign_keys_are_enforced_on_vault_connections() {
     let f = fixture();
     let db = open_vault(&f.vault).unwrap();
     let orphan = db.execute(
-        "INSERT INTO saved_images (save_id, blob_id, image_url, saved_at, incognito) VALUES ('o', 999, 'https://a.test/', 1, 0)",
+        "INSERT INTO saved_images (save_id, blob_id, image_url, saved_at, incognito, mcp_public) VALUES ('o', 999, 'https://a.test/', 1, 0, 0)",
         [],
     );
     assert!(orphan.is_err());
@@ -963,9 +821,7 @@ fn listing_reports_the_latest_source_and_paginates_history() {
 }
 
 #[test]
-fn table_counts_are_absent_before_migration_and_exact_after() {
-    let (_tmp, _session, _ticket, vault) = legacy_fixture(1);
-    assert_eq!(table_counts(&open_vault(&vault).unwrap()).unwrap(), None);
+fn table_counts_are_exact() {
     let mut f = fixture();
     let bytes = png(5, 5);
     save_image(
@@ -980,7 +836,7 @@ fn table_counts_are_absent_before_migration_and_exact_after() {
     save(&mut f, &bytes, "image/png", (5, 5), "b", 2).unwrap();
     assert_eq!(
         table_counts(&open_vault(&f.vault).unwrap()).unwrap(),
-        Some((1, 2, 1))
+        (1, 2, 1)
     );
 }
 
@@ -1002,7 +858,7 @@ fn backups_carry_images_and_verify_their_counts() {
     let db = open_vault(&f.vault).unwrap();
     let backup = crate::vault::backup_vault(&db, &dest, std::time::SystemTime::now()).unwrap();
     let copy = open_vault(&backup).unwrap();
-    assert_eq!(table_counts(&copy).unwrap(), Some((1, 1, 1)));
+    assert_eq!(table_counts(&copy).unwrap(), (1, 1, 1));
     let data: Vec<u8> = copy
         .query_row("SELECT data FROM image_blobs", [], |r| r.get(0))
         .unwrap();
@@ -1013,8 +869,6 @@ fn backups_carry_images_and_verify_their_counts() {
 fn error_codes_are_stable_and_distinct() {
     let errors = [
         ImageError::Vault(VaultError::Switched),
-        ImageError::VaultNewer,
-        ImageError::SchemaMismatch,
         ImageError::InvalidSaveId,
         ImageError::InvalidHash,
         ImageError::InvalidUrl,
@@ -1031,6 +885,7 @@ fn error_codes_are_stable_and_distinct() {
         ImageError::InvalidThumbnail,
         ImageError::SaveIdConflict,
         ImageError::BlobMissing,
+        ImageError::SavedImageNotFound,
         ImageError::Db,
     ];
     let codes: Vec<&str> = errors.iter().map(|error| error.code()).collect();
@@ -1073,27 +928,14 @@ fn a_thumbnail_whose_header_size_differs_from_the_declared_size_is_rejected() {
 
 // --- The `incognito` column ------------------------------------------------------------------------
 
-/// Replaces `saved_images` with the given definition, as an older or foreign vault would have it.
-fn replace_history_table(vault: &Path, definition: &str, version: i64) {
-    Connection::open(vault)
-        .unwrap()
-        .execute_batch(&format!(
-            "DROP TABLE saved_images; CREATE TABLE saved_images ({definition}); PRAGMA user_version = {version};"
-        ))
-        .unwrap();
-}
-
-const V2_HISTORY: &str = "id INTEGER PRIMARY KEY, save_id TEXT NOT NULL UNIQUE, blob_id INTEGER NOT NULL, image_url TEXT NOT NULL, page_url TEXT, frame_url TEXT, saved_at INTEGER NOT NULL";
-
 #[test]
 fn a_new_vault_requires_an_explicit_origin_of_zero_or_one() {
     let f = fixture();
     let db = open_vault(&f.vault).unwrap();
-    assert_eq!(scalar(&db, "PRAGMA user_version"), 3);
     db.execute_batch("INSERT INTO image_blobs (sha256, mime_type, byte_length, width, height, created_at, last_saved_at, data) VALUES (printf('%064d', 1), 'image/png', 1, 1, 1, 1, 1, x'00');").unwrap();
     let insert = |columns: &str, values: &str| {
         db.execute_batch(&format!(
-            "INSERT INTO saved_images (save_id, blob_id, image_url, saved_at{columns}) VALUES (lower(hex(randomblob(8))), 1, 'https://a.test/', 1{values})"
+            "INSERT INTO saved_images (save_id, blob_id, image_url, saved_at, mcp_public{columns}) VALUES (lower(hex(randomblob(8))), 1, 'https://a.test/', 1, 0{values})"
         ))
     };
     assert!(insert("", "").is_err(), "no default");
@@ -1107,34 +949,154 @@ fn a_new_vault_requires_an_explicit_origin_of_zero_or_one() {
     assert_eq!(scalar(&db, "SELECT count(*) FROM saved_images"), 2);
 }
 
+// --- The `mcp_public` column -----------------------------------------------------------------------
+
+fn publication(db: &Connection) -> Vec<(i64, i64, bool)> {
+    db.prepare("SELECT id, blob_id, mcp_public FROM saved_images ORDER BY id")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+}
+
 #[test]
-fn image_tables_without_a_required_origin_are_refused_for_reading_and_writing() {
-    let without_column = V2_HISTORY.to_owned();
-    let nullable = format!("{V2_HISTORY}, incognito INTEGER");
-    let with_default = format!("{V2_HISTORY}, incognito INTEGER NOT NULL DEFAULT 0");
-    for definition in [without_column, nullable, with_default] {
-        let mut f = fixture();
-        replace_history_table(&f.vault, &definition, 2);
-        let bytes = png(1, 1);
-        assert_eq!(
-            save(&mut f, &bytes, "image/png", (1, 1), "s1", 1),
-            Err(ImageError::SchemaMismatch),
-            "{definition}"
-        );
-        let db = open_vault(&f.vault).unwrap();
-        assert_eq!(
-            list_images(&db, None, 10).unwrap_err(),
-            ImageError::SchemaMismatch
-        );
-        assert_eq!(
-            image_sources(&db, 1, None, 10).unwrap_err(),
-            ImageError::SchemaMismatch
-        );
-        // Refused, not converted.
-        assert_eq!(scalar(&db, "PRAGMA user_version"), 2);
-        assert_eq!(
-            scalar(&db, "SELECT count(*) FROM pragma_table_info('saved_images') WHERE name = 'incognito' AND dflt_value IS NULL AND \"notnull\" = 1"),
-            0
+fn the_database_itself_requires_an_explicit_flag_of_zero_or_one() {
+    let f = fixture();
+    let db = open_vault(&f.vault).unwrap();
+    db.execute_batch("INSERT INTO image_blobs (sha256, mime_type, byte_length, width, height, created_at, last_saved_at, data) VALUES (printf('%064d', 1), 'image/png', 1, 1, 1, 1, 1, x'00');").unwrap();
+    let insert = |columns: &str, values: &str| {
+        db.execute_batch(&format!(
+            "INSERT INTO saved_images (save_id, blob_id, image_url, saved_at, incognito{columns}) VALUES (lower(hex(randomblob(8))), 1, 'https://a.test/', 1, 0{values})"
+        ))
+    };
+    assert!(insert("", "").is_err(), "no default");
+    for bad in ["NULL", "2", "-1", "'x'", "0.5"] {
+        assert!(
+            insert(", mcp_public", &format!(", {bad}")).is_err(),
+            "{bad}"
         );
     }
+    assert_eq!(scalar(&db, "SELECT count(*) FROM saved_images"), 0);
+    insert(", mcp_public", ", 0").unwrap();
+    assert!(db
+        .execute_batch("UPDATE saved_images SET mcp_public = 2")
+        .is_err());
+    assert!(db
+        .execute_batch("UPDATE saved_images SET mcp_public = NULL")
+        .is_err());
+}
+
+#[test]
+fn every_save_is_private_whatever_its_origin_or_blob_and_a_replay_keeps_the_choice() {
+    let mut f = fixture();
+    let bytes = png(4, 4);
+    let first = save(&mut f, &bytes, "image/png", (4, 4), "normal", 1).unwrap();
+    let mut secret = request(&bytes, "image/png", 4, 4, "secret");
+    secret.incognito = true;
+    save_image(&mut f.session, &f.ticket, &secret, None, None, 2).unwrap();
+    let other = png(8, 8);
+    save(&mut f, &other, "image/png", (8, 8), "other", 3).unwrap();
+    let db = open_vault(&f.vault).unwrap();
+    assert!(publication(&db).iter().all(|row| !row.2));
+
+    // A retried save action neither resets nor sets the flag.
+    set_mcp_public(&mut f.session, &f.ticket, first.saved_image_id, true).unwrap();
+    let replay = save(&mut f, &bytes, "image/png", (4, 4), "normal", 9).unwrap();
+    assert!(replay.replayed);
+    assert!(publication(&db)[0].2);
+    // A new save of public bytes is a new row, and private.
+    save(&mut f, &bytes, "image/png", (4, 4), "again", 10).unwrap();
+    assert!(!publication(&db)[3].2);
+}
+
+#[test]
+fn the_flag_changes_exactly_one_row_and_leaves_the_blob_and_its_counters_alone() {
+    let mut f = fixture();
+    let bytes = png(4, 4);
+    let a = save(&mut f, &bytes, "image/png", (4, 4), "a", 1).unwrap();
+    let b = save(&mut f, &bytes, "image/png", (4, 4), "b", 2).unwrap();
+    assert_eq!(a.blob_id, b.blob_id);
+    let c = save(&mut f, &png(8, 8), "image/png", (8, 8), "c", 3).unwrap();
+    let db = open_vault(&f.vault).unwrap();
+    let blob = |db: &Connection| -> (i64, i64, i64, Vec<u8>) {
+        db.query_row(
+            "SELECT save_count, created_at, last_saved_at, data FROM image_blobs WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap()
+    };
+    let before = blob(&db);
+    set_mcp_public(&mut f.session, &f.ticket, b.saved_image_id, true).unwrap();
+    let flags = |db: &Connection| publication(db).iter().map(|row| row.2).collect::<Vec<_>>();
+    assert_eq!(flags(&db), [false, true, false]);
+    assert_eq!(blob(&db), before);
+    set_mcp_public(&mut f.session, &f.ticket, b.saved_image_id, true).unwrap();
+    assert_eq!(flags(&db), [false, true, false], "setting it twice is fine");
+    set_mcp_public(&mut f.session, &f.ticket, c.saved_image_id, true).unwrap();
+    set_mcp_public(&mut f.session, &f.ticket, b.saved_image_id, false).unwrap();
+    assert_eq!(flags(&db), [false, false, true]);
+    for missing in [999, 0, -1] {
+        assert_eq!(
+            set_mcp_public(&mut f.session, &f.ticket, missing, true),
+            Err(ImageError::SavedImageNotFound)
+        );
+    }
+    assert_eq!(flags(&db), [false, false, true]);
+}
+
+#[test]
+fn an_incognito_row_cannot_be_made_public_but_a_left_over_value_can_be_cleared() {
+    let mut f = fixture();
+    let bytes = png(4, 4);
+    let normal = save(&mut f, &bytes, "image/png", (4, 4), "normal", 1).unwrap();
+    let mut secret = request(&bytes, "image/png", 4, 4, "secret");
+    secret.incognito = true;
+    let secret = save_image(&mut f.session, &f.ticket, &secret, None, None, 2).unwrap();
+    let db = open_vault(&f.vault).unwrap();
+    let flags = |db: &Connection| publication(db).iter().map(|row| row.2).collect::<Vec<_>>();
+
+    assert_eq!(
+        set_mcp_public(&mut f.session, &f.ticket, secret.saved_image_id, true),
+        Err(ImageError::IncognitoNotPublishable)
+    );
+    assert_eq!(flags(&db), [false, false], "nothing changed");
+    set_mcp_public(&mut f.session, &f.ticket, secret.saved_image_id, false).unwrap();
+    assert_eq!(flags(&db), [false, false]);
+
+    set_mcp_public(&mut f.session, &f.ticket, normal.saved_image_id, true).unwrap();
+    db.execute(
+        "UPDATE saved_images SET mcp_public = 1 WHERE id = ?1",
+        [secret.saved_image_id],
+    )
+    .unwrap();
+    assert_eq!(
+        set_mcp_public(&mut f.session, &f.ticket, secret.saved_image_id, true),
+        Err(ImageError::IncognitoNotPublishable)
+    );
+    set_mcp_public(&mut f.session, &f.ticket, secret.saved_image_id, false).unwrap();
+    assert_eq!(flags(&db), [true, false], "the other row stays as chosen");
+    assert_eq!(
+        set_mcp_public(&mut f.session, &f.ticket, 999, false),
+        Err(ImageError::SavedImageNotFound)
+    );
+}
+
+#[test]
+fn the_source_listing_reports_the_flag_of_each_row() {
+    let mut f = fixture();
+    let bytes = png(4, 4);
+    let a = save(&mut f, &bytes, "image/png", (4, 4), "a", 1).unwrap();
+    save(&mut f, &bytes, "image/png", (4, 4), "b", 2).unwrap();
+    set_mcp_public(&mut f.session, &f.ticket, a.saved_image_id, true).unwrap();
+    let db = open_vault(&f.vault).unwrap();
+    let items = image_sources(&db, a.blob_id, None, 10).unwrap().items;
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| (item.saved_image_id, item.mcp_public))
+            .collect::<Vec<_>>(),
+        [(a.saved_image_id + 1, false), (a.saved_image_id, true)]
+    );
 }

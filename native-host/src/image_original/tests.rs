@@ -211,31 +211,6 @@ fn after_a_vault_switch_an_old_request_gets_nothing_from_the_new_vault() {
     assert_eq!(read_all(&mut f, new_id, &new_sha), png(5, 1));
 }
 
-#[test]
-fn a_vault_without_image_tables_has_no_originals_and_is_not_migrated() {
-    let tmp = TempDir::new();
-    let vault = tmp.0.join("legacy.sqlite3");
-    rusqlite::Connection::open(&vault)
-        .unwrap()
-        .execute_batch(crate::SCHEMA_SQL)
-        .unwrap();
-    configure(&tmp.env(), &vault);
-    let mut f = Fixture {
-        session: Session::new(tmp.env()),
-        tmp,
-        vault,
-    };
-    let vault_token = token(&mut f);
-    for message in [
-        json!({ "type": "image_read", "blobId": 1, "sha256": "a".repeat(64), "vaultToken": vault_token, "offset": 0 }),
-        json!({ "type": "image_thumbnail_put", "blobId": 1, "sha256": "a".repeat(64), "vaultToken": vault_token, "thumbnail": thumbnail_json(4) }),
-    ] {
-        assert_eq!(ask(&mut f, message)["error"], "blob_missing");
-    }
-    let db = open_vault(&f.vault).unwrap();
-    assert_eq!(images::table_counts(&db).unwrap(), None);
-}
-
 // --- Thumbnails ----------------------------------------------------------------------------
 
 fn thumbnail_json(width: u32) -> Value {

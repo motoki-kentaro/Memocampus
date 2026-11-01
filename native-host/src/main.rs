@@ -6,6 +6,7 @@ use std::io::{self, Read, Write};
 mod dialog;
 mod image_original;
 mod image_protocol;
+mod image_publication;
 mod image_query;
 mod images;
 mod launch;
@@ -14,8 +15,6 @@ mod manage;
 mod policy_gate;
 mod search;
 mod vault;
-
-const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS visits (event_id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL, visited_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS tab_snapshots (event_id TEXT PRIMARY KEY, window_id INTEGER NOT NULL, tab_index INTEGER NOT NULL, url TEXT NOT NULL, title TEXT NOT NULL, pinned INTEGER NOT NULL, incognito INTEGER NOT NULL, recorded_at TEXT NOT NULL);";
 
 #[derive(Debug, Deserialize)]
 struct VisitEvent {
@@ -210,6 +209,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Some("image_list" | "image_thumbnails" | "image_sources") => {
                 write_message(&image_query::handle(&mut session, &value))?;
+            }
+            Some("image_mcp_public_set") => {
+                write_message(&image_publication::handle(&mut session, &value))?;
             }
             Some("image_read" | "image_thumbnail_put" | "image_export") => {
                 write_message(&image_original::handle(

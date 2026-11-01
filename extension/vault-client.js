@@ -18,6 +18,7 @@ export const STATE_TEXT = {
   not_configured: "Vaultが未設定です",
   missing: "Vaultファイルが見つかりません",
   invalid: "Vaultの形式が不正です",
+  vault_schema_mismatch: "このVaultは現在の形式に対応していません。自動変換は行いません",
   config_invalid: "設定ファイルを読み取れません",
   app_dir_unavailable: "設定フォルダを特定できません",
 };

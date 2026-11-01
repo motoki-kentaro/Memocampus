@@ -92,7 +92,10 @@ fn target(message: &Value) -> Result<Target, &'static str> {
 }
 
 /// The active vault, provided it is the one the request was made for.
-fn ticket_for(session: &mut Session, message: &Value) -> Result<VaultTicket, &'static str> {
+pub(crate) fn ticket_for(
+    session: &mut Session,
+    message: &Value,
+) -> Result<VaultTicket, &'static str> {
     let expected = message
         .get("vaultToken")
         .and_then(Value::as_str)

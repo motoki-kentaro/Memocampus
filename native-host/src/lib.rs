@@ -1,3 +1,4 @@
-//! Privacy foundation. Connected to automatic recording (`policy_gate`), not to MCP.
+//! What the host and VisibleStore share: the privacy policy and the vault schema definition.
 pub mod policy;
 pub mod policy_store;
+pub mod schema;

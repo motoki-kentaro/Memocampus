@@ -603,6 +603,81 @@ test("the history marks each incognito save, not the image; other rows and inval
   assert.ok(!$("#gallery-details-meta").textContent.includes("シークレット"));
 });
 
+const publicationSources = () => [
+  { savedImageId: 3, imageUrl: "https://a.test/3.png", pageUrl: null, frameUrl: null, savedAt: 3_000, incognito: true, mcpPublic: false },
+  { savedImageId: 2, imageUrl: "https://a.test/2.png", pageUrl: null, frameUrl: null, savedAt: 2_000, incognito: false, mcpPublic: true },
+  // A reply without the field is private, never public by accident.
+  { savedImageId: 1, imageUrl: "https://a.test/1.png", pageUrl: null, frameUrl: null, savedAt: 1_000, incognito: false },
+];
+
+async function openPublication() {
+  const opened = await openImageTab({ vaults: { A: pages("A", 1) }, active: "A", images: { A: [imageSummary(9, 3_000, { saveCount: 3, sources: publicationSources() })] } });
+  const { $ } = opened;
+  $("#gallery-grid").dispatch("click", { target: button(tiles($)[0]) });
+  await settle(30);
+  const boxes = $("#gallery-sources").children.map((li) => li.children.find((child) => child.className === "source-publication").children[0]);
+  return { ...opened, boxes };
+}
+
+test("each history row shows its own publication state; opening a history changes nothing", async () => {
+  const { host, boxes } = await openPublication();
+  assert.deepEqual(boxes.map((box) => box.checked), [false, true, false]);
+  assert.equal(requests(host, "image_mcp_public_set").length, 0);
+});
+
+test("changing one checkbox sends exactly that row and the vault it was listed from", async () => {
+  const { $, host, boxes } = await openPublication();
+  boxes[2].checked = true;
+  $("#gallery-sources").dispatch("change", { target: boxes[2] });
+  assert.equal(boxes[2].disabled, true, "no second click while the host answers");
+  await settle(30);
+  boxes[1].checked = false;
+  $("#gallery-sources").dispatch("change", { target: boxes[1] });
+  await settle(30);
+  const sent = requests(host, "image_mcp_public_set");
+  assert.deepEqual(sent.map((m) => [m.savedImageId, m.mcpPublic]), [[1, true], [2, false]]);
+  assert.ok(sent.every((m) => /^[0-9a-f]{64}$/.test(m.vaultToken)));
+  assert.deepEqual(boxes.map((box) => [box.checked, box.disabled]), [[false, true], [false, false], [true, false]]);
+});
+
+test("an incognito row offers no choice, says why, and sends nothing even if a change event arrives", async () => {
+  const { $, host, boxes } = await openPublication();
+  assert.equal(boxes[0].disabled, true);
+  assert.equal(boxes[0].checked, false);
+  const texts = $("#gallery-sources").children.map((li) => li.children.find((child) => child.className === "source-publication").children[1].textContent);
+  assert.equal(texts[0], "シークレット保存のためMCP非公開");
+  assert.match(texts[1], /公開を許可/);
+  boxes[0].checked = true;
+  $("#gallery-sources").dispatch("change", { target: boxes[0] });
+  await settle(30);
+  assert.equal(requests(host, "image_mcp_public_set").length, 0);
+});
+
+test("an incognito row with a stored flag is shown as private and stays so after reopening", async () => {
+  const sources = publicationSources();
+  sources[0].mcpPublic = true;
+  const { $, host } = await openImageTab({ vaults: { A: pages("A", 1) }, active: "A", images: { A: [imageSummary(9, 3_000, { saveCount: 3, sources })] } });
+  const boxesNow = () => $("#gallery-sources").children.map((li) => li.children.find((child) => child.className === "source-publication").children[0]);
+  for (let round = 0; round < 2; round += 1) {
+    $("#gallery-grid").dispatch("click", { target: button(tiles($)[0]) });
+    await settle(30);
+    assert.deepEqual([boxesNow()[0].checked, boxesNow()[0].disabled], [false, true]);
+  }
+  assert.equal(requests(host, "image_mcp_public_set").length, 0);
+});
+
+test("a refused change returns the checkbox to the stored state and says why", async () => {
+  const { $, host, boxes } = await openPublication();
+  host.publicationError = "saved_image_not_found";
+  boxes[2].checked = true;
+  $("#gallery-sources").dispatch("change", { target: boxes[2] });
+  await settle(30);
+  assert.equal(boxes[2].checked, false);
+  assert.equal(boxes[2].disabled, false);
+  const label = $("#gallery-sources").children[2].children.find((child) => child.className === "source-publication");
+  assert.match(label.children[2].textContent, /保存履歴が見つかりません/);
+});
+
 test("a history row without a boolean origin is not shown as a normal save", async () => {
   const send = async () => ({
     ok: true,
