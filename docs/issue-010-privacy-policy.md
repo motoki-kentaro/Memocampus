@@ -108,11 +108,14 @@ Both implementations use URL parsers (Rust `url`, JavaScript WHATWG `URL`):
 - `example.com`: exact host only. `*.example.com`: root plus dot-delimited descendants.
   `example.com/path/*`: exact host and `/path/` prefix, not bare `/path` or `/path-other`.
   A wildcard host may also have a path prefix. No regex, middle wildcards, userinfo, query,
-  fragment, scheme, or port in a rule. Paths are case-sensitive.
+  fragment, scheme, or port in a rule. Paths are case-sensitive. Version 2 patterns also take an
+  exact path (`example.com/private`) and one `*` in the last segment (`example.com/images/*.png`),
+  which never matches a `/`; version 1 strings keep this grammar (`issue-025-policy-engine.md`, Slice 4).
 - Percent-decode path once as strict UTF-8, including encoded slash; collapse dot segments.
   Invalid escapes/UTF-8, decoded controls/backslash/percent (including double encodings) are
   denied. This intentionally errs on the side of blocking ambiguous URLs. Query/fragment
   are separately validated and retained in normalized output, never appended to rule paths.
+  Since #25 Slice 4 a path rule also meets the path with each run of `/` made one; either match counts.
 - Userinfo counts as credentials. Query/fragment parameter names are form-decoded and
   ASCII-case-insensitive. Hash-router query strings are inspected too. Recognized credential
   names (even with empty values) trigger A. `code` alone triggers only on known callback paths,

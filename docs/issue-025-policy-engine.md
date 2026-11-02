@@ -1,6 +1,6 @@
 # Issue #25 — Privacy Policy engine
 
-Status: **Slices 1 and 2 merged; Slice 3 implemented, for review.** Policy v2 exists as a data model; no regular expression is evaluated, and no new rule syntax or settings UI exists.
+Status: **Slices 1 to 3 merged; Slice 4 implemented, for review.** Version 2 patterns add exact paths and a wildcard in the last path segment, and every path rule also meets the path with its slashes collapsed. No regular expression is evaluated, and no settings UI exists.
 Labels: **[verified]** was run, **[code]** was read in the source, **[inferred]** is reasoning not run.
 
 ## Slice 1: what changed
@@ -325,3 +325,96 @@ takes at most 1 MB from a host and the file may be up to 1 MiB.
 1. The regex evaluator replaces the `Err(UnsupportedRule)` of `RuleSpec::pattern` with its own compiled form, in a zone of its own.
 2. #23 reads with `policy_get`, offers `policy_migrate` when `schemaVersion` is 1, and needs a write message, which does not exist yet.
 3. `policy_too_large` is tested on both sides of the limit through the real host.
+
+## Slice 4: exact paths, a wildcard in the last segment, collapsed slashes
+
+### The path a rule meets [code] [verified]
+
+Rust `url` 2.5.8 (WHATWG). The judged path was, and stays, `path_of(url.path())`:
+
+| Step | Done by | Example |
+|---|---|---|
+| Dot segments, also `%2e` and `%2E`, are resolved | `url` | `/x/%2e%2e/private/a` → `/private/a` |
+| Everything is percent-decoded once, **also `%2F`** | `path_of`, before Slice 4 | `/private%2Fsecret` → `/private/secret` |
+| A `%`, control character or backslash left after decoding is an invalid URL, so `NeverSave` | `path_of` | `/%252F` → invalid |
+| Case and a trailing `/` are kept; runs of `/` are kept | — | `/Private/`, `//private/a` |
+
+Decoding `%2F` already happened before this slice, so `example.com/private/*` already matched `/private%2Fsecret`. Not decoding it would take that match
+away, so it stays. Slice 4 adds no decoding.
+
+### Grammar
+
+Version 2 `pattern` rules gain two forms. A version 1 string keeps the grammar it had, and so do the builtins: `example.com/private` in version 1 is
+`policy_invalid`, as before.
+
+| Pattern | Matches | Does not match |
+|---|---|---|
+| `example.com/private` (exact path, v2) | `/private`, also with a query | `/private/`, `/private/a`, `/private2`, `/Private` |
+| `example.com/*.png` (v2) | `/a.png`, `/.png` | `/images/a.png`, `/a.jpg`, `/a.PNG`, `/a.png/b` |
+| `example.com/images/*.png` (v2) | `/images/a.png` | `/images/sub/a.png`, `/a.png` |
+| `example.com/file-*.jpg` (v2) | `/file-.jpg`, `/file-123.jpg` | `/file-a/b.jpg`, `/other.jpg` |
+| `example.com/images/photo-*` (v2) | `/images/photo-`, `/images/photo-1.png` | `/images/photo-1/a` |
+| `example.com/private/*` (v1 and v2, unchanged) | `/private/` and everything below | `/private`, `/private-x` |
+
+The host part is unchanged: `*.example.com` covers the apex and every subdomain at any depth. A `*` in a path matches any text, also none, without a
+`/`. It may appear once, in the last segment. A path ending in `/*` is the old prefix form and keeps its meaning.
+
+Refused (`policy_invalid`, also in a disabled layer): `example.com/user/*/profile`, `example.com/*/*.png`, `example.com/images/**/photo.png`,
+`example.com/a*b*c.png`, `example.com/*/`; a `.` or `..` segment; `%2A` or `%2F` that would add or move a wildcard; an invalid escape; and everything refused
+before (scheme, port, userinfo, query, fragment, `*` inside a host). A `regex` rule is still refused whole as `policy_unsupported`.
+
+### Collapsed slashes
+
+Each path rule, user or builtin (authentication paths, callback paths), meets two views of the URL's path. A match in either counts:
+
+1. the judged path above, unchanged;
+2. the same with each run of `/` made one: `//private/secret` → `/private/secret`. Nothing else changes: no decoding, case, dot segment or query.
+
+The judged path still matches, so `example.com//private/*` keeps matching `//private/secret`. A second view can only add a match, which only refuses more:
+an old `NeverSave` stays `NeverSave`, an old `SaveButNoMcp` becomes at most `NeverSave`. This applies to version 1 and version 2.
+
+### Structure
+
+`Zone` keeps its host index. Each host holds a list of `Option<PathRule>`, `PathRule` being `Prefix`, `Exact` or `Name { dir, before, after }`, all parsed
+once at compile time. Judging computes the collapsed path only when the path contains `//`. No regular expression or new crate is used.
+
+### Verification
+
+- **Old against new** (scratch harness, main `37e5143` against this tree) [verified]: 3,000 random version 1 and version 2 policies of patterns both can
+  read, random categories and switches, 600,000 URLs with doubled slashes, encodings and dot segments. 0 looser decisions; 13,971 stricter, all on a path
+  with `//`.
+- The unit test comparing with the former evaluator now also has URLs with `//`, `///`, `//login` and `//callback`. Any difference must be stricter and on
+  such a path.
+- A pattern valid in version 1 parses to the same rule in version 2. A migration keeps every rule text as written.
+- Through the real host: batch decisions and the judgement before the vault for the new forms and doubled slashes; no refused URL in the vault; a version 1
+  file stays version 1. Through VisibleStore: the new forms keep rows out of the public read.
+
+### Measurements [verified]
+
+Release build, synthetic rules and URLs, median per URL. The machine changes speed during a run, so old and new were measured in alternation.
+
+| Case | Old | New |
+|---|---|---|
+| 999 host rules, URL of another host | 2 µs | 2 µs |
+| 999 host rules, URL of another host with `//` | 2 µs | 3 µs |
+| 999 `dir/*` rules on the URL's host | 3.3 µs | 3.6 µs |
+| 999 `dir/*` rules on the URL's host, URL with `//` | 8.2–9.1 µs | 12.6–13.8 µs (two views) |
+| 999 `dir/*.png` rules on the URL's host | — | 10.3–11.8 µs |
+| 999 exact path rules on the URL's host | — | 5.6–6.3 µs |
+| Compile, 999 rules, v1 or v2 | 0.8–1.7 ms | 0.8–2.0 ms |
+
+VisibleStore, 10,000 image rows, 50 % public, 999 rules: 68.8 ms in total, compile 0.87 ms (Slice 3: 72.5 ms). With no rule: 67.3 ms.
+
+### Remaining risks
+
+- A server that reads `%2F` as part of a name is judged by the decoded path: `example.com/images/*.png` does not match `/images/sub%2Fa.png`, since the
+  judged path is `/images/sub/a.png`. The old prefix form is not affected.
+- Rules of one host are still scanned in a list. 999 rules on one host cost about 4 to 8 µs per URL, 13 µs with `//`.
+- The JS evaluator, kept for tests, knows neither the new forms nor collapsed slashes. A version 2 policy with a new form is invalid there. It decides
+  nothing in the product.
+- Not run: Chrome, CI.
+
+### Handoff to Slice 5
+
+1. Regular expressions replace the `Err(UnsupportedRule)` of `RuleSpec::pattern`.
+2. #23 needs to explain the version 2 forms, and that version 1 rules gain them only after the explicit migration.

@@ -17,7 +17,10 @@ mod legacy {
         Some(LegacyRule {
             host: parsed.host,
             wildcard: parsed.wildcard,
-            path: parsed.path,
+            path: parsed.path.map(|path| match path {
+                PathRule::Prefix(prefix) => prefix,
+                other => panic!("version 1 has prefixes only: {other:?}"),
+            }),
         })
     }
 
@@ -174,6 +177,10 @@ fn urls() -> Vec<String> {
         "/private%2Fa",
         "/x/../private/a",
         "//private/a",
+        "///private/a",
+        "/private//a",
+        "//login",
+        "/x//callback",
         "/秘密/a",
         "/login",
         "/login/x",
@@ -215,15 +222,30 @@ fn is_intended_change(url: &str) -> bool {
     url.ends_with("??token=x") || url.ends_with("?a?token=x")
 }
 
+/// How much a decision withholds: more is stricter.
+fn strictness(decision: Decision) -> u8 {
+    match decision {
+        Decision::None => 0,
+        Decision::SaveButNoMcp => 1,
+        Decision::NeverSave => 2,
+    }
+}
+
+/// Since Slice 4 a path rule also meets the path with its runs of `/` collapsed.
+fn has_a_run_of_slashes(url: &str) -> bool {
+    normalize_url(url).is_ok_and(|url| url.path.contains("//"))
+}
+
 fn compare(policy: &Policy, urls: &[String]) {
     let compiled = CompiledPolicy::compile(policy).unwrap();
     for url in urls {
         let (old, new) = (legacy::evaluate(policy, url), compiled.evaluate(url));
         if old != new {
             assert!(
-                is_intended_change(url)
+                (is_intended_change(url)
                     && new == Decision::NeverSave
-                    && policy.categories.credentials,
+                    && policy.categories.credentials)
+                    || (has_a_run_of_slashes(url) && strictness(new) > strictness(old)),
                 "{url}: {old:?} -> {new:?}"
             );
         }
@@ -285,6 +307,7 @@ fn invalid_rules_refuse_the_whole_policy_even_in_a_disabled_layer() {
         "*",
         "https://a.test/*",
         "a.test/x",
+        "a.test/*.png",
         "a.test:1",
         "xn--a.test",
         "",
@@ -491,7 +514,7 @@ fn regex_unknown_kinds_malformed_rules_and_other_versions_are_refused() {
         serde_json::json!([{ "kind": "pattern", "pattern": "a.test", "isRegex": false }]),
         serde_json::json!([{ "kind": "pattern", "pattern": 1 }]),
         serde_json::json!([{ "kind": "pattern", "pattern": "https://a.test/*" }]),
-        serde_json::json!([{ "kind": "pattern", "pattern": "a.test/x" }]),
+        serde_json::json!([{ "kind": "pattern", "pattern": "a.test/*/x" }]),
         serde_json::json!([1]),
         serde_json::json!([null]),
         serde_json::json!(["a.test"]),
@@ -650,4 +673,347 @@ fn only_a_valid_version_1_policy_can_be_migrated() {
         ..Policy::default()
     };
     assert_eq!(future.migrated().unwrap_err(), Error::NotMigratable);
+}
+
+// --- Slice 4: exact paths, a wildcard in the last segment, collapsed slashes ------------------
+
+/// Version 2 with patterns version 1 could not hold.
+fn v2_typed(never: &[&str], private: &[&str]) -> Policy {
+    let mut policy = Policy::default();
+    policy.layers.never_save.rules = never.iter().map(|&r| r.into()).collect();
+    policy.layers.save_but_no_mcp.rules = private.iter().map(|&r| r.into()).collect();
+    policy.validate().unwrap();
+    policy
+}
+
+/// Whether each URL is refused by `rule` as a version 2 pattern of the Blind Zone.
+fn refused(rule: &str, cases: &[(&str, bool)]) {
+    let compiled = CompiledPolicy::compile(&v2_typed(&[rule], &[])).unwrap();
+    for &(url, expected) in cases {
+        assert_eq!(
+            compiled.evaluate(url) == Decision::NeverSave,
+            expected,
+            "{rule} {url}"
+        );
+    }
+}
+
+#[test]
+fn an_exact_path_means_that_path_only() {
+    refused(
+        "example.com/private",
+        &[
+            ("https://example.com/private", true),
+            ("https://example.com/private?q=1", true),
+            ("https://example.com/private/", false),
+            ("https://example.com/private/a", false),
+            ("https://example.com/private2", false),
+            ("https://example.com/Private", false),
+            ("https://www.example.com/private", false),
+            ("https://example.com/", false),
+        ],
+    );
+    refused(
+        "*.example.com/private",
+        &[
+            ("https://example.com/private", true),
+            ("https://a.b.example.com/private", true),
+            ("https://a.b.example.com/private/a", false),
+        ],
+    );
+    refused(
+        "example.com/",
+        &[
+            ("https://example.com", true),
+            ("https://example.com/", true),
+            ("https://example.com/a", false),
+        ],
+    );
+    refused(
+        "example.com/private/",
+        &[
+            ("https://example.com/private/", true),
+            ("https://example.com/private", false),
+            ("https://example.com/private/a", false),
+        ],
+    );
+}
+
+#[test]
+fn a_wildcard_matches_within_the_last_segment_only() {
+    refused(
+        "example.com/*.png",
+        &[
+            ("https://example.com/a.png", true),
+            ("https://example.com/long-name.png", true),
+            ("https://example.com/.png", true),
+            ("https://example.com/images/a.png", false),
+            ("https://example.com/a.jpg", false),
+            ("https://example.com/a.PNG", false),
+            ("https://example.com/a.png/", false),
+            ("https://example.com/a.png/b", false),
+        ],
+    );
+    refused(
+        "example.com/images/*.png",
+        &[
+            ("https://example.com/images/a.png", true),
+            ("https://example.com/images/long-name.png", true),
+            ("https://example.com/images/sub/a.png", false),
+            ("https://example.com/a.png", false),
+            ("https://example.com/images-a.png", false),
+        ],
+    );
+    refused(
+        "example.com/file-*.jpg",
+        &[
+            ("https://example.com/file-.jpg", true),
+            ("https://example.com/file-123.jpg", true),
+            ("https://example.com/file-a/b.jpg", false),
+            ("https://example.com/file-.jp", false),
+            ("https://example.com/file.jpg", false),
+            ("https://example.com/other.jpg", false),
+        ],
+    );
+    refused(
+        "example.com/images/photo-*",
+        &[
+            ("https://example.com/images/photo-", true),
+            ("https://example.com/images/photo-1.png", true),
+            ("https://example.com/images/photo-1/a", false),
+            ("https://example.com/images/photo", false),
+        ],
+    );
+    // The text around the wildcard does not overlap: `ab*ba` needs four characters.
+    refused(
+        "example.com/ab*ba",
+        &[
+            ("https://example.com/aba", false),
+            ("https://example.com/abba", true),
+        ],
+    );
+    // The old trailing `/*` keeps covering everything below the directory.
+    refused(
+        "example.com/private/*",
+        &[
+            ("https://example.com/private/a", true),
+            ("https://example.com/private/a/b/c", true),
+            ("https://example.com/private", false),
+        ],
+    );
+}
+
+#[test]
+fn a_wildcard_elsewhere_and_the_new_forms_in_version_1_are_refused() {
+    for bad in [
+        "example.com/user/*/profile",
+        "example.com/*/*.png",
+        "example.com/images/**/photo.png",
+        "example.com/**",
+        "example.com/a*b*c.png",
+        "example.com/*/",
+        "example.com/a/./b",
+        "example.com/a/../b",
+        "example.com/a/*.png/..",
+        "example.com/%2A.png",
+        "example.com/*%2Fa.png",
+        "example.com/a%",
+        "example.com/a%2",
+        "example.com/%FF",
+        "example.com/a b",
+        "example.com/a\\b",
+        "example.com/a?b",
+        "example.com/a#b",
+        "*.example.com*/a",
+        "ex*ample.com/a",
+        "*example.com/a",
+        "*.*.example.com/a",
+        "example.com:443/a",
+        "user@example.com/a",
+        "https://example.com/a",
+        "/a",
+        "",
+    ] {
+        assert!(Rule::parse_in(bad, Syntax::Version2).is_err(), "{bad}");
+        assert!(Rule::parse(bad).is_err(), "{bad}");
+        let mut value = with_rules(
+            2,
+            serde_json::json!([{ "kind": "pattern", "pattern": bad }]),
+        );
+        assert_eq!(
+            parse_json(value.clone()).unwrap_err(),
+            Error::InvalidPolicy,
+            "{bad}"
+        );
+        value["layers"]["neverSave"]["enabled"] = false.into();
+        assert_eq!(
+            parse_json(value).unwrap_err(),
+            Error::InvalidPolicy,
+            "{bad}"
+        );
+    }
+    for new in [
+        "example.com/private",
+        "example.com/",
+        "example.com/*.png",
+        "example.com/images/*.png",
+        "example.com/file-*.jpg",
+        "example.com/images/photo-*",
+    ] {
+        assert!(Rule::parse_in(new, Syntax::Version2).is_ok(), "{new}");
+        assert!(
+            Rule::parse(new).is_err(),
+            "version 1 keeps its grammar: {new}"
+        );
+        assert_eq!(
+            parse_json(with_rules(1, serde_json::json!([new]))).unwrap_err(),
+            Error::InvalidPolicy,
+            "{new}"
+        );
+    }
+    // A pattern valid in version 1 is valid in version 2 and means the same.
+    for rule in RULES {
+        let (v1, v2) = (Rule::parse(rule), Rule::parse_in(rule, Syntax::Version2));
+        assert_eq!(v1.is_ok(), v2.is_ok(), "{rule}");
+        if let (Ok(v1), Ok(v2)) = (v1, v2) {
+            assert_eq!(
+                (v1.host, v1.wildcard, v1.path),
+                (v2.host, v2.wildcard, v2.path)
+            );
+        }
+    }
+}
+
+#[test]
+fn a_path_rule_meets_the_path_as_judged_and_with_its_slashes_collapsed() {
+    refused(
+        "example.com/private/*",
+        &[
+            ("https://example.com/private/secret", true),
+            ("https://example.com//private/secret", true),
+            ("https://example.com///private/secret", true),
+            ("https://example.com/////////private/secret", true),
+            ("https://example.com/private//secret", true),
+            ("https://example.com//private//", true),
+            ("https://example.com//private", false),
+            ("https://example.com//Private/secret", false),
+            ("https://example.com//public/secret", false),
+        ],
+    );
+    // Only the judged path matches this rule: collapsing never takes a match away.
+    refused(
+        "example.com//private/*",
+        &[
+            ("https://example.com//private/secret", true),
+            ("https://example.com/private/secret", false),
+        ],
+    );
+    refused(
+        "example.com/private",
+        &[
+            ("https://example.com//private", true),
+            ("https://example.com///private", true),
+            ("https://example.com//private/", false),
+        ],
+    );
+    refused(
+        "example.com/images/*.png",
+        &[
+            ("https://example.com/images//a.png", true),
+            ("https://example.com//images/a.png", true),
+            ("https://example.com/images//sub/a.png", false),
+        ],
+    );
+    // What the judged path already decoded before Slice 4 stays decoded, and nothing more is:
+    // `%2F` was a `/` already, and a doubly encoded one is still an invalid URL.
+    refused(
+        "example.com/private/*",
+        &[
+            ("https://example.com/private%2Fsecret", true),
+            ("https://example.com/%2Fprivate/secret", true),
+            ("https://example.com/%2F%2Fprivate/secret", true),
+            ("https://example.com/%252Fprivate/secret", true),
+        ],
+    );
+    assert_eq!(collapse_slashes("/private/a"), None);
+    assert_eq!(
+        collapse_slashes("//private/a").as_deref(),
+        Some("/private/a")
+    );
+    assert_eq!(collapse_slashes("/a///b//").as_deref(), Some("/a/b/"));
+    assert_eq!(collapse_slashes("//").as_deref(), Some("/"));
+    assert_eq!(
+        collapse_slashes("//A/%2F/./b").as_deref(),
+        Some("/A/%2F/./b"),
+        "nothing but slashes changes"
+    );
+    let open = CompiledPolicy::compile(&Policy::default()).unwrap();
+    assert_eq!(
+        open.evaluate("https://public.test//private/a"),
+        Decision::None
+    );
+    assert_eq!(
+        open.evaluate("https://public.test//login"),
+        Decision::NeverSave
+    );
+    assert_eq!(
+        open.evaluate("https://public.test//callback?code=1"),
+        Decision::NeverSave
+    );
+}
+
+#[test]
+fn the_new_forms_work_in_both_zones_and_the_blind_zone_wins() {
+    let compiled = CompiledPolicy::compile(&v2_typed(
+        &["example.com/secret", "example.com/img/*.png"],
+        &[
+            "example.com/notes",
+            "example.com/img/*",
+            "example.com/file-*.jpg",
+        ],
+    ))
+    .unwrap();
+    for (url, expected) in [
+        ("https://example.com/secret", Decision::NeverSave),
+        ("https://example.com//secret", Decision::NeverSave),
+        ("https://example.com/secret/", Decision::None),
+        ("https://example.com/img/a.png", Decision::NeverSave),
+        ("https://example.com/img//a.png", Decision::NeverSave),
+        ("https://example.com/img/a.jpg", Decision::SaveButNoMcp),
+        ("https://example.com/img/sub/a.png", Decision::SaveButNoMcp),
+        ("https://example.com/notes", Decision::SaveButNoMcp),
+        ("https://example.com//notes", Decision::SaveButNoMcp),
+        ("https://example.com/notes/a", Decision::None),
+        ("https://example.com/file-.jpg", Decision::SaveButNoMcp),
+        (
+            "https://example.com/file-1.jpg?token=x",
+            Decision::NeverSave,
+        ),
+        ("https://example.com/other.jpg", Decision::None),
+    ] {
+        assert_eq!(compiled.evaluate(url), expected, "{url}");
+    }
+    let mut off = v2_typed(&["example.com/secret"], &["example.com/*.png"]);
+    off.layers.never_save.enabled = false;
+    off.layers.save_but_no_mcp.enabled = false;
+    let off = CompiledPolicy::compile(&off).unwrap();
+    assert_eq!(off.evaluate("https://example.com/secret"), Decision::None);
+    assert_eq!(off.evaluate("https://example.com/a.png"), Decision::None);
+}
+
+#[test]
+fn a_migration_keeps_each_rule_as_written() {
+    let original = policy(&["example.com/a/*", "*.b.test"], &["c.test//x/*"]);
+    let migrated = original.migrated().unwrap();
+    assert_eq!(
+        migrated.layers.never_save.rules,
+        [
+            RuleSpec::from("example.com/a/*"),
+            RuleSpec::from("*.b.test")
+        ]
+    );
+    assert_eq!(
+        migrated.layers.save_but_no_mcp.rules,
+        [RuleSpec::from("c.test//x/*")]
+    );
 }
