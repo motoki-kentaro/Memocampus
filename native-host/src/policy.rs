@@ -68,13 +68,21 @@ impl From<String> for RuleSpec {
     }
 }
 impl RuleSpec {
-    /// The pattern of a rule this version can evaluate.
-    fn pattern(&self) -> Result<&str, Error> {
+    /// The pattern of a rule this version can evaluate, with the grammar of its version.
+    fn pattern(&self) -> Result<(&str, Syntax), Error> {
         match self {
-            Self::Text(pattern) | Self::Typed(TypedRule::Pattern { pattern }) => Ok(pattern),
+            Self::Text(pattern) => Ok((pattern, Syntax::Version1)),
+            Self::Typed(TypedRule::Pattern { pattern }) => Ok((pattern, Syntax::Version2)),
             Self::Typed(TypedRule::Regex { .. }) => Err(Error::UnsupportedRule),
         }
     }
+}
+/// The grammar of a pattern. Version 2 adds an exact path and a wildcard in the last path segment;
+/// a version 1 string keeps the grammar it had, and so do the builtins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Syntax {
+    Version1,
+    Version2,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -133,7 +141,8 @@ impl Policy {
         self.check_header()?;
         for layer in [&self.layers.never_save, &self.layers.save_but_no_mcp] {
             for rule in &layer.rules {
-                Rule::parse(rule.pattern()?)?;
+                let (pattern, syntax) = rule.pattern()?;
+                Rule::parse_in(pattern, syntax)?;
             }
         }
         Ok(())
@@ -185,12 +194,12 @@ impl Policy {
 /// A `None` path covers the whole host.
 #[derive(Debug, Default)]
 struct Zone {
-    exact: HashMap<String, Vec<Option<String>>>,
-    wildcard: HashMap<String, Vec<Option<String>>>,
+    exact: HashMap<String, Vec<Option<PathRule>>>,
+    wildcard: HashMap<String, Vec<Option<PathRule>>>,
 }
 impl Zone {
-    fn add(&mut self, rule: &str) -> Result<(), Error> {
-        let rule = Rule::parse(rule)?;
+    fn add(&mut self, rule: &str, syntax: Syntax) -> Result<(), Error> {
+        let rule = Rule::parse_in(rule, syntax)?;
         let hosts = if rule.wildcard {
             &mut self.wildcard
         } else {
@@ -200,23 +209,29 @@ impl Zone {
         Ok(())
     }
     fn add_all(&mut self, rules: &[String]) -> Result<(), Error> {
-        rules.iter().try_for_each(|rule| self.add(rule))
+        rules
+            .iter()
+            .try_for_each(|rule| self.add(rule, Syntax::Version1))
     }
     fn add_specs(&mut self, rules: &[RuleSpec]) -> Result<(), Error> {
-        rules.iter().try_for_each(|rule| self.add(rule.pattern()?))
+        rules.iter().try_for_each(|rule| {
+            let (pattern, syntax) = rule.pattern()?;
+            self.add(pattern, syntax)
+        })
     }
-    fn matches(&self, url: &NormalizedUrl) -> bool {
-        let covers = |paths: &Vec<Option<String>>| {
-            paths.iter().any(|path| {
-                path.as_ref()
-                    .is_none_or(|p| url.path.starts_with(p.as_str()))
+    /// A rule matches if it matches any of the views of the path.
+    fn matches(&self, host: &str, paths: &[&str]) -> bool {
+        let covers = |rules: &Vec<Option<PathRule>>| {
+            rules.iter().any(|rule| {
+                rule.as_ref()
+                    .is_none_or(|rule| paths.iter().any(|path| rule.matches(path)))
             })
         };
-        if self.exact.get(&url.host).is_some_and(covers) {
+        if self.exact.get(host).is_some_and(covers) {
             return true;
         }
         // The whole host, then what follows each dot: exactly the suffixes on a label boundary.
-        let mut suffix = url.host.as_str();
+        let mut suffix = host;
         loop {
             if self.wildcard.get(suffix).is_some_and(covers) {
                 return true;
@@ -267,22 +282,30 @@ impl CompiledPolicy {
             private: if b.enabled { private } else { Zone::default() },
         })
     }
-    /// Blind Zone first. An invalid URL is `NeverSave` whatever the layers say.
+    /// Blind Zone first. An invalid URL is `NeverSave` whatever the layers say. A path rule meets
+    /// the judged path and the same with its runs of `/` collapsed: either match counts.
     pub fn evaluate(&self, input: &str) -> Decision {
         let Ok(url) = normalize_url(input) else {
             return Decision::NeverSave;
         };
-        if self.blind.matches(&url)
+        let collapsed = collapse_slashes(&url.path);
+        let both = [url.path.as_str(), collapsed.as_deref().unwrap_or_default()];
+        let paths = if collapsed.is_some() {
+            &both[..]
+        } else {
+            &both[..1]
+        };
+        if self.blind.matches(&url.host, paths)
             || (self.auth_paths
                 && BUILTINS
                     .auth_paths
                     .iter()
-                    .any(|p| path_matches(&url.path, p)))
-            || (self.credentials && has_credentials(&url))
+                    .any(|p| paths.iter().any(|path| path_matches(path, p))))
+            || (self.credentials && has_credentials(&url, paths))
         {
             return Decision::NeverSave;
         }
-        if self.private.matches(&url) {
+        if self.private.matches(&url.host, paths) {
             return Decision::SaveButNoMcp;
         }
         Decision::None
@@ -352,6 +375,20 @@ fn path_of(path: &str) -> Result<String, Error> {
     }
     Ok(format!("/{}", parts.join("/")))
 }
+/// The judged path with each run of `/` made one, if that changes it. Nothing else is rewritten:
+/// no decoding beyond what `path_of` did, no case, dot segment or query change.
+fn collapse_slashes(path: &str) -> Option<String> {
+    if !path.contains("//") {
+        return None;
+    }
+    let mut out = String::with_capacity(path.len());
+    for c in path.chars() {
+        if !(c == '/' && out.ends_with('/')) {
+            out.push(c);
+        }
+    }
+    Some(out)
+}
 pub fn normalize_url(input: &str) -> Result<NormalizedUrl, Error> {
     if input.encode_utf16().count() > 32768
         || input
@@ -397,10 +434,72 @@ pub fn normalize_url(input: &str) -> Result<NormalizedUrl, Error> {
 pub struct Rule {
     host: String,
     wildcard: bool,
-    path: Option<String>,
+    path: Option<PathRule>,
+}
+/// The path part of a rule, compared with a judged path.
+#[derive(Debug, Clone, PartialEq)]
+enum PathRule {
+    /// `/dir/*`, the only form of version 1: the directory and everything below it.
+    Prefix(String),
+    /// Version 2: this path and no other, not even with a trailing `/`.
+    Exact(String),
+    /// Version 2: one `*` in the last segment, matching any text, also none, without a `/`.
+    Name {
+        dir: String,
+        before: String,
+        after: String,
+    },
+}
+impl PathRule {
+    fn parse(path: &str, syntax: Syntax) -> Result<Self, Error> {
+        let stars = path.matches('*').count();
+        if stars == 1 && path.ends_with("/*") {
+            return Ok(Self::Prefix(path_of(&path[..path.len() - 1])?));
+        }
+        if syntax == Syntax::Version1 || stars > 1 {
+            return Err(Error::InvalidPolicy);
+        }
+        // Read like a judged path. A dot segment, or an encoded `*` or `/` that would move the
+        // wildcard, makes the rule mean something else than it says, so it is refused.
+        let judged = path_of(path)?;
+        if judged != decode(path)? || judged.matches('*').count() != stars {
+            return Err(Error::InvalidPolicy);
+        }
+        let Some((before, after)) = judged.split_once('*') else {
+            return Ok(Self::Exact(judged));
+        };
+        if after.contains('/') {
+            return Err(Error::InvalidPolicy);
+        }
+        let (dir, before) = before.split_at(before.rfind('/').map_or(0, |i| i + 1));
+        Ok(Self::Name {
+            dir: dir.into(),
+            before: before.into(),
+            after: after.into(),
+        })
+    }
+    fn matches(&self, path: &str) -> bool {
+        match self {
+            Self::Prefix(prefix) => path.starts_with(prefix.as_str()),
+            Self::Exact(exact) => path == exact,
+            Self::Name { dir, before, after } => {
+                path.strip_prefix(dir.as_str()).is_some_and(|name| {
+                    !name.contains('/')
+                        && name.len() >= before.len() + after.len()
+                        && name.starts_with(before.as_str())
+                        && name.ends_with(after.as_str())
+                })
+            }
+        }
+    }
 }
 impl Rule {
+    /// A version 1 pattern.
     pub fn parse(rule: &str) -> Result<Self, Error> {
+        Self::parse_in(rule, Syntax::Version1)
+    }
+    /// A pattern read with the grammar of `syntax`.
+    pub fn parse_in(rule: &str, syntax: Syntax) -> Result<Self, Error> {
         if rule.encode_utf16().count() > 2048
             || rule
                 .chars()
@@ -421,14 +520,9 @@ impl Rule {
         if normalized.userinfo || normalized.port.is_some() || normalized.path != "/" {
             return Err(Error::InvalidPolicy);
         }
-        let path = if let Some(path) = raw_path {
-            if !path.ends_with("/*") || path[..path.len() - 1].contains('*') {
-                return Err(Error::InvalidPolicy);
-            }
-            Some(path_of(&path[..path.len() - 1]).map_err(|_| Error::InvalidPolicy)?)
-        } else {
-            None
-        };
+        let path = raw_path
+            .map(|path| PathRule::parse(path, syntax).map_err(|_| Error::InvalidPolicy))
+            .transpose()?;
         Ok(Self {
             host: normalized.host,
             wildcard,
@@ -444,7 +538,7 @@ fn path_matches(path: &str, prefix: &str) -> bool {
 fn parameter_name(key: &str) -> String {
     key.rsplit('?').next().unwrap_or(key).to_ascii_lowercase()
 }
-fn has_credentials(url: &NormalizedUrl) -> bool {
+fn has_credentials(url: &NormalizedUrl, paths: &[&str]) -> bool {
     let fragment = url
         .fragment
         .split_once('?')
@@ -462,7 +556,7 @@ fn has_credentials(url: &NormalizedUrl) -> bool {
                 || BUILTINS
                     .callback_paths
                     .iter()
-                    .any(|p| path_matches(&url.path, p))))
+                    .any(|p| paths.iter().any(|path| path_matches(path, p)))))
 }
 
 #[cfg(test)]

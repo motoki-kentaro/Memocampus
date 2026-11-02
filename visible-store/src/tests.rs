@@ -3011,3 +3011,31 @@ fn a_policy_with_a_regex_rule_publishes_nothing() {
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     assert_failed(f.store.search_visits(&ALL), VisibleError::PolicyUnavailable);
 }
+
+#[test]
+fn the_new_patterns_and_collapsed_slashes_keep_rows_out_of_the_public_read() {
+    let f = Fixture::new();
+    f.add_rule(true, "new.test/secret");
+    f.add_rule(false, "new.test/img/*.png");
+    f.add_rule(false, "new.test/notes");
+    let db = writer(&f.vault);
+    let rows = [
+        ("blind-exact", "https://new.test/secret", false),
+        ("blind-doubled", "https://new.test//secret", false),
+        ("private-name", "https://new.test/img/CANARY.png", false),
+        ("private-doubled", "https://new.test/img//CANARY.png", false),
+        ("private-exact", "https://new.test///notes", false),
+        ("public-below", "https://new.test/secret/x", true),
+        ("public-sub", "https://new.test/img/sub/x.png", true),
+        ("public-other", "https://new.test/img/x.jpg", true),
+    ];
+    for (id, url, _) in rows {
+        visit(&db, id, url, "Title", &day(3));
+    }
+    drop(db);
+    let visible = f.urls();
+    for (id, url, public) in rows {
+        assert_eq!(visible.iter().any(|u| u == url), public, "{id}");
+    }
+    assert_eq!(visible.len(), 3, "{visible:?}");
+}

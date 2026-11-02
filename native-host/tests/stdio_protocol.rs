@@ -2426,3 +2426,102 @@ fn a_document_too_large_for_chrome_is_refused_without_its_content() {
         assert_eq!(policy_bytes(&tmp), before, "and changes nothing");
     }
 }
+
+#[test]
+fn the_new_patterns_and_collapsed_slashes_hold_in_the_batch_and_again_before_the_vault() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let store = store_of(&tmp);
+    let current = store.load().unwrap();
+    assert_eq!(current.policy.schema_version, 2);
+    let mut edited = current.policy.clone();
+    edited.layers.never_save.rules = vec![
+        "blind.example/secret".into(),
+        "blind.example/img/*.png".into(),
+        "blind.example/dir/*".into(),
+    ];
+    edited.layers.save_but_no_mcp.rules = vec!["private.example/file-*.jpg".into()];
+    store.update(&current, edited).unwrap();
+    let urls = [
+        ("1", "https://blind.example/secret"),
+        ("2", "https://blind.example//secret"),
+        ("3", "https://blind.example/img/CANARY.png"),
+        ("4", "https://blind.example///img//CANARY.png"),
+        ("5", "https://blind.example//dir/CANARY"),
+        ("6", "https://blind.example/secret/CANARY"),
+        ("7", "https://blind.example/img/sub/CANARY.png"),
+        ("8", "https://private.example/file-CANARY.jpg"),
+        ("9", "https://private.example//file-.jpg"),
+        ("10", "https://private.example/file-CANARY/x.jpg"),
+    ];
+    let expected = [
+        "never_save",
+        "never_save",
+        "never_save",
+        "never_save",
+        "never_save",
+        "allow",
+        "allow",
+        "save_but_no_mcp",
+        "save_but_no_mcp",
+        "allow",
+    ];
+    let items: Vec<Value> = urls
+        .iter()
+        .map(|(id, url)| json!({ "id": id, "url": url }))
+        .collect();
+    let reply = exchange(&tmp, &[batch(json!(items))]).remove(0);
+    assert_eq!(
+        decisions(&reply),
+        urls.iter()
+            .zip(expected)
+            .map(|((id, _), decision)| (id.to_string(), decision.to_owned()))
+            .collect::<Vec<_>>()
+    );
+    assert!(!reply.to_string().contains("CANARY"));
+    // A precheck is no permission: the host judges each event again before the vault.
+    let events: Vec<Value> = urls.iter().map(|(id, url)| visit(id, url, AT)).collect();
+    let acks = exchange(&tmp, &events);
+    for ((id, _), (ack, decision)) in urls.iter().zip(acks.iter().zip(expected)) {
+        let want = if decision == "never_save" {
+            dropped(id)
+        } else {
+            stored(id)
+        };
+        assert_eq!(ack, &want, "{id}");
+    }
+    let rows = row_dump(&tmp.default_vault()).join("\n");
+    for (_, url) in &urls[..5] {
+        assert!(!rows.contains(&format!("|{url}|")), "{url}");
+    }
+    assert_eq!(rows.lines().count(), 5, "{rows}");
+}
+
+#[test]
+fn a_version_1_policy_also_refuses_a_path_hidden_behind_doubled_slashes() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    with_canary_rules(&tmp);
+    let reply = exchange(
+        &tmp,
+        &[batch(json!([
+            { "id": "1", "url": "https://private-canary.test/x/1" },
+            { "id": "2", "url": "https://private-canary.test//x/1" },
+            { "id": "3", "url": "https://private-canary.test//x" },
+            { "id": "4", "url": "https://public.test//login" },
+        ]))],
+    )
+    .remove(0);
+    assert_eq!(
+        decisions(&reply),
+        [
+            ("1", "save_but_no_mcp"),
+            ("2", "save_but_no_mcp"),
+            ("3", "allow"),
+            ("4", "never_save"),
+        ]
+        .map(|(id, decision)| (id.to_owned(), decision.to_owned()))
+    );
+    let v1 = std::fs::read(store_of(&tmp).policy_path()).unwrap();
+    assert!(String::from_utf8_lossy(&v1).contains("\"schemaVersion\": 1"));
+}
