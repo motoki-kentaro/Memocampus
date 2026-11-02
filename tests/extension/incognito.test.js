@@ -27,7 +27,7 @@ async function startWorker({ tabs = {}, query = [], seed = {} } = {}) {
       connectNative() {},
       lastError: undefined,
       sendNativeMessage(_host, event, reply) {
-        if (event.type === "policy_status") return reply({ ok: true, type: "policy_result", requestId: event.requestId, state: "ready", policy: defaults, etag: "e" });
+        if (event.type === "policy_status") return reply({ ok: true, type: "policy_result", requestId: event.requestId, state: "ready", revision: defaults.revision, etag: "e" });
         if (event.type === "policy_evaluate_batch") return reply({ ok: true, type: "policy_evaluate_batch_result", requestId: event.requestId, etag: "e", revision: 1, items: event.items.map((item) => ({ id: item.id, decision: "allow" })) });
         sent.push(event);
         reply({ ok: true, eventId: event.id });

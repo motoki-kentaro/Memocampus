@@ -30,14 +30,16 @@ const CODE_OF_STATE = {
   invalid: "policy_invalid",
   busy: "policy_busy",
   unavailable: "policy_unavailable",
+  unsupported: "policy_unsupported",
 };
 const STATE_OF_CODE = Object.fromEntries(Object.entries(CODE_OF_STATE).map(([state, code]) => [code, state]));
 
 function fromResponse(response) {
   if (response.state !== "ready") return { ok: false, code: CODE_OF_STATE[response.state] ?? "invalid_response" };
   if (typeof response.etag !== "string" || response.etag === "") return { ok: false, code: "invalid_response" };
-  if (!Number.isSafeInteger(response.policy?.revision)) return { ok: false, code: "policy_invalid" };
-  return { ok: true, version: response.etag, revision: response.policy.revision };
+  // The status carries no rule; the extension needs none, as the host alone judges.
+  if (!Number.isSafeInteger(response.revision)) return { ok: false, code: "policy_invalid" };
+  return { ok: true, version: response.etag, revision: response.revision };
 }
 
 /** Lists of URLs for one message each; always at least one, so an empty list still asks the host. */

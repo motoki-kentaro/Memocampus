@@ -25,8 +25,9 @@ hands out `decide()` only for a valid one.
 `policy_status` and `policy_initialize` carry only a `requestId`, never a URL. Both answer
 `type: "policy_result"`.
 
-- Ready: `{ok: true, state: "ready", policy, etag}`
-- `policy_status` otherwise: `{ok: true, state: "uninitialized" | "invalid" | "busy" | "unavailable"}`
+- Ready: `{ok: true, state: "ready", etag, revision, schemaVersion, engineVersion}`. Since #25 Slice 3 no rule
+  or policy document; `policy_get` returns the document on an explicit request.
+- `policy_status` otherwise: `{ok: true, state: "uninitialized" | "invalid" | "unsupported" | "busy" | "unavailable"}`
 - `policy_initialize` otherwise: `{ok: false, error}`, including `policy_already_initialized`
 
 `uninitialized` requires that neither `policy.json` nor `policy.initialized` exists. Everything

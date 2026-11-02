@@ -2,6 +2,10 @@
 //! the decision for each automatically recorded event. A decision exists only if a valid policy
 //! was loaded; a failure to load is reported as an error and never as a refusal of the URL.
 //!
+//! `policy_status` says only whether a policy is usable, and which version: no rule. The document
+//! itself comes only from `policy_get`, which nothing in recording asks for. `policy_migrate` is
+//! the explicit step from version 1 to 2 and takes the ETag of the policy it converts.
+//!
 //! `policy_evaluate_batch` is what the extension asks before it keeps a URL anywhere:
 //!
 //! ```text
@@ -26,6 +30,13 @@ pub const NOT_INITIALIZED: &str = "policy_not_initialized";
 pub const INVALID: &str = "policy_invalid";
 pub const BUSY: &str = "policy_busy";
 pub const UNAVAILABLE: &str = "policy_unavailable";
+pub const UNSUPPORTED: &str = "policy_unsupported";
+const CONFLICT: &str = "policy_conflict";
+const NOT_MIGRATABLE: &str = "policy_not_migratable";
+const INVALID_ETAG: &str = "invalid_etag";
+const TOO_LARGE_TO_SEND: &str = "policy_too_large";
+/// Chrome refuses a message from a host above 1 MB; the policy file itself may be up to 1 MiB.
+const MAX_REPLY_BYTES: usize = 1_000_000;
 const ALREADY_INITIALIZED: &str = "policy_already_initialized";
 const INVALID_BATCH: &str = "invalid_policy_batch";
 const BATCH_TOO_LARGE: &str = "policy_batch_too_large";
@@ -65,6 +76,7 @@ impl PolicyGate {
                     return Err(NOT_INITIALIZED)
                 }
                 Err(StoreError::Busy) => return Err(BUSY),
+                Err(StoreError::Unsupported) => return Err(UNSUPPORTED),
                 Err(StoreError::Missing | StoreError::Invalid) => return Err(INVALID),
                 Err(_) => return Err(UNAVAILABLE),
             }
@@ -115,16 +127,81 @@ impl PolicyGate {
             self.load()
         };
         match loaded {
-            Ok(snapshot) => json!({
-                "ok": true, "type": "policy_result", "requestId": id, "state": "ready",
-                "policy": snapshot.policy, "etag": snapshot.etag,
-            }),
+            Ok(snapshot) => {
+                let mut reply = version_of(&snapshot);
+                reply["ok"] = true.into();
+                reply["type"] = "policy_result".into();
+                reply["requestId"] = id.into();
+                reply
+            }
             Err(code) if initialize => {
                 json!({ "ok": false, "type": "policy_result", "requestId": id, "error": code })
             }
             Err(code) => {
                 json!({ "ok": true, "type": "policy_result", "requestId": id, "state": state_of(code) })
             }
+        }
+    }
+
+    /// The active policy itself, for an explicit request only.
+    pub fn get(&self, message: &Value) -> Value {
+        const RESULT: &str = "policy_get_result";
+        let Some(id) = request_id(message) else {
+            return json!({ "ok": false, "type": RESULT, "requestId": null, "error": "invalid_request_id" });
+        };
+        let failure =
+            |code: &str| json!({ "ok": false, "type": RESULT, "requestId": id, "error": code });
+        match self.load() {
+            Ok(snapshot) => {
+                let mut reply = version_of(&snapshot);
+                reply["ok"] = true.into();
+                reply["type"] = RESULT.into();
+                reply["requestId"] = id.into();
+                reply["policy"] = json!(snapshot.policy);
+                if reply.to_string().len() > MAX_REPLY_BYTES {
+                    return failure(TOO_LARGE_TO_SEND);
+                }
+                reply
+            }
+            Err(code) => failure(code),
+        }
+    }
+
+    /// Explicit, never retried, and only against the ETag the caller has seen.
+    pub fn migrate(&self, message: &Value) -> Value {
+        const RESULT: &str = "policy_migrate_result";
+        let Some(id) = request_id(message) else {
+            return json!({ "ok": false, "type": RESULT, "requestId": null, "error": "invalid_request_id" });
+        };
+        let outcome = (|| {
+            let etag = message
+                .get("etag")
+                .and_then(Value::as_str)
+                .filter(|etag| !etag.is_empty())
+                .ok_or(INVALID_ETAG)?;
+            let current = self.load()?;
+            if current.etag != etag {
+                return Err(CONFLICT);
+            }
+            let store = self.store.as_ref().map_err(|_| UNAVAILABLE)?;
+            store.migrate(&current).map_err(|error| match error {
+                StoreError::Conflict => CONFLICT,
+                StoreError::NotMigratable => NOT_MIGRATABLE,
+                StoreError::Busy => BUSY,
+                StoreError::Invalid => INVALID,
+                StoreError::Unsupported => UNSUPPORTED,
+                _ => UNAVAILABLE,
+            })
+        })();
+        match outcome {
+            Ok(snapshot) => {
+                let mut reply = version_of(&snapshot);
+                reply["ok"] = true.into();
+                reply["type"] = RESULT.into();
+                reply["requestId"] = id.into();
+                reply
+            }
+            Err(code) => json!({ "ok": false, "type": RESULT, "requestId": id, "error": code }),
         }
     }
 
@@ -138,6 +215,17 @@ impl PolicyGate {
             _ => UNAVAILABLE,
         })
     }
+}
+
+/// What identifies a policy without showing it.
+fn version_of(snapshot: &Snapshot) -> Value {
+    json!({
+        "state": "ready",
+        "etag": snapshot.etag,
+        "revision": snapshot.policy.revision,
+        "schemaVersion": snapshot.policy.schema_version,
+        "engineVersion": snapshot.policy.engine_version,
+    })
 }
 
 fn batch_items(message: &Value) -> Result<Vec<(&str, &str)>, &'static str> {
@@ -179,6 +267,7 @@ fn state_of(code: &str) -> &'static str {
         NOT_INITIALIZED => "uninitialized",
         BUSY => "busy",
         INVALID => "invalid",
+        UNSUPPORTED => "unsupported",
         _ => "unavailable",
     }
 }
