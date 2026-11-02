@@ -3,6 +3,10 @@
 Connects the Privacy Policy of `issue-010-privacy-policy.md` to automatic recording. Evaluation
 rules, presets and the JSON schema are unchanged.
 
+**Since #25 Slice 2 the extension judges nothing:** it asks the host with `policy_evaluate_batch`
+before keeping a URL. Where this document describes `decide()`, the evaluator or a check of the head
+in the extension, `issue-025-policy-engine.md` replaces it.
+
 ## Three outcomes that must not be confused
 
 | Outcome | Meaning | Extension | Host answer |

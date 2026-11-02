@@ -9,10 +9,12 @@
 // - Every other failure (host unreachable, timeout, no vault, busy vault, unknown codes) is
 //   temporary: the event stays queued and is retried on the next flush. The host stores events
 //   with INSERT OR IGNORE by id, so a resend after a lost ACK never duplicates rows.
-// - Every flush asks the policy first. Without a valid policy nothing is sent and nothing is
-//   removed. With one, stored events it refuses are removed from the pending and dead-letter lists
-//   without a copy, whenever the policy changes, and the event at the head is checked before it is
-//   sent. The host checks again, so an event refused by a newer policy is acknowledged as dropped.
+// - Only events the host allowed are ever enqueued, and what is stored is not trusted later. Every
+//   flush asks the policy first. Without a valid policy nothing is sent and nothing is removed.
+//   With one, whenever its version changes, the host judges every stored URL, and those it refuses
+//   are removed from the pending and dead-letter lists without a copy. Without a complete answer
+//   nothing is sent. The host judges each event again on arrival and acknowledges a refused one as
+//   dropped, so no event needs a separate check here and none can block those behind it.
 // - A visit or snapshot not declared normal (`incognito: false`) is removed without a dead-letter
 //   copy, so its URL and title are not kept anywhere. The service worker never queues one; this
 //   covers events queued by an older version and a refusal by the host.
@@ -74,8 +76,9 @@ function withTimeout(promise, timeoutMs) {
 }
 
 /**
- * `policy.current({ fresh })` resolves to `{ ok: true, version, decide(url) }`, where `decide` answers
- * "allow" or "deny", or to `{ ok: false, code }` when no decision can be made.
+ * `policy.current({ fresh })` resolves to `{ ok: true, version }`, and `policy.evaluate(urls)` to
+ * `{ ok: true, version, decisions }`, a Map from URL to "allow" or "deny". Both resolve to
+ * `{ ok: false, code }` when no decision can be made.
  */
 export function createEventQueue({ storage, send, policy, now = () => new Date(), timeoutMs = SEND_TIMEOUT_MS, onChange = () => {} }) {
   if (typeof policy?.current !== "function") throw new TypeError("createEventQueue needs a policy");
@@ -146,9 +149,12 @@ export function createEventQueue({ storage, send, policy, now = () => new Date()
     discarded.add(event.id);
   }
 
-  /** Removes everything `decide` refuses from both lists, in one write. Keeps no copy or count. */
-  function sweep(decide) {
-    const refused = (event) => isRecording(event) && decide(event.url) !== "allow";
+  /**
+   * Removes what `decisions` refuses from both lists, in one write. Keeps no copy or count. An event
+   * enqueued after the host was asked is not in `decisions`: it was allowed itself, and stays.
+   */
+  function sweep(decisions) {
+    const refused = (event) => isRecording(event) && (typeof event.url !== "string" || decisions.get(event.url) === "deny");
     return exclusive(async () => {
       const stored = await storage.get([QUEUE_KEY, DEAD_LETTER_KEY]);
       const list = (key) => (Array.isArray(stored?.[key]) ? stored[key] : []);
@@ -185,10 +191,9 @@ export function createEventQueue({ storage, send, policy, now = () => new Date()
     });
   }
 
-  async function deliver(event, decide) {
+  async function deliver(event) {
     if (!event || typeof event !== "object" || Array.isArray(event)) return { kind: "permanent", code: "invalid_event" };
     if (isUndeclared(event)) return { kind: "discard", code: INCOGNITO_ERROR };
-    if (isRecording(event) && decide(event.url) !== "allow") return { kind: "discard", code: "dropped_by_policy" };
     try {
       return classifyResponse(event, await withTimeout(Promise.resolve().then(() => send(event)), timeoutMs));
     } catch (error) {
@@ -209,16 +214,19 @@ export function createEventQueue({ storage, send, policy, now = () => new Date()
       fresh = false;
       if (verdict?.ok !== true) return pendingCount > 0 ? verdict?.code || "policy_unavailable" : null;
       if (verdict.version !== sweptVersion) {
+        const events = [...(Array.isArray(stored?.[QUEUE_KEY]) ? stored[QUEUE_KEY] : []), ...(Array.isArray(stored?.[DEAD_LETTER_KEY]) ? stored[DEAD_LETTER_KEY].map((entry) => entry?.event) : [])];
+        const judged = await policy.evaluate(events.filter(isRecording).map((event) => event.url));
+        if (judged?.ok !== true) return pendingCount > 0 ? judged?.code || "policy_unavailable" : null;
         try {
-          await sweep(verdict.decide);
+          await sweep(judged.decisions);
         } catch {
           return "storage_write_failed";
         }
-        sweptVersion = verdict.version;
+        sweptVersion = judged.version;
       }
       const [head] = await readList(QUEUE_KEY);
       if (head === undefined) return null;
-      const outcome = await deliver(head, verdict.decide);
+      const outcome = await deliver(head);
       if (outcome.code === "dropped_by_policy") noteDiscarded(head);
       try {
         if (outcome.kind === "delivered" || outcome.kind === "discard") await remove(head);

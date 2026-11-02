@@ -1,4 +1,5 @@
-// Runs the real service worker, queue, policy gate and evaluator against a fake chrome and host.
+// Runs the real service worker, queue and policy gate against a fake chrome and host. The fake host
+// judges with the JS evaluator, kept for tests; the extension itself evaluates nothing.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -6,7 +7,9 @@ import { pathToFileURL } from "node:url";
 import { DEAD_LETTER_KEY, QUEUE_KEY, classifyResponse, createEventQueue } from "../../extension/event-queue.js";
 import { createPolicyGate } from "../../extension/policy-gate.js";
 import { describePolicyStatus, describeRecordResult } from "../../extension/queue-text.js";
+import { evaluatePolicy } from "../../extension/policy.js";
 import defaults from "../../extension/policy-defaults.json" with { type: "json" };
+import { readFileSync, readdirSync } from "node:fs";
 import { extensionDir, loadSidePanel, settle } from "./fake-dom.js";
 
 const AUTH_URL = "https://accounts.google.com/signin/secret-path";
@@ -32,10 +35,23 @@ function fakeHost(overrides = {}) {
     down: false,
     initialized: false,
     statusRequests: 0,
+    batchRequests: 0,
+    batchUrls: [],
     initializations: 0,
     received: [],
     answer: null,
+    batchAnswer: null,
     respond(message) {
+      if (message.type === "policy_evaluate_batch") {
+        this.batchRequests += 1;
+        this.batchUrls.push(...message.items.map((item) => item.url));
+        if (this.batchAnswer) return this.batchAnswer(message);
+        const base = { type: "policy_evaluate_batch_result", requestId: message.requestId };
+        const code = { uninitialized: "policy_not_initialized", invalid: "policy_invalid", busy: "policy_busy", unavailable: "policy_unavailable" }[this.state];
+        if (this.state !== "ready") return { ...base, ok: false, error: code ?? "invalid_response" };
+        const names = { none: "allow", saveButNoMcp: "save_but_no_mcp", neverSave: "never_save" };
+        return { ...base, ok: true, etag: `rev-${this.policy.revision}`, revision: this.policy.revision, items: message.items.map((item) => ({ id: item.id, decision: names[evaluatePolicy(this.policy, item.url)] })) };
+      }
       if (message.type === "policy_status") {
         this.statusRequests += 1;
         return { ok: true, type: "policy_result", requestId: message.requestId, state: this.state, ...(this.state === "ready" ? { policy: this.policy, etag: `rev-${this.policy.revision}` } : {}) };
@@ -174,6 +190,7 @@ test("incognito stays excluded before the policy is even asked", async () => {
   const worker = await startWorker({ tabs: { 7: tabOf(7, NORMAL_URL, { incognito: true }) } });
   await worker.navigate(NORMAL_URL, 7);
   assert.equal(worker.host.statusRequests, 0);
+  assert.equal(worker.host.batchRequests, 0, "and the host never sees the URL");
   assertNoTrace(worker, NORMAL_URL);
 });
 
@@ -182,7 +199,6 @@ for (const [name, change] of [
   ["a damaged policy", (host) => (host.state = "invalid")],
   ["a busy policy", (host) => (host.state = "busy")],
   ["an unavailable host", (host) => (host.down = true)],
-  ["a document that fails validation", (host) => (host.policy = { ...host.policy, engineVersion: 2 })],
   ["an unrecognized state", (host) => (host.state = "something-new")],
 ]) {
   test(`${name} records nothing, keeps nothing, and is shown`, async () => {
@@ -218,11 +234,11 @@ test("a restarted worker starts from nothing and asks the host again", async () 
   const host = fakeHost();
   const first = await startWorker({ host });
   await first.navigate(NORMAL_URL);
-  const asked = host.statusRequests;
+  const asked = host.batchRequests;
   host.policy = withRule("normal.test");
   const second = await startWorker({ host, data: first.data });
   await second.navigate(NORMAL_URL);
-  assert.ok(host.statusRequests > asked, "the new worker fetched the policy");
+  assert.ok(host.batchRequests > asked, "the new worker asked the host");
   assert.equal(host.received.length, 1, "and applied the new rule");
 });
 
@@ -366,20 +382,20 @@ test("a policy that breaks during delivery stops collection at once, without wai
   assert.ok(!worker.stored().includes("after-failure"));
 });
 
-test("an event that reaches the head after the sweep is still judged, and leaves no dead letter", async () => {
+test("an event the host refuses after the sweep is removed by its answer, and leaves no dead letter", async () => {
   const data = new Map();
   const storage = {
     get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter((key) => data.has(key)).map((key) => [key, clone(data.get(key))])),
     set: async (items) => Object.entries(items).forEach(([key, value]) => data.set(key, clone(value))),
   };
   const sent = [];
-  const policy = { current: async () => ({ ok: true, version: "same", decide: (url) => (url === AUTH_URL ? "deny" : "allow") }) };
-  const queue = createEventQueue({ storage, policy, send: async (event) => (sent.push(event.id), { ok: true, eventId: event.id }) });
+  const policy = { current: async () => ({ ok: true, version: "same" }), evaluate: async () => ({ ok: true, version: "same", decisions: new Map() }) };
+  const queue = createEventQueue({ storage, policy, send: async (event) => (sent.push(event.id), event.url === AUTH_URL ? { ok: true, eventId: event.id, dropped: "policy" } : { ok: true, eventId: event.id }) });
   await queue.enqueue(visit("first", NORMAL_URL));
-  await queue.flush(); // this version is now swept, so only the check of the head can catch the next one
+  await queue.flush(); // this version is now swept, so only the host's own check can catch the next one
   await queue.enqueue(visit("late", AUTH_URL));
   assert.equal(await queue.flush(), null);
-  assert.deepEqual(sent, ["first"]);
+  assert.deepEqual(sent, ["first", "late"]);
   assert.deepEqual(data.get(QUEUE_KEY), []);
   assert.deepEqual(data.get(DEAD_LETTER_KEY) ?? [], []);
   assert.deepEqual(await queue.locate(["late"]), { pending: 0, deadLettered: 0, stored: 0, refused: 1 });
@@ -526,8 +542,234 @@ test("a check started before a failure was reported cannot restore the old polic
 
 test("the decision separates a refused URL from a missing policy, for shared-vector kinds of URL", async () => {
   const gate = gateWith(fakeHost(), { now: 0 });
-  const { decide, ok } = await gate.current();
+  const refused = [AUTH_URL, TOKEN_URL, "https://a.test/#%FF", "https://a.test/%ZZ", "not a url"];
+  const allowed = [NORMAL_URL, SEARCH_URL, B_URL];
+  const { ok, decisions } = await gate.evaluate([...refused, ...allowed, undefined, null]);
   assert.equal(ok, true);
-  for (const url of [AUTH_URL, TOKEN_URL, "https://a.test/#%FF", "https://a.test/%ZZ", "not a url", undefined, null]) assert.equal(decide(url), "deny", String(url));
-  for (const url of [NORMAL_URL, SEARCH_URL, B_URL]) assert.equal(decide(url), "allow", url);
+  for (const url of refused) assert.equal(decisions.get(url), "deny", url);
+  for (const url of allowed) assert.equal(decisions.get(url), "allow", url);
+  assert.equal(decisions.has(undefined), false, "only strings are asked about");
+});
+
+test("a ready answer without a usable revision gives no decision", async () => {
+  const host = fakeHost();
+  host.policy = null;
+  const gate = gateWith({ ...host, respond: (message) => ({ ok: true, type: "policy_result", requestId: message.requestId, state: "ready", etag: "e", policy: null }) }, { now: 0 });
+  assert.deepEqual(await gate.current(), { ok: false, code: "policy_invalid" });
+});
+
+// --- The host is the only judge -------------------------------------------------------------------
+
+test("no extension file imports the JS evaluator, and only the host's answer counts", async () => {
+  for (const name of readdirSync(extensionDir).filter((file) => file.endsWith(".js") && file !== "policy.js")) {
+    const source = readFileSync(path.join(extensionDir, name), "utf8");
+    assert.ok(!/from\s+["']\.\/policy\.js["']/.test(source), name);
+    assert.ok(!/evaluatePolicy|validatePolicy|parseRule|normalizeUrl\(/.test(source.replace(/^\/\/.*$/gm, "")), name);
+  }
+  // Answers the JS evaluator would reverse.
+  const host = fakeHost();
+  host.batchAnswer = (message) => ({ ok: true, type: "policy_evaluate_batch_result", requestId: message.requestId, etag: "e", revision: 1, items: message.items.map((item) => ({ id: item.id, decision: item.url === AUTH_URL ? "allow" : "never_save" })) });
+  const worker = await startWorker({ host });
+  await worker.navigate(NORMAL_URL, 1);
+  assert.deepEqual(host.received, []);
+  await worker.navigate(AUTH_URL, 2);
+  assert.deepEqual(host.received.map((event) => event.url), [AUTH_URL]);
+});
+
+test("only the URL goes to the host for judging: no title, and it is not written anywhere first", async () => {
+  const host = fakeHost();
+  host.batchAnswer = (message) => {
+    assert.deepEqual(Object.keys(message.items[0]).sort(), ["id", "url"]);
+    assert.ok(!JSON.stringify(message).includes(SECRET_TITLE));
+    return { ok: true, type: "policy_evaluate_batch_result", requestId: message.requestId, etag: "e", revision: 1, items: message.items.map((item) => ({ id: item.id, decision: "never_save" })) };
+  };
+  const worker = await startWorker({ host });
+  await worker.navigate(NORMAL_URL);
+  assert.equal(host.batchRequests, 1);
+  assert.deepEqual(worker.writes.filter((write) => write.includes(NORMAL_URL)), []);
+  assertNoTrace(worker, NORMAL_URL);
+});
+
+const batchReply = (message, items, extra = {}) => ({ ok: true, type: "policy_evaluate_batch_result", requestId: message.requestId, etag: "e", revision: 1, items, ...extra });
+const each = (message, decision) => message.items.map((item) => ({ id: item.id, decision }));
+
+for (const [name, answer] of [
+  ["a malformed reply", () => ({})],
+  ["another reply type", (m) => ({ ok: true, type: "policy_result", requestId: m.requestId })],
+  ["another request's reply", (m) => ({ ...batchReply(m, each(m, "allow")), requestId: "other" })],
+  ["no items", (m) => batchReply(m, undefined)],
+  ["an unknown decision", (m) => batchReply(m, each(m, "maybe"))],
+  ["a decision named like an object property", (m) => batchReply(m, each(m, "constructor"))],
+  ["a missing item", (m) => batchReply(m, [])],
+  ["an extra item", (m) => batchReply(m, [...each(m, "allow"), { id: "other", decision: "allow" }])],
+  ["an unknown id", (m) => batchReply(m, m.items.map(() => ({ id: "other", decision: "allow" })))],
+  ["no etag", (m) => batchReply(m, each(m, "allow"), { etag: "" })],
+  ["no revision", (m) => batchReply(m, each(m, "allow"), { revision: null })],
+  ["a host error", (m) => ({ ok: false, type: "policy_evaluate_batch_result", requestId: m.requestId, error: "policy_busy" })],
+]) {
+  test(`${name} from the host keeps nothing, on every entrance`, async () => {
+    const host = fakeHost();
+    host.batchAnswer = answer;
+    const worker = await startWorker({ host, query: [tabOf(1, NORMAL_URL)] });
+    await worker.navigate(NORMAL_URL);
+    assertNoTrace(worker, NORMAL_URL);
+    assert.deepEqual(host.received, []);
+    const result = await worker.message({ type: "record-all-tabs" });
+    assert.equal(result.ok, false);
+    assertNoTrace(worker, NORMAL_URL);
+    assert.equal(worker.badge.text, "!");
+  });
+}
+
+test("a duplicate id in an answer gives no decision, even if the count fits", async () => {
+  const urls = [NORMAL_URL, SEARCH_URL];
+  const gate = createPolicyGate({ send: async (m) => batchReply(m, [{ id: m.items[0].id, decision: "allow" }, { id: m.items[0].id, decision: "allow" }]) });
+  assert.equal((await gate.evaluate(urls)).ok, false);
+});
+
+test("the answer may come in any order", async () => {
+  const gate = createPolicyGate({ send: async (m) => batchReply(m, m.items.map((item) => ({ id: item.id, decision: item.url === NORMAL_URL ? "allow" : "never_save" })).reverse()) });
+  const { decisions } = await gate.evaluate([NORMAL_URL, AUTH_URL]);
+  assert.equal(decisions.get(NORMAL_URL), "allow");
+  assert.equal(decisions.get(AUTH_URL), "deny");
+});
+
+test("a long list is split, each message within the limits, and every URL is asked once", async () => {
+  const sizes = [];
+  const gate = createPolicyGate({ send: async (m) => (sizes.push(m.items.length), batchReply(m, each(m, "allow"))) });
+  const urls = Array.from({ length: 2500 }, (_, n) => `https://a.test/${n}`);
+  const { ok, decisions } = await gate.evaluate([...urls, ...urls]);
+  assert.equal(ok, true);
+  assert.deepEqual(sizes, [1000, 1000, 500]);
+  assert.equal(decisions.size, 2500);
+});
+
+test("large URLs split by size too, and an overlong one is refused without being sent", async () => {
+  const sent = [];
+  const gate = createPolicyGate({ send: async (m) => (sent.push(m), batchReply(m, each(m, "allow"))) });
+  const big = Array.from({ length: 800 }, (_, n) => `https://a.test/${n}/${"\u0001".repeat(0)}${"x".repeat(32000)}`);
+  const over = `https://a.test/${"x".repeat(32768)}`;
+  const { decisions } = await gate.evaluate([...big, over]);
+  assert.ok(sent.length >= 2);
+  for (const message of sent) assert.ok(JSON.stringify(message).length < 64 * 1024 * 1024);
+  assert.equal(decisions.get(over), "deny");
+  assert.ok(!JSON.stringify(sent).includes(over));
+});
+
+test("a failure in any part of a split request leaves no decision, and nothing is kept", async () => {
+  const query = Array.from({ length: 1500 }, (_, n) => tabOf(n + 1, `https://a.test/${n}`));
+  for (const fail of [(h) => (h.down = true), (h) => (h.state = "busy")]) {
+    const host = fakeHost();
+    const plain = host.respond.bind(host);
+    host.respond = (message) => {
+      const reply = plain(message);
+      if (message.type === "policy_evaluate_batch") fail(host);
+      return reply;
+    };
+    const worker = await startWorker({ host, query });
+    const result = await worker.message({ type: "record-all-tabs" });
+    assert.equal(result.ok, false);
+    assert.deepEqual(worker.pending(), []);
+    assert.deepEqual(host.received, []);
+  }
+});
+
+test("parts answered from different versions of the policy give no decision", async () => {
+  let version = 0;
+  const gate = createPolicyGate({ send: async (m) => batchReply(m, each(m, "allow"), { etag: `e${(version += 1)}` }) });
+  assert.deepEqual(await gate.evaluate(Array.from({ length: 1001 }, (_, n) => `https://a.test/${n}`)), { ok: false, code: "policy_busy" });
+});
+
+test("an old host, which does not know the request, stops recording rather than opening it", async () => {
+  const host = fakeHost();
+  host.batchAnswer = () => ({ ok: false, eventId: null, error: "unknown_type" });
+  const worker = await startWorker({ host });
+  await worker.navigate(NORMAL_URL);
+  assertNoTrace(worker, NORMAL_URL);
+});
+
+test("all tabs: incognito and non-web tabs are not shown to the host", async () => {
+  const worker = await startWorker({ query: [tabOf(1, NORMAL_URL), tabOf(2, "https://incognito.test/", { incognito: true }), tabOf(3, "chrome://settings/"), tabOf(4, "file:///C:/x")] });
+  await worker.message({ type: "record-all-tabs" });
+  assert.deepEqual([...new Set(worker.host.batchUrls)], [NORMAL_URL]);
+});
+
+// --- The stored queue, without a judge in the extension --------------------------------------------
+
+test("stored events are judged by the host, unusable ones go, and those behind them are delivered", async () => {
+  const host = fakeHost();
+  const queue = [visit("bad", "https://a.test/%ZZ"), visit("scheme", "ftp://a.test/"), { ...visit("none", NORMAL_URL), url: 42 }, visit("blind", TOKEN_URL), visit("ok", NORMAL_URL, "Kept")];
+  const worker = await startWorker({ host, data: seeded(queue) });
+  const reply = await worker.message({ type: "flush-queue" });
+  assert.equal(reply.blockedBy, null);
+  assert.deepEqual(host.received.map((event) => event.id), ["ok"]);
+  assert.deepEqual(worker.pending(), []);
+  assert.deepEqual(worker.dead(), []);
+  assert.ok(!worker.stored().includes("SECRET-VALUE"));
+});
+
+test("without a complete answer a stored queue is neither sent nor changed, and recovers", async () => {
+  const host = fakeHost();
+  host.batchAnswer = (m) => batchReply(m, []);
+  const queue = [visit("v1", NORMAL_URL, "Kept"), visit("v2", AUTH_URL)];
+  const dead = [{ errorCode: "invalid_event", eventId: "d1", failedAt: "t", event: visit("d1", AUTH_URL) }];
+  const worker = await startWorker({ host, data: seeded(queue, dead) });
+  const reply = await worker.message({ type: "flush-queue" });
+  assert.equal(reply.blockedBy, "invalid_response");
+  assert.deepEqual(host.received, []);
+  assert.equal(worker.pending().length, 2);
+  assert.equal(worker.dead().length, 1, "and no new dead letter");
+  host.batchAnswer = null;
+  await worker.message({ type: "flush-queue" });
+  assert.deepEqual(host.received.map((event) => event.id), ["v1"]);
+  assert.deepEqual(worker.dead(), []);
+});
+
+test("an event enqueued while the sweep waits for the host is not removed by it", async () => {
+  const data = seeded([visit("old", NORMAL_URL)]);
+  const storage = {
+    get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter((key) => data.has(key)).map((key) => [key, clone(data.get(key))])),
+    set: async (items) => Object.entries(items).forEach(([key, value]) => data.set(key, clone(value))),
+  };
+  let queue;
+  const policy = {
+    current: async () => ({ ok: true, version: "v" }),
+    evaluate: async (urls) => {
+      await queue.enqueue(visit("new", "https://new.test/"));
+      return { ok: true, version: "v", decisions: new Map(urls.map((url) => [url, "deny"])) };
+    },
+  };
+  const sent = [];
+  queue = createEventQueue({ storage, policy, send: async (event) => (sent.push(event.id), { ok: true, eventId: event.id }) });
+  await queue.flush();
+  assert.deepEqual(sent, ["new"]);
+});
+
+test("a host that keeps refusing delivery drops it there: an allow is not a permit", async () => {
+  const host = fakeHost();
+  const worker = await startWorker({ host, query: [tabOf(1, NORMAL_URL)] });
+  host.answer = (event) => ({ ok: true, eventId: event.id, dropped: "policy" });
+  await worker.navigate(NORMAL_URL);
+  assert.deepEqual(worker.pending(), []);
+  assert.deepEqual(worker.dead(), []);
+  assert.ok(!worker.stored().includes(NORMAL_URL));
+});
+
+test("canaries: blind leaves no trace anywhere; private and public are delivered", async () => {
+  const BLIND = "https://blind.example/?token=CANARY";
+  const PRIVATE = "https://private.example/path";
+  const PUBLIC = "https://public.example/path";
+  const host = fakeHost();
+  host.policy.layers.saveButNoMcp.rules.push("private.example");
+  const worker = await startWorker({ host });
+  const logged = await withConsoleWatch(async () => {
+    await worker.navigate(BLIND, 1);
+    await worker.navigate(PRIVATE, 2);
+    await worker.navigate(PUBLIC, 3);
+    await worker.message({ type: "flush-queue" });
+  });
+  assert.deepEqual(host.received.map((event) => event.url), [PRIVATE, PUBLIC]);
+  const trace = [worker.stored(), worker.writes.join(), JSON.stringify(host.received), worker.badge.title, logged].join();
+  assert.ok(!trace.includes("CANARY"));
+  assert.deepEqual(worker.dead(), []);
 });
