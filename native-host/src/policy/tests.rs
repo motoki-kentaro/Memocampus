@@ -421,16 +421,18 @@ fn a_thousand_rules_compile_and_every_one_of_them_works() {
 fn judging_url_after_url_parses_no_rule() {
     let source = include_str!("../policy.rs");
     let body = source
-        .split("pub fn evaluate(&self, input: &str) -> Decision {\n        let Ok(url)")
+        .split("pub fn evaluate(&self, input: &str) -> Decision {\n        let Ok((url, parsed))")
         .nth(1)
         .or_else(|| {
             source
-                .split("pub fn evaluate(&self, input: &str) -> Decision {\r\n        let Ok(url)")
+                .split(
+                    "pub fn evaluate(&self, input: &str) -> Decision {\r\n        let Ok((url, parsed))",
+                )
                 .nth(1)
         })
         .unwrap();
     let body = body.split("fn decode").next().unwrap();
-    for banned in ["Rule::parse", "validate", "compile"] {
+    for banned in ["Rule::parse", "validate", "compile", "Regex"] {
         assert!(!body.contains(banned), "{banned}");
     }
 }
@@ -491,15 +493,21 @@ fn regex_unknown_kinds_malformed_rules_and_other_versions_are_refused() {
         2,
         serde_json::json!([{ "kind": "regex", "pattern": "^https://a\\.test/" }]),
     );
-    assert_eq!(parse_json(regex).unwrap_err(), Error::UnsupportedRule);
+    assert!(
+        parse_json(regex).is_ok(),
+        "a regex is evaluated since Slice 5"
+    );
     let mut regex_private = with_rules(2, serde_json::json!([]));
     regex_private["layers"]["saveButNoMcp"]["rules"] =
-        serde_json::json!([{ "kind": "regex", "pattern": "x" }]);
+        serde_json::json!([{ "kind": "regex", "pattern": "(?<=a)x" }]);
     assert_eq!(
         parse_json(regex_private).unwrap_err(),
         Error::UnsupportedRule
     );
-    let mut regex_off = with_rules(2, serde_json::json!([{ "kind": "regex", "pattern": "x" }]));
+    let mut regex_off = with_rules(
+        2,
+        serde_json::json!([{ "kind": "regex", "pattern": "(?=x)" }]),
+    );
     regex_off["layers"]["neverSave"]["enabled"] = false.into();
     assert_eq!(
         parse_json(regex_off).unwrap_err(),
@@ -1016,4 +1024,414 @@ fn a_migration_keeps_each_rule_as_written() {
         migrated.layers.save_but_no_mcp.rules,
         [RuleSpec::from("c.test//x/*")]
     );
+}
+
+// --- Slice 5: regex rules ---------------------------------------------------------------------
+
+fn regex(pattern: &str) -> RuleSpec {
+    RuleSpec::Typed(TypedRule::Regex {
+        pattern: pattern.into(),
+    })
+}
+
+fn with_regexes(never: &[&str], private: &[&str]) -> Policy {
+    let mut policy = Policy::default();
+    policy.layers.never_save.rules = never.iter().map(|p| regex(p)).collect();
+    policy.layers.save_but_no_mcp.rules = private.iter().map(|p| regex(p)).collect();
+    policy
+}
+
+/// Whether each URL is refused by `pattern` as a regex of the Blind Zone.
+fn regex_refuses(pattern: &str, cases: &[(&str, bool)]) {
+    let compiled = CompiledPolicy::compile(&with_regexes(&[pattern], &[])).unwrap();
+    for &(url, expected) in cases {
+        assert_eq!(
+            compiled.evaluate(url) == Decision::NeverSave,
+            expected,
+            "{pattern} {url}"
+        );
+    }
+}
+
+#[test]
+fn a_regex_meets_the_whole_url_as_the_parser_writes_it() {
+    regex_refuses(
+        r"^https://www\.google\.com/search(?:\?|$)",
+        &[
+            ("https://www.google.com/search?q=memocampus", true),
+            ("https://www.google.com/search", true),
+            ("HTTPS://WWW.GOOGLE.COM:443/search?q=test", true),
+            ("https://www.google.com./search?q=test", true),
+            ("blob:https://www.google.com/search", true),
+            ("https://www.google.com/searchx?q=1", false),
+            ("http://www.google.com/search?q=1", false),
+            ("https://www.google.co.jp/search?q=1", false),
+            ("https://www.google.com/Search?q=1", false),
+        ],
+    );
+    // Found anywhere unless anchored.
+    regex_refuses(
+        r"example\.com/private",
+        &[
+            ("https://a.example.com/private/x", true),
+            ("https://example.com/privates", true),
+            ("https://example.com/public?next=example.com/private", true),
+            ("https://example.com/public", false),
+        ],
+    );
+    regex_refuses(
+        r"^https://example\.com/private$",
+        &[
+            ("https://example.com/private", true),
+            ("https://example.com/private/", false),
+            ("https://example.com/private?q=1", false),
+            ("https://example.com/private#top", false),
+        ],
+    );
+    regex_refuses(
+        "^http:",
+        &[
+            ("http://example.com/", true),
+            ("https://example.com/", false),
+        ],
+    );
+    regex_refuses(
+        r"^https?://[^/]*\.example\.com/",
+        &[
+            ("https://a.example.com/", true),
+            ("http://a.b.example.com/x", true),
+            ("https://a.example.com.evil.test/", false),
+            ("https://example.com/", false),
+        ],
+    );
+    regex_refuses(
+        r"[?&]q=secret(?:&|$)",
+        &[
+            ("https://x.test/?a=1&q=secret", true),
+            ("https://x.test/?q=secret&b=2", true),
+            ("https://x.test/?q=secrets", false),
+        ],
+    );
+    regex_refuses(
+        "#private$",
+        &[
+            ("https://x.test/page#private", true),
+            ("https://x.test/page#public", false),
+        ],
+    );
+    // Case-sensitive unless the regex says otherwise. The parser writes scheme and host in
+    // lower case, so an upper-case host in a regex never matches.
+    regex_refuses(
+        "/Private/",
+        &[
+            ("https://x.test/Private/a", true),
+            ("https://x.test/private/a", false),
+        ],
+    );
+    regex_refuses(
+        "(?i)/private/",
+        &[
+            ("https://x.test/PRIVATE/a", true),
+            ("https://x.test/Private/a", true),
+        ],
+    );
+    regex_refuses(
+        r"^https://EXAMPLE\.com/",
+        &[
+            ("https://EXAMPLE.com/", false),
+            ("https://example.com/", false),
+        ],
+    );
+    regex_refuses(
+        r"^https://(?:mail|chat)\.example\.com/[0-9]{4}/",
+        &[
+            ("https://mail.example.com/2026/x", true),
+            ("https://chat.example.com/1999/", true),
+            ("https://news.example.com/2026/x", false),
+            ("https://mail.example.com/26/x", false),
+        ],
+    );
+    // The parser writes a name in punycode and the rest percent-encoded, and keeps an encoding
+    // as it came: a regex meets that text, not the decoded one a pattern meets.
+    regex_refuses("秘密", &[("https://例え.テスト/秘密", false)]);
+    regex_refuses(
+        r"^https://xn--r8jz45g\.xn--zckzah/%E7%A7%98%E5%AF%86",
+        &[("https://例え.テスト/秘密", true)],
+    );
+    regex_refuses(
+        r"\p{Han}|a%2Fb",
+        &[
+            ("https://x.test/a%2Fb", true),
+            ("https://x.test/a/b", false),
+            ("https://x.test/%E7%A7%98", false),
+        ],
+    );
+    regex_refuses(
+        r"^https://127\.0\.0\.1:8443/",
+        &[("https://127.1:8443/", true), ("https://127.0.0.1/", false)],
+    );
+    regex_refuses(
+        r":443/",
+        &[
+            ("https://x.test:443/", false),
+            ("https://x.test:4430/", false),
+        ],
+    );
+}
+
+#[test]
+fn the_url_without_trailing_dots_is_made_only_when_it_differs() {
+    let dotless = |url: &str| without_trailing_dots(&Url::parse(url).unwrap());
+    assert_eq!(
+        dotless("https://example.com./x?q#f").as_deref(),
+        Some("https://example.com/x?q#f")
+    );
+    assert_eq!(
+        dotless("https://example.com../").as_deref(),
+        Some("https://example.com/")
+    );
+    assert_eq!(dotless("https://example.com/"), None);
+    assert_eq!(dotless("https://[::1]/"), None);
+    assert_eq!(dotless("https://127.0.0.1/"), None);
+}
+
+#[test]
+fn regex_limits_and_errors_are_told_apart_and_refuse_the_policy_even_in_a_disabled_layer() {
+    assert_eq!(
+        (
+            MAX_REGEX_RULES,
+            MAX_REGEX_BYTES,
+            REGEX_TOTAL_SIZE_LIMIT,
+            REGEX_SIZE_LIMIT,
+            REGEX_TOTAL_DFA_SIZE_LIMIT,
+            REGEX_DFA_SIZE_LIMIT
+        ),
+        (128, 4096, 8 << 20, 1 << 20, 8 << 20, 256 << 10),
+        "the documented limits"
+    );
+    let long = "x".repeat(MAX_REGEX_BYTES + 1);
+    let long_wide = "秘".repeat(MAX_REGEX_BYTES / 3 + 1);
+    let nested = format!("{}a{}", "(".repeat(300), ")".repeat(300));
+    for (pattern, expected) in [
+        (r"(a)\1", Error::UnsupportedRule),
+        ("(?<=a)b", Error::UnsupportedRule),
+        ("(?<!a)b", Error::UnsupportedRule),
+        ("a(?=b)", Error::UnsupportedRule),
+        ("a(?!b)", Error::UnsupportedRule),
+        ("(a", Error::InvalidPolicy),
+        ("a)", Error::InvalidPolicy),
+        ("[a", Error::InvalidPolicy),
+        ("a{2,1}", Error::InvalidPolicy),
+        ("*a", Error::InvalidPolicy),
+        (r"\p{NoSuchClass}", Error::InvalidPolicy),
+        (r"\", Error::InvalidPolicy),
+        ("a{100000}", Error::RegexLimit),
+        (r"\w{100}", Error::RegexLimit),
+        (r"\w{21}", Error::RegexLimit),
+        (long.as_str(), Error::RegexLimit),
+        (long_wide.as_str(), Error::RegexLimit),
+        (nested.as_str(), Error::RegexLimit),
+    ] {
+        let name: String = pattern.chars().take(20).collect();
+        for (never, private, enabled) in [
+            (true, false, true),
+            (false, true, true),
+            (true, false, false),
+            (false, true, false),
+        ] {
+            let one = [pattern];
+            let mut policy = with_regexes(
+                if never { &one } else { &[] },
+                if private { &one } else { &[] },
+            );
+            policy.layers.never_save.enabled = enabled;
+            policy.layers.save_but_no_mcp.enabled = enabled;
+            assert_eq!(policy.validate().unwrap_err(), expected, "{name}");
+            assert_eq!(
+                CompiledPolicy::compile(&policy).unwrap_err(),
+                expected,
+                "{name}"
+            );
+            assert_eq!(policy.evaluate("https://public.test/"), Decision::NeverSave);
+        }
+    }
+    // At the limits a regex is accepted.
+    for pattern in [
+        "x".repeat(MAX_REGEX_BYTES),
+        "秘".repeat(MAX_REGEX_BYTES / 3),
+        format!("{}a{}", "(".repeat(200), ")".repeat(200)),
+        r"\w{20}".to_owned(),
+    ] {
+        assert!(
+            with_regexes(&[&pattern], &[]).validate().is_ok(),
+            "{}",
+            pattern.chars().take(10).collect::<String>()
+        );
+    }
+    // The number of regexes counts both layers, enabled or not.
+    let half: Vec<String> = (0..MAX_REGEX_RULES / 2).map(|n| format!("r{n}x")).collect();
+    let half: Vec<&str> = half.iter().map(String::as_str).collect();
+    let mut full = with_regexes(&half, &half);
+    full.layers.never_save.rules.push("many.test".into());
+    assert!(CompiledPolicy::compile(&full).is_ok());
+    full.layers.save_but_no_mcp.enabled = false;
+    full.layers.save_but_no_mcp.rules.push(regex("one-more"));
+    assert_eq!(full.validate().unwrap_err(), Error::RegexLimit);
+    assert_eq!(
+        CompiledPolicy::compile(&full).unwrap_err(),
+        Error::RegexLimit
+    );
+    // A regex is no rule of version 1.
+    let mut v1 = policy(&[], &[]);
+    v1.layers.never_save.rules.push(regex("x"));
+    assert_eq!(v1.validate().unwrap_err(), Error::InvalidPolicy);
+}
+
+#[test]
+fn a_regex_cannot_be_made_to_backtrack() {
+    let input = format!("https://example.com/{}!", "a".repeat(30_000));
+    for pattern in ["^(a+)+$", "(a+)+$", "(a|aa)+$", "(a|a)*b", "(?:a*)*b"] {
+        let compiled = CompiledPolicy::compile(&with_regexes(&[pattern], &[])).unwrap();
+        assert_eq!(compiled.evaluate(&input), Decision::None, "{pattern}");
+    }
+    let compiled = CompiledPolicy::compile(&with_regexes(&["(a+)+!$"], &[])).unwrap();
+    assert_eq!(compiled.evaluate(&input), Decision::NeverSave);
+}
+
+#[test]
+fn regexes_and_patterns_keep_the_order_of_the_zones() {
+    let blind_regex = |extra: RuleSpec| {
+        let mut policy = with_regexes(&["secret"], &[]);
+        policy.layers.save_but_no_mcp.rules = vec![extra, regex("^https://mixed\\.test/")];
+        CompiledPolicy::compile(&policy).unwrap()
+    };
+    for compiled in [
+        blind_regex("example.com".into()),
+        blind_regex(regex(r"example\.com")),
+    ] {
+        for (url, expected) in [
+            ("https://example.com/secret", Decision::NeverSave),
+            ("https://example.com/x", Decision::SaveButNoMcp),
+            ("https://mixed.test/secret", Decision::NeverSave),
+            ("https://mixed.test/x", Decision::SaveButNoMcp),
+            ("https://public.test/x", Decision::None),
+            ("https://public.test/secret", Decision::NeverSave),
+        ] {
+            assert_eq!(compiled.evaluate(url), expected, "{url}");
+        }
+    }
+    // A Blind pattern wins over a Private regex, whichever comes first in its layer.
+    for rules in [
+        vec!["blind.test".into(), regex("unused")],
+        vec![regex("unused"), "blind.test".into()],
+    ] {
+        let mut policy = with_regexes(&[], &["blind"]);
+        policy.layers.never_save.rules = rules;
+        let compiled = CompiledPolicy::compile(&policy).unwrap();
+        assert_eq!(
+            compiled.evaluate("https://blind.test/"),
+            Decision::NeverSave
+        );
+        assert_eq!(
+            compiled.evaluate("https://x.test/blind"),
+            Decision::SaveButNoMcp
+        );
+    }
+    // A disabled layer's regex decides nothing.
+    let mut off = with_regexes(&["secret"], &["private"]);
+    off.layers.never_save.enabled = false;
+    let compiled = CompiledPolicy::compile(&off).unwrap();
+    assert_eq!(compiled.evaluate("https://x.test/secret"), Decision::None);
+    assert_eq!(
+        compiled.evaluate("https://x.test/secret/private"),
+        Decision::SaveButNoMcp
+    );
+    off.layers.save_but_no_mcp.enabled = false;
+    let compiled = CompiledPolicy::compile(&off).unwrap();
+    assert_eq!(compiled.evaluate("https://x.test/private"), Decision::None);
+    // An invalid URL is refused before any regex, even one that would match nothing.
+    let compiled = CompiledPolicy::compile(&with_regexes(&[], &["^$"])).unwrap();
+    assert_eq!(compiled.evaluate("not a url"), Decision::NeverSave);
+    assert_eq!(compiled.evaluate("https://x.test/%FF"), Decision::NeverSave);
+}
+
+#[test]
+fn adding_a_regex_never_refuses_less() {
+    let urls = urls();
+    let some: Vec<String> = urls.iter().step_by(13).cloned().collect();
+    let mut bases = vec![
+        v2(&RULES[..6], &RULES[6..]),
+        v2(&["*.example.com"], &["example.com/private/*"]),
+        Policy::default(),
+    ];
+    let mut off = v2(&RULES[..6], &RULES[6..]);
+    off.categories.credentials = false;
+    bases.push(off);
+    for base in bases {
+        let before = CompiledPolicy::compile(&base).unwrap();
+        for (never, pattern) in [
+            (true, "private"),
+            (false, "private"),
+            (true, "^https://"),
+            (false, "(?i)EXAMPLE"),
+            (false, "never-matches-anything"),
+        ] {
+            let mut added = base.clone();
+            let layer = if never {
+                &mut added.layers.never_save
+            } else {
+                &mut added.layers.save_but_no_mcp
+            };
+            layer.rules.push(regex(pattern));
+            let after = CompiledPolicy::compile(&added).unwrap();
+            for url in &some {
+                let (old, new) = (before.evaluate(url), after.evaluate(url));
+                assert!(
+                    strictness(new) >= strictness(old),
+                    "{pattern} {url}: {old:?} -> {new:?}"
+                );
+                if pattern == "never-matches-anything" {
+                    assert_eq!(old, new, "{url}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_regexes_of_a_policy_share_one_budget() {
+    // One regex may use the limit of a rule; each of 128 an eighth of a megabyte at most.
+    assert!(with_regexes(&[r"\w{20}"], &[]).validate().is_ok());
+    let many = |extra: &str| {
+        let fillers: Vec<String> = (0..MAX_REGEX_RULES - 1)
+            .map(|n| format!("^https://site{n}\\.example/"))
+            .collect();
+        let mut never: Vec<&str> = fillers.iter().map(String::as_str).collect();
+        never.push(extra);
+        with_regexes(&never[..64], &never[64..])
+    };
+    for fits in [
+        r"\w+",
+        r"(?i)^https://mail\.example\.com/[0-9]+/inbox",
+        r"\p{L}+",
+    ] {
+        assert!(many(fits).validate().is_ok(), "{fits}");
+        assert!(CompiledPolicy::compile(&many(fits)).is_ok(), "{fits}");
+    }
+    for over in [r"\w\w", r"\w{20}"] {
+        assert_eq!(
+            many(over).validate().unwrap_err(),
+            Error::RegexLimit,
+            "{over}"
+        );
+        assert_eq!(
+            CompiledPolicy::compile(&many(over)).unwrap_err(),
+            Error::RegexLimit,
+            "{over}"
+        );
+    }
+    let budget = RegexBudget::of(&many("x"));
+    assert_eq!((budget.size, budget.dfa), (64 << 10, 64 << 10));
+    let budget = RegexBudget::of(&Policy::default());
+    assert_eq!((budget.size, budget.dfa), (1 << 20, 256 << 10));
 }

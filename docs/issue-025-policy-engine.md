@@ -1,6 +1,6 @@
 # Issue #25 — Privacy Policy engine
 
-Status: **Slices 1 to 3 merged; Slice 4 implemented, for review.** Version 2 patterns add exact paths and a wildcard in the last path segment, and every path rule also meets the path with its slashes collapsed. No regular expression is evaluated, and no settings UI exists.
+Status: **Slices 1 to 4 merged; Slice 5 implemented, for review.** Version 2 has patterns with exact paths and a wildcard in the last path segment, path rules also meet the path with its slashes collapsed, and regex rules meet the whole URL. No settings UI exists.
 Labels: **[verified]** was run, **[code]** was read in the source, **[inferred]** is reasoning not run.
 
 ## Slice 1: what changed
@@ -266,7 +266,7 @@ All other fields are as in version 1. In Rust a rule is `RuleSpec::Text(String)`
 |---|---|
 | `schemaVersion` and `engineVersion` both 1, every rule a string | Evaluated as before |
 | Both 2, every rule typed, every rule `pattern` | Evaluated; a pattern means what the same string means in version 1 |
-| Version 2 with a `regex` rule, also in a disabled layer | **Refused whole**: `policy_unsupported`, state `unsupported`. Not ignored, not read as a pattern |
+| Version 2 with a `regex` rule, also in a disabled layer | Until Slice 5 **refused whole**: `policy_unsupported`, state `unsupported`. Not ignored, not read as a pattern. Since Slice 5 evaluated; see there |
 | Unknown `kind`, a missing or extra field, a string rule in version 2, a typed rule in version 1 | Invalid: `policy_invalid` |
 | Any other pair of versions, such as 2 and 1 | Invalid |
 
@@ -361,7 +361,7 @@ The host part is unchanged: `*.example.com` covers the apex and every subdomain 
 
 Refused (`policy_invalid`, also in a disabled layer): `example.com/user/*/profile`, `example.com/*/*.png`, `example.com/images/**/photo.png`,
 `example.com/a*b*c.png`, `example.com/*/`; a `.` or `..` segment; `%2A` or `%2F` that would add or move a wildcard; an invalid escape; and everything refused
-before (scheme, port, userinfo, query, fragment, `*` inside a host). A `regex` rule is still refused whole as `policy_unsupported`.
+before (scheme, port, userinfo, query, fragment, `*` inside a host). A `regex` rule was still refused whole as `policy_unsupported` until Slice 5.
 
 ### Collapsed slashes
 
@@ -418,3 +418,166 @@ VisibleStore, 10,000 image rows, 50 % public, 999 rules: 68.8 ms in total, compi
 
 1. Regular expressions replace the `Err(UnsupportedRule)` of `RuleSpec::pattern`.
 2. #23 needs to explain the version 2 forms, and that version 1 rules gain them only after the explicit migration.
+
+## Slice 5: regex rules
+
+### The rule
+
+```json
+{ "kind": "regex", "pattern": "^https://www\\.google\\.com/search(?:\\?|$)" }
+```
+
+Version 2 only, in either layer, mixed freely with `pattern` rules. A version 1 policy holding one is `policy_invalid`, and nothing migrates or upgrades a
+policy because of a regex. `schemaVersion` and `engineVersion` stay 2.
+
+### What a regex meets [code] [verified]
+
+The URL as the Rust `url` crate (2.5.8) writes it (`Url::as_str`, the same as `to_string`), after the checks every URL passes: an invalid URL is `NeverSave`
+before any rule. Measured on that crate:
+
+| Input | What the regex meets |
+|---|---|
+| `HTTPS://WWW.GOOGLE.COM:443/search?q=test` | `https://www.google.com/search?q=test`: scheme and host in lower case, default port gone |
+| `https://例え.テスト/秘密?q=日本` | `https://xn--r8jz45g.xn--zckzah/%E7%A7%98%E5%AF%86?q=%E6%97%A5%E6%9C%AC`: punycode, UTF-8 percent-encoded |
+| `https://example.com/a%2Fb?x=%41` | unchanged: an encoding stays as it came, `%2F` is not decoded (a pattern decodes it) |
+| `https://127.1/`, `https://[0:0::1]/` | `https://127.0.0.1/`, `https://[::1]/` |
+| `https://example.com/a/../b/./c` | `https://example.com/b/c` |
+| `https://example.com:8443/`, `https://user:pw@example.com/`, `…#frag` | port, userinfo and fragment kept |
+| `blob:https://example.com/x` | `https://example.com/x`: the inner URL, which is also what the patterns judge |
+| `https://example.com./x` | both `https://example.com./x` and `https://example.com/x`; a match in either counts |
+
+The second view of a host with trailing dots exists because a pattern reads `example.com.` as `example.com`; without it a regex written for
+`example.com` would let that URL through. It is made only when the host has such a dot and the policy has a regex. Nothing else is rewritten: no decoding, no
+case folding.
+
+- **Found anywhere**: `Regex::is_match`. `^` and `$` anchor to the whole URL; `example\.com/private` also matches `https://a.example.com/private/x` and a
+  query that contains that text.
+- **Case-sensitive**, as the `regex` crate is; `(?i)` makes one regex insensitive. Scheme and host are always lower case, so `EXAMPLE` never matches a host.
+- **Unicode**: the syntax is Unicode-aware, but the URL is ASCII, so `秘密` or `\p{Han}` never match; write `%E7%A7%98%E5%AF%86` or `xn--…`.
+- No match text, capture or position is kept.
+
+### Pattern and regex
+
+| | Pattern | Regex |
+|---|---|---|
+| Meets | host index, then the decoded path, raw and collapsed | the whole URL as written by the parser |
+| Query, fragment, scheme, port | never | yes |
+| `%2F` | decoded to `/` | stays `%2F` |
+| Case | host folded, path sensitive | sensitive unless `(?i)` |
+| Cost per URL | only rules of the URL's host | every regex of an enabled layer |
+
+### Limits
+
+| Limit | Value | Error |
+|---|---:|---|
+| Regex rules per policy, both layers, enabled or not | 128 | `RegexLimit` |
+| Length of one regex | 4,096 bytes of UTF-8 | `RegexLimit` |
+| Compiled size of all regexes, shared equally | 8 MiB, at most 1 MiB for one | `RegexLimit` |
+| Lazy DFA cache of all regexes, shared equally | 8 MiB, at most 256 KiB for one | grows no further; matching falls back to a slower, still linear engine |
+| Nesting | 250 (the crate's default) | `RegexLimit` |
+
+Existing limits stay: 1,000 rules per layer, a 1 MiB file, URLs up to 32,768 UTF-16 units.
+
+Why these values, measured with the crate (scratch harness, synthetic patterns):
+
+- Ordinary rules compile to 1–10 KB: `^https://www\.google\.com/search(?:\?|$)` 1.2 KB, `(?i)^https://mail\.example\.com/[0-9]+/inbox` 2.3 KB. A Unicode
+  `\w` is 50 KB on its own; `(?-u)\w` is 0.3 KB.
+- A fixed 1 MiB for each of 128 regexes allowed 128 × `\w{20}`: 150–180 MiB of heap, 1.2 s to compile, and 845 ms to judge one 31 KB URL. Shared
+  equally, 128 regexes get 64 KiB each, which `\w+` (50 KB) still fits; one or a few get 1 MiB, so `\w{20}` is possible alone.
+  The worst a policy can do is about 11–13 MiB of heap and 75 ms to compile. Judging is linear: 36 µs for an ordinary URL, 57 ms for a 31 KB URL.
+- Whether one regex fits depends on how many others the policy has. Adding a regex can make an existing one too large, and the store then refuses the
+  update: the policy is never stored half valid.
+
+### Errors
+
+| Cause | Rust | Host reply, state |
+|---|---|---|
+| Syntax error: `(a`, `[a`, `a{2,1}`, `\p{NoSuchClass}` | `InvalidPolicy` | `policy_invalid`, `invalid` |
+| Look-around, backreference: `(?<=a)b`, `a(?=b)`, `(a)\1` | `UnsupportedRule` | `policy_unsupported`, `unsupported` |
+| Over a limit: count, length, compiled size, nesting, `a{100000}` | `RegexLimit` | `policy_invalid`, `invalid` |
+| Policy file missing, busy, unreadable | as before | `policy_unavailable`, `policy_busy`, … |
+
+No reply, error or log carries the regex or a URL. The kinds are told apart with `regex-syntax` (the crate `regex` builds on, at the same version) only
+after a regex failed to compile. Every case refuses the whole policy, also when the regex sits in a disabled layer: no URL is judged, nothing is recorded,
+VisibleStore publishes nothing. The store does not write such a policy.
+
+### Where regexes live
+
+`Zone` holds `regexes: Vec<Regex>` next to its host index, compiled once in `CompiledPolicy::compile`. `Policy::validate` compiles each regex once to know it
+is valid and drops it. Judging calls only `is_match`; a test checks that the judging code builds no regex. The Blind Zone, patterns and regexes, is decided
+before the Private Zone, so the order of rules within a layer or of patterns and regexes changes no decision. A policy without regexes judges exactly as in
+Slice 4.
+
+**No `RegexSet`.** `RegexSet` answers which of many regexes match in one pass, but it is one automaton for all of them: one rule's size then counts against all,
+an error cannot be told per rule, and its compile and cache limits apply to the set. At 128 regexes the plain list costs 4 µs per URL more than none. It
+becomes worth measuring if the limit of 128 rises or judging regexes dominates a batch.
+
+### Trust boundary and privacy
+
+Unchanged: the extension asks `policy_evaluate_batch`, drops `never_save` in memory, and the host judges every event again in `record_event` with the policy
+current then. Through the real host [verified]: a Blind regex matching the query is dropped in the batch and in `record_event` and never reaches the vault; a
+regex added after the precheck refuses the event before the vault, and the batch then answers with the new revision and ETag. A Private regex stores the
+row, and VisibleStore keeps it out of the public read like any `saveButNoMcp` row.
+
+VisibleStore applies regexes to visits, images and their pages and frames. Rows recorded before a regex existed disappear from the public read as soon as
+it does, and a hidden image answers `not_found` exactly like an unknown one.
+
+### Compatibility
+
+- **A Slice 4 host** reads a regex rule as unsupported: `policy_unsupported`, recording stops, VisibleStore answers `PolicyUnavailable`. Measured on 2,000
+  random policies with regexes: every one refused, none judged. No older host ignores a regex and records.
+- **The extension** decides nothing. Its message for `policy_unsupported` now names look-around and backreferences.
+- **The JS evaluator** (`extension/policy.js`, tests only) does not evaluate regexes and refuses a policy holding one. No JavaScript `RegExp` judges in the
+  product.
+
+### Verification
+
+- **Slice 4 against Slice 5** (scratch harness, main `db62533` against this tree) [verified]: 3,000 random version 1 and version 2 policies without regex, with
+  every pattern form, category and switch, 600,000 URLs: every decision identical. The 2,000 version 2 ones again with 2–6 regexes: 400,000 URLs, none less
+  strict than without the regexes, 94,768 stricter.
+- In the test suite: adding a regex to policies of every kind never refuses less, and one that matches nothing changes nothing.
+- `^(a+)+$`, `(a+)+$`, `(a|aa)+$`, `(a|a)*b` and `(?:a*)*b` on a 30,000-character URL answer at once; no time is asserted in the tests.
+
+### Measurements [verified]
+
+Release build, synthetic rules, median per URL of 5,000 ordinary URLs (about 80 characters). "Load" is `Policy::parse` with its validation, "compile"
+`CompiledPolicy::compile`; the host does both for each message.
+
+| Policy | Load | Compile | Heap | Per URL |
+|---|---:|---:|---:|---:|
+| Slice 4, 999 patterns | — | 0.8 ms | — | 2.3 µs |
+| 999 patterns, no regex | 1.0 ms | 0.8 ms | 398 KiB | 2.4 µs |
+| 1 regex | 0.1 ms | 0.1 ms | 22 KiB | 2.4 µs |
+| 32 regexes | 2.8 ms | 2.3 ms | 536 KiB | 3.7 µs |
+| 128 regexes | 7.1 ms | 5.5 ms | 2.1 MiB | 6.5 µs |
+| 128 unanchored regexes that read the whole URL and fail | 20 ms | 20.5 ms | 4.8 MiB | 5.3 µs |
+| 999 patterns + 128 regexes | 5.0 ms | 5.1 ms | 2.5 MiB | 6.5 µs |
+| 128 regexes, URL of 31 KB | | | | 198 µs |
+| 128 unanchored regexes, URL of 31 KB | | | | 507 µs |
+| 128 × `\w+N\d` (half the budget each) | 35 ms | 37 ms | 13 MiB | 1.7 µs; 6.4 ms for 31 KB |
+| 8 × `\w{20}N` (1 MiB each) | 73 ms | 75 ms | 9.4–11 MiB | 36 µs; 57 ms for 31 KB |
+
+"128 regexes" are anchored on scheme and host: `^https://(?:[^/]+\.)?siteN\.example/private/`, `^https://www\.searchN\.example/search(?:\?|$)`,
+`(?i)^https://mailN\.example/[0-9]+/inbox`, `^https://appN\.example/.*[?&]session=[a-f0-9]{8}`. "Unanchored" are `(?i)secretN[a-z]{2,8}token|/pwN/\d+`.
+
+VisibleStore, 10,000 image rows, 50 % public, 999 patterns: 73.2 ms without regex, 154.9 ms with 128 regexes (compile 4.9 ms; the rest is judging 20,000
+URLs).
+
+### Remaining risks
+
+- A regex meets the encoded URL: `/%41dmin` is not `/Admin` to a regex, and `%2F` is not `/`. A site that writes the same address in two encodings can pass a
+  regex written for one of them. Patterns do not have this gap.
+- The URL is ASCII, so a regex with non-ASCII text never matches; #23 should say so.
+- Each message compiles every regex twice (validation, then the compiled policy). With 128 ordinary regexes that is about 13 ms per `record_event`; at the
+  worst a policy can do, about 150 ms.
+- A regex of the worst size reading a 31 KB URL takes about 57 ms, so a batch of 1,000 such URLs would take about a minute. Ordinary URLs and regexes take
+  microseconds.
+- Not run: Chrome, CI.
+
+### Handoff to Slice 6
+
+1. The GUI API should return `RegexLimit`, `UnsupportedRule` and `InvalidPolicy` per rule, which the Rust error now distinguishes, without the regex text in a
+   log.
+2. The editor should explain the URL a regex meets (lower case host, punycode, percent-encoding), and that the limit of one regex depends on how many there
+   are.
+3. A test endpoint for regexes is still out of scope.

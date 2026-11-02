@@ -107,10 +107,14 @@ Both implementations use URL parsers (Rust `url`, JavaScript WHATWG `URL`):
   deliberately unsupported in v1 (URLs with IPv6 remain valid). Domain and IPv4 rules work.
 - `example.com`: exact host only. `*.example.com`: root plus dot-delimited descendants.
   `example.com/path/*`: exact host and `/path/` prefix, not bare `/path` or `/path-other`.
-  A wildcard host may also have a path prefix. No regex, middle wildcards, userinfo, query,
+  A wildcard host may also have a path prefix. No middle wildcards, userinfo, query,
   fragment, scheme, or port in a rule. Paths are case-sensitive. Version 2 patterns also take an
   exact path (`example.com/private`) and one `*` in the last segment (`example.com/images/*.png`),
   which never matches a `/`; version 1 strings keep this grammar (`issue-025-policy-engine.md`, Slice 4).
+  Version 2 also has `{ "kind": "regex" }` rules of the Rust `regex` crate, found anywhere in the URL as the
+  parser writes it (lower-case host, punycode, percent-encoding kept), with their own limits; an unusable
+  regex refuses the whole policy, also in a disabled layer. Only the Rust host evaluates them, never
+  JavaScript (`issue-025-policy-engine.md`, Slice 5).
 - Percent-decode path once as strict UTF-8, including encoded slash; collapse dot segments.
   Invalid escapes/UTF-8, decoded controls/backslash/percent (including double encodings) are
   denied. This intentionally errs on the side of blocking ambiguous URLs. Query/fragment
