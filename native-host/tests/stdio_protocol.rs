@@ -1797,3 +1797,266 @@ fn manual_image_saves_do_not_depend_on_the_policy() {
     assert_eq!(responses.last().unwrap()["type"], "image_saved");
     assert_eq!(image_rows(&tmp.default_vault()), (1, 1));
 }
+
+// --- Judging before the extension keeps anything (Issue #25) --------------------------------------
+
+fn batch(items: Value) -> Value {
+    json!({ "type": "policy_evaluate_batch", "requestId": "b", "items": items })
+}
+
+fn batch_error(code: &str) -> Value {
+    json!({ "ok": false, "type": "policy_evaluate_batch_result", "requestId": "b", "error": code })
+}
+
+fn decisions(reply: &Value) -> Vec<(String, String)> {
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["type"], "policy_evaluate_batch_result");
+    assert_eq!(reply["requestId"], "b");
+    reply["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| {
+            assert_eq!(item.as_object().unwrap().len(), 2, "id and decision only");
+            (
+                item["id"].as_str().unwrap().to_owned(),
+                item["decision"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_batch_judges_every_kind_of_url_and_never_echoes_one() {
+    let tmp = TempDir::new();
+    initialize_policy(&tmp);
+    let store = store_of(&tmp);
+    let current = store.load().unwrap();
+    let mut edited = current.policy.clone();
+    edited.layers.never_save.rules.push("blind.example".into());
+    edited
+        .layers
+        .save_but_no_mcp
+        .rules
+        .push("private.example".into());
+    store.update(&current, edited).unwrap();
+    let reply = exchange(
+        &tmp,
+        &[batch(json!([
+            { "id": "1", "url": "https://public.example/CANARY" },
+            { "id": "a-2", "url": "https://private.example/CANARY" },
+            { "id": "3", "url": "https://blind.example/CANARY" },
+            { "id": "4", "url": "https://public.example/?token=CANARY" },
+            { "id": "5", "url": "https://public.example/%ZZ/CANARY" },
+            { "id": "6", "url": "ftp://public.example/CANARY" },
+            { "id": "7", "url": "not a url CANARY" },
+            { "id": "8", "url": "" },
+        ]))],
+    )
+    .remove(0);
+    let expected = [
+        ("1", "allow"),
+        ("a-2", "save_but_no_mcp"),
+        ("3", "never_save"),
+        ("4", "never_save"),
+        ("5", "never_save"),
+        ("6", "never_save"),
+        ("7", "never_save"),
+        ("8", "never_save"),
+    ];
+    assert_eq!(
+        decisions(&reply),
+        expected.map(|(id, decision)| (id.to_owned(), decision.to_owned()))
+    );
+    assert_eq!(reply["revision"], 2);
+    assert_eq!(reply["etag"], store.load().unwrap().etag);
+    let text = reply.to_string();
+    for private in ["CANARY", "example", "rules", "blind"] {
+        assert!(!text.contains(private), "{text}");
+    }
+}
+
+#[test]
+fn a_batch_can_be_empty_one_or_the_maximum_and_asks_for_a_policy_each_time() {
+    let tmp = TempDir::new();
+    assert_eq!(
+        exchange(&tmp, &[batch(json!([]))]).remove(0),
+        batch_error("policy_not_initialized"),
+        "even an empty batch reports that no decision exists"
+    );
+    initialize_policy(&tmp);
+    assert_eq!(
+        decisions(&exchange(&tmp, &[batch(json!([]))]).remove(0)),
+        []
+    );
+    assert_eq!(
+        decisions(
+            &exchange(
+                &tmp,
+                &[batch(json!([{ "id": "1", "url": "https://a.test/" }]))]
+            )
+            .remove(0)
+        ),
+        [("1".to_owned(), "allow".to_owned())]
+    );
+    let items = |n: usize| -> Value {
+        (0..n)
+            .map(|i| json!({ "id": i.to_string(), "url": format!("https://a.test/{i}") }))
+            .collect()
+    };
+    let full = exchange(&tmp, &[batch(items(1000))]).remove(0);
+    assert_eq!(decisions(&full).len(), 1000);
+    assert!(
+        full.to_string().len() < 100_000,
+        "far below 1 MB from a host"
+    );
+    assert_eq!(
+        exchange(&tmp, &[batch(items(1001))]).remove(0),
+        batch_error("policy_batch_too_large")
+    );
+}
+
+#[test]
+fn a_malformed_batch_is_refused_whole() {
+    let tmp = TempDir::new();
+    initialize_policy(&tmp);
+    let ok = json!({ "id": "1", "url": "https://a.test/CANARY" });
+    for items in [
+        json!(null),
+        json!({}),
+        json!("x"),
+        json!([ok, ok]),
+        json!([ok, 1]),
+        json!([ok, { "id": "2" }]),
+        json!([ok, { "id": "2", "url": 3 }]),
+        json!([ok, { "url": "https://a.test/" }]),
+        json!([ok, { "id": 2, "url": "https://a.test/" }]),
+        json!([ok, { "id": "", "url": "https://a.test/" }]),
+        json!([ok, { "id": "a b", "url": "https://a.test/" }]),
+        json!([ok, { "id": "x".repeat(33), "url": "https://a.test/" }]),
+    ] {
+        assert_eq!(
+            exchange(&tmp, &[batch(items.clone())]).remove(0),
+            batch_error("invalid_policy_batch"),
+            "{items}"
+        );
+    }
+    let missing = json!({ "type": "policy_evaluate_batch", "requestId": "b" });
+    assert_eq!(
+        exchange(&tmp, &[missing]).remove(0),
+        batch_error("invalid_policy_batch")
+    );
+    let no_request = json!({ "type": "policy_evaluate_batch", "items": [] });
+    assert_eq!(
+        exchange(&tmp, &[no_request]).remove(0)["error"],
+        "invalid_request_id"
+    );
+}
+
+#[test]
+fn no_decision_is_given_without_a_valid_policy() {
+    let one = batch(json!([{ "id": "1", "url": "https://a.test/CANARY" }]));
+    let tmp = TempDir::new();
+    assert_eq!(
+        exchange(&tmp, std::slice::from_ref(&one)).remove(0),
+        batch_error("policy_not_initialized")
+    );
+    initialize_policy(&tmp);
+    let path = store_of(&tmp).policy_path();
+    let good = std::fs::read(&path).unwrap();
+    for broken in [
+        b"{ broken".to_vec(),
+        b"{}".to_vec(),
+        String::from_utf8(good.clone())
+            .unwrap()
+            .replace("\"rules\": []", "\"rules\": [\"https://a.test/*\"]")
+            .into_bytes(),
+    ] {
+        assert_ne!(broken, good);
+        std::fs::write(&path, broken).unwrap();
+        assert_eq!(
+            exchange(&tmp, std::slice::from_ref(&one)).remove(0),
+            batch_error("policy_invalid")
+        );
+    }
+    std::fs::write(&path, &good).unwrap();
+    // A writer holds the lock: busy after the host's short retries, not a decision.
+    let lock = std::fs::File::open(tmp.app_dir().join("policy.lock")).unwrap();
+    lock.try_lock().unwrap();
+    assert_eq!(
+        exchange(&tmp, std::slice::from_ref(&one)).remove(0),
+        batch_error("policy_busy")
+    );
+    drop(lock);
+    assert_eq!(decisions(&exchange(&tmp, &[one]).remove(0)).len(), 1);
+}
+
+#[test]
+fn an_allow_is_no_permit_a_later_rule_stops_the_write() {
+    const URL: &str = "https://later.test/CANARY";
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let reply = exchange(&tmp, &[batch(json!([{ "id": "1", "url": URL }]))]).remove(0);
+    assert_eq!(decisions(&reply)[0].1, "allow");
+    add_never_save_rule(&tmp, "later.test");
+    assert_eq!(
+        exchange(&tmp, &[visit("v", URL, AT), snapshot("s", URL, AT)]),
+        [dropped("v"), dropped("s")]
+    );
+    assert_eq!(row_dump(&tmp.default_vault()), Vec::<String>::new());
+    assert_eq!(
+        decisions(&exchange(&tmp, &[batch(json!([{ "id": "1", "url": URL }]))]).remove(0))[0].1,
+        "never_save"
+    );
+}
+
+#[test]
+fn canaries_blind_is_nowhere_in_the_vault_private_and_public_are_stored() {
+    const BLIND: &str = "https://blind.example/?token=CANARY";
+    const NAMED_BLIND: &str = "https://blind.example/CANARY";
+    const PRIVATE: &str = "https://private.example/path";
+    const PUBLIC: &str = "https://public.example/path";
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    add_never_save_rule(&tmp, "blind.example");
+    let store = store_of(&tmp);
+    let current = store.load().unwrap();
+    let mut edited = current.policy.clone();
+    edited
+        .layers
+        .save_but_no_mcp
+        .rules
+        .push("private.example".into());
+    store.update(&current, edited).unwrap();
+    assert_eq!(
+        exchange(
+            &tmp,
+            &[
+                visit("b1", BLIND, AT),
+                visit("b2", NAMED_BLIND, AT),
+                visit("p", PRIVATE, AT),
+                visit("u", PUBLIC, AT),
+            ]
+        ),
+        [dropped("b1"), dropped("b2"), stored("p"), stored("u")]
+    );
+    let bytes = std::fs::read(tmp.default_vault()).unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(!text.contains("CANARY") && !text.contains("blind.example"));
+    assert!(text.contains(PRIVATE) && text.contains(PUBLIC));
+}
+
+#[test]
+fn a_batch_compiles_once_and_judges_with_that_one_policy() {
+    let source = include_str!("../src/policy_gate.rs");
+    let body = source
+        .split("fn judge_batch")
+        .nth(1)
+        .unwrap()
+        .split("pub fn handle")
+        .next()
+        .unwrap();
+    assert_eq!(body.matches("self.load()").count(), 1);
+    assert_eq!(body.matches("CompiledPolicy::compile").count(), 1);
+    assert!(!body.contains("self.decide") && !body.contains("policy.evaluate"));
+}

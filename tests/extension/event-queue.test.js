@@ -55,7 +55,7 @@ function fakeHost() {
   return host;
 }
 
-const allowAll = { current: async () => ({ ok: true, version: "v", decide: () => "allow" }) };
+const allowAll = { current: async () => ({ ok: true, version: "v" }), evaluate: async (urls) => ({ ok: true, version: "v", decisions: new Map(urls.map((url) => [url, "allow"])) }) };
 
 let counter = 0;
 const visit = (url = "https://a.test/", id = `e${++counter}`) => ({ type: "visit", id, url, title: "T", incognito: false, visitedAt: "2026-10-30T00:00:00.000Z" });
@@ -89,7 +89,8 @@ test("malformed events are quarantined as permanent errors", async () => {
   assert.deepEqual(pending(storage), []);
   assert.deepEqual(
     deadLetters(storage).map(({ errorCode, eventId }) => [errorCode, eventId]),
-    [["invalid_event", "no-url"], ["invalid_event", null], ["invalid_event", null]],
+    // The event without a URL has nothing the host could judge, so it is removed, as a refused one.
+    [["invalid_event", null], ["invalid_event", null]],
   );
 });
 

@@ -47,6 +47,8 @@ const ERROR_MESSAGES = {
   policy_invalid: "プライバシー設定を読み取れない（欠落・破損・未対応の版）ため、自動記録を停止しています。設定は上書きしていません。",
   policy_busy: "プライバシー設定が使用中のため、自動記録を一時停止しています。",
   policy_unavailable: "プライバシー設定にアクセスできないため、自動記録を停止しています。",
+  invalid_policy_batch: "Native Hostと拡張機能のバージョンが合わないため、自動記録を停止しています。",
+  policy_batch_too_large: "Native Hostと拡張機能のバージョンが合わないため、自動記録を停止しています。",
   policy_already_initialized: "プライバシー設定は初期化済みです。既存の設定は上書きしません。",
   // Image saving
   incognito_unknown: "保存元のウィンドウの種類を確認できないため、保存しませんでした。",

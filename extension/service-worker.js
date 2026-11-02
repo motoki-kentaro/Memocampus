@@ -87,15 +87,13 @@ function snapshotEvent(tab, recordedAt) {
  * "queued" from "stored in SQLite" so the UI never reports unsaved snapshots as saved.
  */
 async function recordAllTabs() {
-  // Without a valid policy no tab can be judged, so nothing is recorded at all.
-  const verdict = await policy.current({ maxAgeMs: 0 });
-  if (!verdict.ok) throw new QueueError(verdict.code);
-  const tabs = await chrome.tabs.query({});
+  // Only tabs known to be normal are shown to the host, and only those it allows are kept: the others
+  // leave no trace, not even a count. Without a complete answer nothing is recorded at all.
+  const tabs = (await chrome.tabs.query({})).filter((tab) => tab.incognito === false && isRecordableUrl(tab.url || ""));
+  const judged = await policy.evaluate(tabs.map((tab) => tab.url));
+  if (!judged.ok) throw new QueueError(judged.code);
   const recordedAt = new Date().toISOString();
-  // Only tabs known to be normal and allowed by the policy: the others leave no trace, not even a count.
-  const events = tabs
-    .filter((tab) => tab.incognito === false && isRecordableUrl(tab.url || "") && verdict.decide(tab.url) === "allow")
-    .map((tab) => snapshotEvent(tab, recordedAt));
+  const events = tabs.filter((tab) => judged.decisions.get(tab.url) === "allow").map((tab) => snapshotEvent(tab, recordedAt));
   if (events.length === 0) return { ok: true, queued: 0, stored: 0, pending: 0, deadLettered: 0 };
   await queue.enqueueAll(events);
   const blockedBy = await flushQueue();
@@ -120,8 +118,8 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
   }
   if (tab?.incognito !== false) return;
   // Decided before anything is written: a refused or undecidable visit is not kept anywhere.
-  const verdict = await policy.current({ maxAgeMs: 0 });
-  if (!verdict.ok || verdict.decide(details.url) !== "allow") return;
+  const judged = await policy.evaluate([details.url]);
+  if (!judged.ok || judged.decisions.get(details.url) !== "allow") return;
   const event = {
     type: "visit",
     id: crypto.randomUUID(),

@@ -28,6 +28,7 @@ async function startWorker({ tabs = {}, query = [], seed = {} } = {}) {
       lastError: undefined,
       sendNativeMessage(_host, event, reply) {
         if (event.type === "policy_status") return reply({ ok: true, type: "policy_result", requestId: event.requestId, state: "ready", policy: defaults, etag: "e" });
+        if (event.type === "policy_evaluate_batch") return reply({ ok: true, type: "policy_evaluate_batch_result", requestId: event.requestId, etag: "e", revision: 1, items: event.items.map((item) => ({ id: item.id, decision: "allow" })) });
         sent.push(event);
         reply({ ok: true, eventId: event.id });
       },
@@ -162,7 +163,7 @@ test("a refusal by the host discards the event without a dead letter; a failure 
     get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter((key) => data.has(key)).map((key) => [key, data.get(key)])),
     set: async (items) => Object.entries(items).forEach(([key, value]) => data.set(key, value)),
   };
-  const policy = { current: async () => ({ ok: true, version: "v", decide: () => "allow" }) };
+  const policy = { current: async () => ({ ok: true, version: "v" }), evaluate: async (urls) => ({ ok: true, version: "v", decisions: new Map(urls.map((url) => [url, "allow"])) }) };
   const refusing = createEventQueue({ storage, policy, send: async (sent) => ({ ok: false, eventId: sent.id, error: "incognito_not_allowed" }) });
   await refusing.enqueue(event);
   assert.equal(await refusing.flush(), null, "delivery does not pause");
