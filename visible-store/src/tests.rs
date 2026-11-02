@@ -2773,10 +2773,11 @@ fn perf_report() {
 fn perf_images() {
     let env =
         |name: &str, default: u32| std::env::var(name).map_or(default, |v| v.parse().unwrap());
-    let (rows, percent, rules) = (
+    let (rows, percent, rules, regexes) = (
         env("MC_PERF_ROWS", 10_000),
         env("MC_PERF_PUBLIC", 50),
         env("MC_PERF_RULES", 0),
+        env("MC_PERF_REGEX", 0),
     );
     let f = Fixture::new();
     let db = writer(&f.vault);
@@ -2810,6 +2811,16 @@ fn perf_images() {
             .save_but_no_mcp
             .rules
             .push(format!("*.host{n}.example").into());
+    }
+    for n in 0..regexes {
+        use memocampus_native_host::policy::{RuleSpec, TypedRule};
+        policy
+            .layers
+            .never_save
+            .rules
+            .push(RuleSpec::Typed(TypedRule::Regex {
+                pattern: format!(r"^https://(?:[^/]+\.)?site{n}\.example/private/"),
+            }));
     }
     store.update(&current, policy.clone()).unwrap();
 
@@ -2888,7 +2899,7 @@ fn perf_images() {
         )
         .unwrap();
     println!(
-        "PERF-IMG rows={rows} public={percent}% rules={rules} compile={compile:?} total={total:?} lock_held={lock_held:?} judge_build={judge_build:?} query={query:?} hits={hits} set={:.1}MiB host_commits={commits} host_failures={failures} worst_commit={worst:?} reads={reads} read_busy={busy}",
+        "PERF-IMG rows={rows} public={percent}% rules={rules} regexes={regexes} compile={compile:?} total={total:?} lock_held={lock_held:?} judge_build={judge_build:?} query={query:?} hits={hits} set={:.1}MiB host_commits={commits} host_failures={failures} worst_commit={worst:?} reads={reads} read_busy={busy}",
         set_bytes as f64 / 1_048_576.0,
     );
 }
@@ -2990,26 +3001,30 @@ fn version_2_keeps_layer_b_private() {
 }
 
 #[test]
-fn a_policy_with_a_regex_rule_publishes_nothing() {
+fn a_policy_with_an_unusable_regex_publishes_nothing() {
     let f = Fixture::new();
     f.seed();
     seed_images(&f);
     let id = image_page(&f).items.remove(0).id;
     let path = f.app.join("policy.json");
-    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    value["layers"]["saveButNoMcp"]["rules"] =
-        serde_json::json!([{ "kind": "regex", "pattern": "^https://CANARY" }]);
-    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
-    assert_failed(f.store.search_visits(&ALL), VisibleError::PolicyUnavailable);
-    assert_failed(
-        f.store.search_images(&ALL_IMAGES),
-        VisibleError::PolicyUnavailable,
-    );
-    assert_failed(sources_of(&f, &id), VisibleError::PolicyUnavailable);
-    // Disabling the layer does not make it usable: the rule cannot be judged.
-    value["layers"]["saveButNoMcp"]["enabled"] = false.into();
-    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
-    assert_failed(f.store.search_visits(&ALL), VisibleError::PolicyUnavailable);
+    let original = fs::read(&path).unwrap();
+    // Unsupported, invalid, and over the compiled size limit.
+    for pattern in ["(?<=CANARY)x", "(CANARY", "\\w{100}CANARY"] {
+        let mut value: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        value["layers"]["saveButNoMcp"]["rules"] =
+            serde_json::json!([{ "kind": "regex", "pattern": pattern }]);
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_failed(f.store.search_visits(&ALL), VisibleError::PolicyUnavailable);
+        assert_failed(
+            f.store.search_images(&ALL_IMAGES),
+            VisibleError::PolicyUnavailable,
+        );
+        assert_failed(sources_of(&f, &id), VisibleError::PolicyUnavailable);
+        // Disabling the layer does not make it usable: the rule cannot be judged.
+        value["layers"]["saveButNoMcp"]["enabled"] = false.into();
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_failed(f.store.search_visits(&ALL), VisibleError::PolicyUnavailable);
+    }
 }
 
 #[test]
@@ -3038,4 +3053,94 @@ fn the_new_patterns_and_collapsed_slashes_keep_rows_out_of_the_public_read() {
         assert_eq!(visible.iter().any(|u| u == url), public, "{id}");
     }
     assert_eq!(visible.len(), 3, "{visible:?}");
+}
+
+fn add_regex(f: &Fixture, never_save: bool, pattern: &str) {
+    use memocampus_native_host::policy::{RuleSpec, TypedRule};
+    let store = f.policy_store();
+    let current = store.load().unwrap();
+    let mut next = current.policy.clone();
+    let layer = if never_save {
+        &mut next.layers.never_save
+    } else {
+        &mut next.layers.save_but_no_mcp
+    };
+    layer.rules.push(RuleSpec::Typed(TypedRule::Regex {
+        pattern: pattern.into(),
+    }));
+    store.update(&current, next).unwrap();
+}
+
+#[test]
+fn regex_rules_keep_rows_recorded_before_them_out_of_the_public_read() {
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    let rows = [
+        ("blind", "https://rx.test/blind/CANARY", false),
+        ("private", "https://rx.test/notes?CANARY=1", false),
+        ("both", "https://both.test/CANARY", false),
+        ("case", "https://rx.test/BLIND/CANARY", false),
+        ("public", "https://rx.test/public", true),
+        ("near", "https://rx.test/notes", true),
+    ];
+    for (id, url, _) in rows {
+        visit(&db, id, url, "Title", &day(3));
+    }
+    let blob_id = blob(&db, 1);
+    save(&db, blob_id, &PUBLIC_SAVE);
+    let hidden_blob = blob(&db, 2);
+    save(
+        &db,
+        hidden_blob,
+        &Save {
+            id: "rx-page",
+            page: Some("https://rx.test/notes?CANARY=img"),
+            ..PUBLIC_SAVE
+        },
+    );
+    let image_blob = blob(&db, 3);
+    save(
+        &db,
+        image_blob,
+        &Save {
+            id: "rx-image",
+            image: "https://cdn.public.test/blind/CANARY.png",
+            ..PUBLIC_SAVE
+        },
+    );
+    drop(db);
+    // Before the regexes everything is public.
+    assert_eq!(
+        f.store.search_visits(&ALL).unwrap().total,
+        rows.len() as u64
+    );
+    let before = image_page(&f);
+    assert_eq!(before.items.len(), 3);
+    let before_ids: Vec<String> = before.items.iter().map(|item| item.id.clone()).collect();
+
+    add_regex(&f, true, "(?i)/blind/");
+    add_regex(&f, false, r"^https://rx\.test/notes\?");
+    add_regex(&f, false, r"^https://both\.test/");
+    add_regex(&f, true, r"^https://both\.test/CANARY$");
+    let visible = f.urls();
+    for (id, url, public) in rows {
+        assert_eq!(visible.iter().any(|u| u == url), public, "{id}");
+    }
+    assert_eq!(visible.len(), 2, "{visible:?}");
+    let after = image_page(&f);
+    assert_clean(&after);
+    assert_eq!(after.items.len(), 1, "only the public save's image");
+    // A hidden image answers exactly as one that never existed.
+    let unknown = sources_of(&f, "image_00000000000000000000000000000000").unwrap_err();
+    let hidden: Vec<&String> = before_ids
+        .iter()
+        .filter(|id| !after.items.iter().any(|item| &item.id == *id))
+        .collect();
+    assert_eq!(hidden.len(), 2);
+    for id in hidden {
+        assert_eq!(sources_of(&f, id).unwrap_err(), unknown);
+    }
+    let public = &after.items[0];
+    let sources = sources_of(&f, &public.id).unwrap();
+    assert_clean(&sources);
 }

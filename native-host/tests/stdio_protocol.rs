@@ -2278,15 +2278,16 @@ fn a_migration_against_another_version_or_without_one_changes_nothing() {
 }
 
 #[test]
-fn a_policy_with_a_regular_expression_is_refused_everywhere_and_left_alone() {
+fn a_policy_with_an_unsupported_regular_expression_is_refused_everywhere_and_left_alone() {
     let tmp = TempDir::new();
     create_default_vault(&tmp);
     let path = store_of(&tmp).policy_path();
     let mut value: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     value["schemaVersion"] = 2.into();
     value["engineVersion"] = 2.into();
+    // Look-behind: a regex this engine cannot evaluate (Slice 5 evaluates the others).
     value["layers"]["neverSave"]["rules"] =
-        json!([{ "kind": "regex", "pattern": "^https://canary\\.test/" }]);
+        json!([{ "kind": "regex", "pattern": "(?<=^https://)canary\\.test/" }]);
     let bytes = serde_json::to_vec(&value).unwrap();
     std::fs::write(&path, &bytes).unwrap();
     assert_eq!(
@@ -2524,4 +2525,158 @@ fn a_version_1_policy_also_refuses_a_path_hidden_behind_doubled_slashes() {
     );
     let v1 = std::fs::read(store_of(&tmp).policy_path()).unwrap();
     assert!(String::from_utf8_lossy(&v1).contains("\"schemaVersion\": 1"));
+}
+
+fn regex_rule(pattern: &str) -> memocampus_native_host::policy::RuleSpec {
+    use memocampus_native_host::policy::{RuleSpec, TypedRule};
+    RuleSpec::Typed(TypedRule::Regex {
+        pattern: pattern.into(),
+    })
+}
+
+#[test]
+fn regex_rules_decide_in_the_batch_and_again_before_the_vault() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let store = store_of(&tmp);
+    let current = store.load().unwrap();
+    let mut edited = current.policy.clone();
+    edited.layers.never_save.rules = vec![regex_rule("[?&]q=CANARY-blind(?:&|$)")];
+    edited.layers.save_but_no_mcp.rules = vec![
+        regex_rule(r"^https://private\.example/"),
+        "blind-too.example".into(),
+    ];
+    store.update(&current, edited).unwrap();
+    let urls = [
+        ("1", "https://public.example/?q=CANARY-blind"),
+        ("2", "https://private.example/?q=CANARY-blind"),
+        ("3", "https://private.example/notes"),
+        ("4", "https://blind-too.example/?a=1&q=CANARY-blind"),
+        ("5", "https://blind-too.example/x"),
+        ("6", "https://public.example/?q=CANARY-blinder"),
+        ("7", "https://PRIVATE.example:443/x"),
+    ];
+    let expected = [
+        "never_save",
+        "never_save",
+        "save_but_no_mcp",
+        "never_save",
+        "save_but_no_mcp",
+        "allow",
+        "save_but_no_mcp",
+    ];
+    let items: Vec<Value> = urls
+        .iter()
+        .map(|(id, url)| json!({ "id": id, "url": url }))
+        .collect();
+    let reply = exchange(&tmp, &[batch(json!(items))]).remove(0);
+    assert_eq!(
+        decisions(&reply),
+        urls.iter()
+            .zip(expected)
+            .map(|((id, _), decision)| (id.to_string(), decision.to_owned()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(reply["revision"], 2);
+    assert!(!reply.to_string().contains("CANARY"));
+    let events: Vec<Value> = urls.iter().map(|(id, url)| visit(id, url, AT)).collect();
+    let acks = exchange(&tmp, &events);
+    for ((id, _), (ack, decision)) in urls.iter().zip(acks.iter().zip(expected)) {
+        let want = if decision == "never_save" {
+            dropped(id)
+        } else {
+            stored(id)
+        };
+        assert_eq!(ack, &want, "{id}");
+    }
+    let rows = row_dump(&tmp.default_vault()).join("\n");
+    assert!(!rows.contains("CANARY-blind|"), "{rows}");
+    assert!(!rows.contains("CANARY-blind&"), "{rows}");
+    assert_eq!(rows.lines().count(), 4, "{rows}");
+
+    // A precheck is no permission: a regex added after it refuses the event before the vault.
+    let late = "https://public.example/late/CANARY-late";
+    let precheck = exchange(&tmp, &[batch(json!([{ "id": "l", "url": late }]))]).remove(0);
+    assert_eq!(decisions(&precheck), [("l".into(), "allow".into())]);
+    let current = store.load().unwrap();
+    let mut edited = current.policy.clone();
+    edited.layers.never_save.rules.push(regex_rule("/late/"));
+    store.update(&current, edited).unwrap();
+    assert_eq!(exchange(&tmp, &[visit("l", late, AT)]), [dropped("l")]);
+    assert!(!row_dump(&tmp.default_vault())
+        .join("\n")
+        .contains("CANARY-late"));
+    let after = exchange(&tmp, &[batch(json!([{ "id": "l", "url": late }]))]).remove(0);
+    assert_eq!(decisions(&after), [("l".into(), "never_save".into())]);
+    assert_eq!(after["revision"], 3);
+    assert_ne!(after["etag"], precheck["etag"]);
+}
+
+#[test]
+fn an_unusable_regex_stops_every_judgement_and_is_never_echoed() {
+    let many: Vec<Value> = (0..129)
+        .map(|n| json!({ "kind": "regex", "pattern": format!("CANARY{n}") }))
+        .collect();
+    for (rules, code) in [
+        (
+            json!([{ "kind": "regex", "pattern": "(?<=CANARY)x" }]),
+            "policy_unsupported",
+        ),
+        (
+            json!([{ "kind": "regex", "pattern": "(CANARY" }]),
+            "policy_invalid",
+        ),
+        (
+            json!([{ "kind": "regex", "pattern": "\\w{100}CANARY" }]),
+            "policy_invalid",
+        ),
+        (
+            json!([{ "kind": "regex", "pattern": "CANARY".repeat(700) }]),
+            "policy_invalid",
+        ),
+        (json!(many), "policy_invalid"),
+    ] {
+        for enabled in [true, false] {
+            let tmp = TempDir::new();
+            create_default_vault(&tmp);
+            let store = store_of(&tmp);
+            let good = std::fs::read(store.policy_path()).unwrap();
+            let mut value: Value = serde_json::from_slice(&good).unwrap();
+            value["layers"]["neverSave"]["rules"] = rules.clone();
+            value["layers"]["neverSave"]["enabled"] = enabled.into();
+            // The store refuses to write it, and leaves the file as it was.
+            let current = store.load().unwrap();
+            let candidate: memocampus_native_host::policy::Policy =
+                serde_json::from_value(value.clone()).unwrap();
+            assert!(store.update(&current, candidate).is_err());
+            assert_eq!(std::fs::read(store.policy_path()).unwrap(), good);
+            // Written by hand, it stops recording: no decision, no drop, nothing stored.
+            std::fs::write(store.policy_path(), serde_json::to_vec(&value).unwrap()).unwrap();
+            let replies = exchange(
+                &tmp,
+                &[
+                    batch(json!([{ "id": "1", "url": "https://public.test/" }])),
+                    visit("v", "https://public.test/CANARY-visit", AT),
+                    json!({ "type": "policy_status", "requestId": "s" }),
+                ],
+            );
+            assert_eq!(replies[0], batch_error(code), "{code}");
+            assert_policy_failure(&replies[1], "v", code);
+            let state = code.trim_start_matches("policy_");
+            assert_eq!(
+                replies[2],
+                json!({ "ok": true, "type": "policy_result", "requestId": "s", "state": state })
+            );
+            for reply in &replies {
+                assert!(!reply.to_string().contains("CANARY"), "{reply}");
+            }
+            assert!(row_dump(&tmp.default_vault()).is_empty());
+            // A valid policy again, in a new host process, records again.
+            std::fs::write(store.policy_path(), &good).unwrap();
+            assert_eq!(
+                exchange(&tmp, &[visit("w", "https://public.test/", AT)]),
+                [stored("w")]
+            );
+        }
+    }
 }

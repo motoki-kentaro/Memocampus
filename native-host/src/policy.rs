@@ -1,5 +1,7 @@
 //! URL/rule contract; see docs/issue-010-privacy-policy.md. Version 1 stores each rule as a string,
-//! version 2 as a typed rule (docs/issue-025-policy-engine.md). A pattern means the same in both.
+//! version 2 as a typed rule (docs/issue-025-policy-engine.md). A pattern means the same in both;
+//! a regex, version 2 only, meets the whole URL.
+use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -7,6 +9,15 @@ use url::Url;
 
 pub const MAX_REVISION: u64 = 9_007_199_254_740_991;
 pub const DEFAULT_JSON: &str = include_str!("../../extension/policy-defaults.json");
+/// Limits of regex rules, enabled or not (docs/issue-025-policy-engine.md, Slice 5).
+pub const MAX_REGEX_RULES: usize = 128;
+pub const MAX_REGEX_BYTES: usize = 4096;
+/// The compiled size of all regexes of a policy, shared equally, and at most this for one.
+pub const REGEX_TOTAL_SIZE_LIMIT: usize = 8 * 1024 * 1024;
+pub const REGEX_SIZE_LIMIT: usize = 1024 * 1024;
+/// The same for the lazy DFA cache a regex grows while matching.
+pub const REGEX_TOTAL_DFA_SIZE_LIMIT: usize = 8 * 1024 * 1024;
+pub const REGEX_DFA_SIZE_LIMIT: usize = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -51,7 +62,7 @@ pub enum TypedRule {
     Pattern {
         pattern: String,
     },
-    /// Reserved: no regular expression is evaluated yet, so a policy holding one is refused whole.
+    /// A regular expression of the `regex` crate, found anywhere in the URL (`compile_regex`).
     Regex {
         pattern: String,
     },
@@ -67,13 +78,17 @@ impl From<String> for RuleSpec {
         Self::Typed(TypedRule::Pattern { pattern })
     }
 }
+/// What a stored rule is: a pattern with the grammar of its version, or a regex.
+enum Form<'a> {
+    Pattern(&'a str, Syntax),
+    Regex(&'a str),
+}
 impl RuleSpec {
-    /// The pattern of a rule this version can evaluate, with the grammar of its version.
-    fn pattern(&self) -> Result<(&str, Syntax), Error> {
+    fn form(&self) -> Form<'_> {
         match self {
-            Self::Text(pattern) => Ok((pattern, Syntax::Version1)),
-            Self::Typed(TypedRule::Pattern { pattern }) => Ok((pattern, Syntax::Version2)),
-            Self::Typed(TypedRule::Regex { .. }) => Err(Error::UnsupportedRule),
+            Self::Text(pattern) => Form::Pattern(pattern, Syntax::Version1),
+            Self::Typed(TypedRule::Pattern { pattern }) => Form::Pattern(pattern, Syntax::Version2),
+            Self::Typed(TypedRule::Regex { pattern }) => Form::Regex(pattern),
         }
     }
 }
@@ -88,8 +103,12 @@ pub enum Syntax {
 pub enum Error {
     InvalidPolicy,
     InvalidUrl,
-    /// A rule of a kind this version knows but does not evaluate. The policy cannot be used.
+    /// A rule this version knows but cannot evaluate, such as a regex with look-around or a
+    /// backreference. The policy cannot be used.
     UnsupportedRule,
+    /// Regex rules over a limit: too many, too long, or compiled too large. The policy cannot be
+    /// used.
+    RegexLimit,
     /// Only a valid version 1 policy can be migrated.
     NotMigratable,
 }
@@ -135,14 +154,28 @@ impl Policy {
                 return Err(Error::InvalidPolicy);
             }
         }
+        if self.regex_count() > MAX_REGEX_RULES {
+            return Err(Error::RegexLimit);
+        }
         Ok(())
     }
+    fn regex_count(&self) -> usize {
+        [&self.layers.never_save, &self.layers.save_but_no_mcp]
+            .iter()
+            .flat_map(|layer| &layer.rules)
+            .filter(|rule| matches!(rule.form(), Form::Regex(_)))
+            .count()
+    }
+    /// Every rule, also of a disabled layer; a regex is compiled for it.
     pub fn validate(&self) -> Result<(), Error> {
         self.check_header()?;
+        let budget = RegexBudget::of(self);
         for layer in [&self.layers.never_save, &self.layers.save_but_no_mcp] {
             for rule in &layer.rules {
-                let (pattern, syntax) = rule.pattern()?;
-                Rule::parse_in(pattern, syntax)?;
+                match rule.form() {
+                    Form::Pattern(pattern, syntax) => drop(Rule::parse_in(pattern, syntax)?),
+                    Form::Regex(pattern) => drop(compile_regex(pattern, budget)?),
+                }
             }
         }
         Ok(())
@@ -190,12 +223,13 @@ impl Policy {
     }
 }
 
-/// Rules of one zone by host, so a URL meets only the rules of its own host and parent domains.
-/// A `None` path covers the whole host.
+/// Patterns of one zone by host, so a URL meets only the patterns of its own host and parent
+/// domains. A `None` path covers the whole host. Regexes have no host and meet every URL.
 #[derive(Debug, Default)]
 struct Zone {
     exact: HashMap<String, Vec<Option<PathRule>>>,
     wildcard: HashMap<String, Vec<Option<PathRule>>>,
+    regexes: Vec<Regex>,
 }
 impl Zone {
     fn add(&mut self, rule: &str, syntax: Syntax) -> Result<(), Error> {
@@ -213,14 +247,25 @@ impl Zone {
             .iter()
             .try_for_each(|rule| self.add(rule, Syntax::Version1))
     }
-    fn add_specs(&mut self, rules: &[RuleSpec]) -> Result<(), Error> {
-        rules.iter().try_for_each(|rule| {
-            let (pattern, syntax) = rule.pattern()?;
-            self.add(pattern, syntax)
+    fn add_specs(&mut self, rules: &[RuleSpec], budget: RegexBudget) -> Result<(), Error> {
+        rules.iter().try_for_each(|rule| match rule.form() {
+            Form::Pattern(pattern, syntax) => self.add(pattern, syntax),
+            Form::Regex(pattern) => {
+                self.regexes.push(compile_regex(pattern, budget)?);
+                Ok(())
+            }
         })
     }
-    /// A rule matches if it matches any of the views of the path.
-    fn matches(&self, host: &str, paths: &[&str]) -> bool {
+    /// A pattern meets any of the views of the path, a regex any of the views of the URL. Where a
+    /// rule of the zone matches decides nothing else: the zone matches.
+    fn matches(&self, host: &str, paths: &[&str], urls: &[&str]) -> bool {
+        self.matches_patterns(host, paths)
+            || self
+                .regexes
+                .iter()
+                .any(|regex| urls.iter().any(|url| regex.is_match(url)))
+    }
+    fn matches_patterns(&self, host: &str, paths: &[&str]) -> bool {
         let covers = |rules: &Vec<Option<PathRule>>| {
             rules.iter().any(|rule| {
                 rule.as_ref()
@@ -259,13 +304,14 @@ impl CompiledPolicy {
         let a = &policy.layers.never_save;
         let b = &policy.layers.save_but_no_mcp;
         let c = &policy.categories;
+        let budget = RegexBudget::of(policy);
         let mut blind = Zone::default();
-        blind.add_specs(&a.rules)?;
+        blind.add_specs(&a.rules, budget)?;
         if c.authentication {
             blind.add_all(&BUILTINS.authentication)?;
         }
         let mut private = Zone::default();
-        private.add_specs(&b.rules)?;
+        private.add_specs(&b.rules, budget)?;
         for (enabled, rules) in [
             (c.government, &BUILTINS.government),
             (c.webmail, &BUILTINS.webmail),
@@ -284,9 +330,21 @@ impl CompiledPolicy {
     }
     /// Blind Zone first. An invalid URL is `NeverSave` whatever the layers say. A path rule meets
     /// the judged path and the same with its runs of `/` collapsed: either match counts.
+    /// A regex meets the URL as the parser writes it, and without the trailing dots of its host.
     pub fn evaluate(&self, input: &str) -> Decision {
-        let Ok(url) = normalize_url(input) else {
+        let Ok((url, parsed)) = parse_url(input) else {
             return Decision::NeverSave;
+        };
+        let dotless = if self.blind.regexes.is_empty() && self.private.regexes.is_empty() {
+            None
+        } else {
+            without_trailing_dots(&parsed)
+        };
+        let whole = [parsed.as_str(), dotless.as_deref().unwrap_or_default()];
+        let urls = if dotless.is_some() {
+            &whole[..]
+        } else {
+            &whole[..1]
         };
         let collapsed = collapse_slashes(&url.path);
         let both = [url.path.as_str(), collapsed.as_deref().unwrap_or_default()];
@@ -295,7 +353,7 @@ impl CompiledPolicy {
         } else {
             &both[..1]
         };
-        if self.blind.matches(&url.host, paths)
+        if self.blind.matches(&url.host, paths, urls)
             || (self.auth_paths
                 && BUILTINS
                     .auth_paths
@@ -305,7 +363,7 @@ impl CompiledPolicy {
         {
             return Decision::NeverSave;
         }
-        if self.private.matches(&url.host, paths) {
+        if self.private.matches(&url.host, paths, urls) {
             return Decision::SaveButNoMcp;
         }
         Decision::None
@@ -390,6 +448,10 @@ fn collapse_slashes(path: &str) -> Option<String> {
     Some(out)
 }
 pub fn normalize_url(input: &str) -> Result<NormalizedUrl, Error> {
+    parse_url(input).map(|(url, _)| url)
+}
+/// The judged form, and the parsed HTTP(S) URL it was taken from (the inner one of a `blob:`).
+fn parse_url(input: &str) -> Result<(NormalizedUrl, Url), Error> {
     if input.encode_utf16().count() > 32768
         || input
             .chars()
@@ -420,14 +482,27 @@ pub fn normalize_url(input: &str) -> Result<NormalizedUrl, Error> {
             return Err(Error::InvalidUrl);
         }
     }
-    Ok(NormalizedUrl {
+    let normalized = NormalizedUrl {
         host,
         port: url.port().map(|p| p.to_string()),
         path: path_of(url.path())?,
         userinfo: !url.username().is_empty() || url.password().is_some_and(|p| !p.is_empty()),
         query: url.query().unwrap_or("").into(),
         fragment: url.fragment().unwrap_or("").into(),
-    })
+    };
+    Ok((normalized, url))
+}
+/// The URL with the trailing dots of its host removed, if it has any: `example.com.` is the
+/// host `example.com` to a pattern, and must not slip past a regex written for that.
+fn without_trailing_dots(url: &Url) -> Option<String> {
+    let host = url.host_str()?;
+    let trimmed = host.trim_end_matches('.');
+    if trimmed.len() == host.len() {
+        return None;
+    }
+    let mut dotless = url.clone();
+    dotless.set_host(Some(trimmed)).ok()?;
+    Some(dotless.into())
 }
 
 #[derive(Debug)]
@@ -528,6 +603,50 @@ impl Rule {
             wildcard,
             path,
         })
+    }
+}
+/// What one regex of a policy may use: an equal share of the policy's budget, at most the limit
+/// of one rule. So all regexes of a policy together stay within the totals.
+#[derive(Debug, Clone, Copy)]
+struct RegexBudget {
+    size: usize,
+    dfa: usize,
+}
+impl RegexBudget {
+    fn of(policy: &Policy) -> Self {
+        let count = policy.regex_count().max(1);
+        Self {
+            size: (REGEX_TOTAL_SIZE_LIMIT / count).min(REGEX_SIZE_LIMIT),
+            dfa: (REGEX_TOTAL_DFA_SIZE_LIMIT / count).min(REGEX_DFA_SIZE_LIMIT),
+        }
+    }
+}
+/// A regex rule ready to judge. A syntax error makes the policy invalid; look-around and
+/// backreferences, which the `regex` crate does not have, unsupported; a limit, `RegexLimit`.
+fn compile_regex(pattern: &str, budget: RegexBudget) -> Result<Regex, Error> {
+    if pattern.len() > MAX_REGEX_BYTES {
+        return Err(Error::RegexLimit);
+    }
+    RegexBuilder::new(pattern)
+        .size_limit(budget.size)
+        .dfa_size_limit(budget.dfa)
+        .build()
+        .map_err(|error| match error {
+            regex::Error::CompiledTooBig(_) => Error::RegexLimit,
+            _ => regex_syntax_error(pattern),
+        })
+}
+fn regex_syntax_error(pattern: &str) -> Error {
+    use regex_syntax::ast::ErrorKind;
+    match regex_syntax::ast::parse::Parser::new().parse(pattern) {
+        Err(error) => match error.kind() {
+            ErrorKind::UnsupportedLookAround | ErrorKind::UnsupportedBackreference => {
+                Error::UnsupportedRule
+            }
+            ErrorKind::NestLimitExceeded(_) => Error::RegexLimit,
+            _ => Error::InvalidPolicy,
+        },
+        Ok(_) => Error::InvalidPolicy,
     }
 }
 fn path_matches(path: &str, prefix: &str) -> bool {
