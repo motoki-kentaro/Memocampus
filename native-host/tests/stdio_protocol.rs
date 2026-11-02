@@ -1553,10 +1553,14 @@ fn explicit_initialization_starts_recording_and_never_replaces_a_policy() {
     );
     assert_eq!(responses[0]["ok"], true, "{}", responses[0]);
     assert_eq!(responses[0]["state"], "ready");
-    assert_eq!(responses[0]["policy"]["revision"], 1);
+    assert_eq!(responses[0]["revision"], 1);
     assert_eq!(responses[1]["etag"], responses[0]["etag"]);
-    assert_eq!(responses[1]["policy"]["schemaVersion"], 1);
-    assert_eq!(responses[1]["policy"]["engineVersion"], 1);
+    assert_eq!(
+        responses[1]["schemaVersion"], 2,
+        "a new policy is version 2"
+    );
+    assert_eq!(responses[1]["engineVersion"], 2);
+    assert!(responses[0].get("policy").is_none() && responses[1].get("policy").is_none());
     assert_eq!(
         responses[2],
         json!({ "ok": false, "type": "policy_result", "requestId": "i2", "error": "policy_already_initialized" })
@@ -2059,4 +2063,366 @@ fn a_batch_compiles_once_and_judges_with_that_one_policy() {
     assert_eq!(body.matches("self.load()").count(), 1);
     assert_eq!(body.matches("CompiledPolicy::compile").count(), 1);
     assert!(!body.contains("self.decide") && !body.contains("policy.evaluate"));
+}
+
+// --- Policy version 2, explicit migration, status without rules (Issue #25 Slice 3) ----------
+
+fn status(tmp: &TempDir) -> Value {
+    exchange(tmp, &[json!({ "type": "policy_status", "requestId": "s" })]).remove(0)
+}
+
+fn policy_bytes(tmp: &TempDir) -> Vec<u8> {
+    std::fs::read(store_of(tmp).policy_path()).unwrap()
+}
+
+/// A version 1 policy as an older Memocampus left it, then edited once (revision 2).
+fn with_canary_rules(tmp: &TempDir) {
+    use memocampus_native_host::policy::{Policy, RuleSpec};
+    let store = store_of(tmp);
+    let old = Policy {
+        schema_version: 1,
+        engine_version: 1,
+        ..Policy::default()
+    };
+    std::fs::write(
+        store.policy_path(),
+        serde_json::to_vec_pretty(&old).unwrap(),
+    )
+    .unwrap();
+    let current = store.load().unwrap();
+    let mut edited = current.policy.clone();
+    let text = |rule: &str| RuleSpec::Text(rule.into());
+    edited.layers.never_save.rules = vec![text("blind-canary.test"), text("*.second-canary.test")];
+    edited.layers.save_but_no_mcp.rules = vec![text("private-canary.test/x/*")];
+    store.update(&current, edited).unwrap();
+}
+
+fn migrate(tmp: &TempDir, etag: Value) -> Value {
+    exchange(
+        tmp,
+        &[json!({ "type": "policy_migrate", "requestId": "m", "etag": etag })],
+    )
+    .remove(0)
+}
+
+const PROBES: [&str; 8] = [
+    "https://blind-canary.test/",
+    "https://a.second-canary.test/",
+    "https://second-canary.test/",
+    "https://private-canary.test/x/1",
+    "https://private-canary.test/x",
+    "https://public.test/??token=x",
+    "https://mail.google.com/",
+    "https://public.test/",
+];
+
+fn judged(tmp: &TempDir) -> Vec<(String, String)> {
+    let items: Vec<Value> = PROBES
+        .iter()
+        .enumerate()
+        .map(|(i, url)| json!({ "id": i.to_string(), "url": url }))
+        .collect();
+    decisions(&exchange(tmp, &[batch(json!(items))]).remove(0))
+}
+
+#[test]
+fn the_status_names_a_version_and_no_rule_and_get_returns_the_document() {
+    let tmp = TempDir::new();
+    initialize_policy(&tmp);
+    with_canary_rules(&tmp);
+    let before = policy_bytes(&tmp);
+    let current = store_of(&tmp).load().unwrap();
+    let reply = status(&tmp);
+    assert_eq!(
+        reply,
+        json!({ "ok": true, "type": "policy_result", "requestId": "s", "state": "ready", "etag": current.etag,
+                "revision": 2, "schemaVersion": 1, "engineVersion": 1 })
+    );
+    assert!(!reply.to_string().contains("canary"));
+    let got = exchange(&tmp, &[json!({ "type": "policy_get", "requestId": "g" })]).remove(0);
+    assert_eq!(got["ok"], true);
+    assert_eq!(got["type"], "policy_get_result");
+    assert_eq!(got["etag"], current.etag);
+    assert_eq!(
+        got["policy"],
+        serde_json::to_value(&current.policy).unwrap()
+    );
+    assert_eq!(policy_bytes(&tmp), before, "reading changes nothing");
+    assert_eq!(
+        exchange(&tmp, &[json!({ "type": "policy_get" })]).remove(0)["error"],
+        "invalid_request_id"
+    );
+    let fresh = TempDir::new();
+    assert_eq!(
+        exchange(&fresh, &[json!({ "type": "policy_get", "requestId": "g" })]).remove(0),
+        json!({ "ok": false, "type": "policy_get_result", "requestId": "g", "error": "policy_not_initialized" })
+    );
+}
+
+#[test]
+fn nothing_but_the_explicit_request_migrates_a_version_1_policy() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    with_canary_rules(&tmp);
+    let before = policy_bytes(&tmp);
+    exchange(
+        &tmp,
+        &[
+            json!({ "type": "policy_status", "requestId": "s" }),
+            json!({ "type": "policy_get", "requestId": "g" }),
+            json!({ "type": "policy_initialize", "requestId": "i" }),
+            batch(json!([{ "id": "1", "url": "https://public.test/" }])),
+            visit("v", "https://public.test/", AT),
+            json!({ "type": "vault_status", "requestId": "vs" }),
+            search("q"),
+        ],
+    );
+    assert_eq!(policy_bytes(&tmp), before);
+    assert_eq!(status(&tmp)["schemaVersion"], 1);
+}
+
+#[test]
+fn an_explicit_migration_keeps_every_decision_and_is_seen_as_a_new_version() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    with_canary_rules(&tmp);
+    let decided = judged(&tmp);
+    let before = status(&tmp);
+    let reply = migrate(&tmp, before["etag"].clone());
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["type"], "policy_migrate_result");
+    assert_eq!(
+        (
+            reply["schemaVersion"].clone(),
+            reply["engineVersion"].clone()
+        ),
+        (json!(2), json!(2))
+    );
+    assert_eq!(reply["revision"], 3);
+    assert_ne!(reply["etag"], before["etag"]);
+    assert!(!reply.to_string().contains("canary"));
+    let after = status(&tmp);
+    assert_eq!(after["etag"], reply["etag"]);
+    assert_eq!(judged(&tmp), decided, "the same decision for every URL");
+    let migrated = store_of(&tmp).load().unwrap().policy;
+    assert_eq!(
+        serde_json::to_value(&migrated.layers).unwrap(),
+        json!({
+            "neverSave": { "enabled": true, "rules": [
+                { "kind": "pattern", "pattern": "blind-canary.test" },
+                { "kind": "pattern", "pattern": "*.second-canary.test" } ] },
+            "saveButNoMcp": { "enabled": true, "rules": [
+                { "kind": "pattern", "pattern": "private-canary.test/x/*" } ] },
+        })
+    );
+    // The write guard uses the migrated policy too.
+    assert_eq!(
+        exchange(
+            &tmp,
+            &[
+                visit("b", "https://blind-canary.test/", AT),
+                visit("p", "https://public.test/", AT)
+            ]
+        ),
+        [dropped("b"), stored("p")]
+    );
+    // Again: refused, and nothing changes.
+    let bytes = policy_bytes(&tmp);
+    assert_eq!(
+        migrate(&tmp, after["etag"].clone()),
+        json!({ "ok": false, "type": "policy_migrate_result", "requestId": "m", "error": "policy_not_migratable" })
+    );
+    assert_eq!(policy_bytes(&tmp), bytes);
+}
+
+#[test]
+fn a_migration_against_another_version_or_without_one_changes_nothing() {
+    let tmp = TempDir::new();
+    let fresh = migrate(&tmp, json!("x"));
+    assert_eq!(fresh["error"], "policy_not_initialized");
+    initialize_policy(&tmp);
+    let stale = status(&tmp)["etag"].clone();
+    with_canary_rules(&tmp);
+    let before = (policy_bytes(&tmp), status(&tmp));
+    for (etag, code) in [
+        (stale, "policy_conflict"),
+        (json!("0".repeat(64)), "policy_conflict"),
+        (json!(""), "invalid_etag"),
+        (json!(1), "invalid_etag"),
+        (Value::Null, "invalid_etag"),
+    ] {
+        assert_eq!(
+            migrate(&tmp, etag.clone()),
+            json!({ "ok": false, "type": "policy_migrate_result", "requestId": "m", "error": code }),
+            "{etag}"
+        );
+        assert_eq!((policy_bytes(&tmp), status(&tmp)), before);
+    }
+    assert_eq!(
+        exchange(
+            &tmp,
+            &[json!({ "type": "policy_migrate", "etag": before.1["etag"] })]
+        )
+        .remove(0)["error"],
+        "invalid_request_id"
+    );
+    // Held by a writer: refused once, not retried in the background.
+    let lock = std::fs::File::open(tmp.app_dir().join("policy.lock")).unwrap();
+    lock.try_lock().unwrap();
+    assert_eq!(
+        migrate(&tmp, before.1["etag"].clone())["error"],
+        "policy_busy"
+    );
+    drop(lock);
+    assert_eq!((policy_bytes(&tmp), status(&tmp)), before);
+}
+
+#[test]
+fn a_policy_with_a_regular_expression_is_refused_everywhere_and_left_alone() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let path = store_of(&tmp).policy_path();
+    let mut value: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    value["schemaVersion"] = 2.into();
+    value["engineVersion"] = 2.into();
+    value["layers"]["neverSave"]["rules"] =
+        json!([{ "kind": "regex", "pattern": "^https://canary\\.test/" }]);
+    let bytes = serde_json::to_vec(&value).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    assert_eq!(
+        status(&tmp),
+        json!({ "ok": true, "type": "policy_result", "requestId": "s", "state": "unsupported" })
+    );
+    assert_eq!(
+        exchange(
+            &tmp,
+            &[batch(json!([{ "id": "1", "url": "https://public.test/" }]))]
+        )
+        .remove(0),
+        batch_error("policy_unsupported")
+    );
+    assert_policy_failure(
+        &exchange(&tmp, &[visit("v", "https://public.test/", AT)])[0],
+        "v",
+        "policy_unsupported",
+    );
+    assert_eq!(migrate(&tmp, json!("x"))["error"], "policy_unsupported");
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(row_dump(&tmp.default_vault()), Vec::<String>::new());
+    // An unknown kind is no policy at all.
+    value["layers"]["neverSave"]["rules"] = json!([{ "kind": "glob", "pattern": "canary.test" }]);
+    std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert_eq!(status(&tmp)["state"], "invalid");
+}
+
+#[test]
+fn a_new_install_writes_version_2_and_an_existing_version_1_is_kept() {
+    let tmp = TempDir::new();
+    initialize_policy(&tmp);
+    let stored: Value = serde_json::from_slice(&policy_bytes(&tmp)).unwrap();
+    assert_eq!(
+        (
+            stored["schemaVersion"].clone(),
+            stored["engineVersion"].clone()
+        ),
+        (json!(2), json!(2))
+    );
+    let other = TempDir::new();
+    initialize_policy(&other);
+    with_canary_rules(&other);
+    let before = policy_bytes(&other);
+    assert_eq!(
+        exchange(
+            &other,
+            &[json!({ "type": "policy_initialize", "requestId": "i" })]
+        )
+        .remove(0)["error"],
+        "policy_already_initialized"
+    );
+    assert_eq!(policy_bytes(&other), before);
+    assert_eq!(status(&other)["schemaVersion"], 1);
+}
+
+/// A version 2 policy whose compact form is `target` bytes long, all of it pattern rules.
+fn policy_of_compact_length(target: usize) -> memocampus_native_host::policy::Policy {
+    use memocampus_native_host::policy::Policy;
+    let rule = |n: usize, len: usize| format!("a.test/{n:04}{}/*", "x".repeat(len));
+    let mut policy = Policy::default();
+    let length = |policy: &Policy| serde_json::to_string(policy).unwrap().len();
+    // Enough full rules to reach the target, then the last one shortened to hit it exactly.
+    let base = length(&policy);
+    let mut probe = policy.clone();
+    probe.layers.never_save.rules = vec![rule(0, 1990).into(), rule(1, 1990).into()];
+    let two = length(&probe);
+    probe.layers.never_save.rules.pop();
+    let per_rule = two - length(&probe);
+    let count = (target - base) / per_rule + 2;
+    for n in 0..count {
+        let layer = if n < 1000 {
+            &mut policy.layers.never_save
+        } else {
+            &mut policy.layers.save_but_no_mcp
+        };
+        layer.rules.push(rule(n, 1990).into());
+    }
+    // Shorten rules from the end, each by at most its whole padding, until the length is exact.
+    let mut over = length(&policy) - target;
+    let mut n = count;
+    while over > 0 {
+        n -= 1;
+        let cut = over.min(1990);
+        let layer = if n < 1000 {
+            &mut policy.layers.never_save
+        } else {
+            &mut policy.layers.save_but_no_mcp
+        };
+        layer.rules[n % 1000] = rule(n, 1990 - cut).into();
+        over -= cut;
+    }
+    assert_eq!(length(&policy), target);
+    policy
+}
+
+#[test]
+fn a_document_too_large_for_chrome_is_refused_without_its_content() {
+    let tmp = TempDir::new();
+    initialize_policy(&tmp);
+    let store = store_of(&tmp);
+    for (compact, fits) in [
+        (990_000, true),
+        (999_000, true),
+        (1_000_100, false),
+        (1_010_000, false),
+    ] {
+        let current = store.load().unwrap();
+        let mut candidate = policy_of_compact_length(compact);
+        candidate.revision = current.policy.revision;
+        store.update(&current, candidate).unwrap();
+        let before = policy_bytes(&tmp);
+        assert!(
+            before.len() <= 1_048_576,
+            "the file itself is within its own limit"
+        );
+        let replies = exchange(
+            &tmp,
+            &[
+                json!({ "type": "policy_get", "requestId": "g" }),
+                json!({ "type": "policy_status", "requestId": "s" }),
+            ],
+        );
+        let text = replies[0].to_string();
+        if fits {
+            assert_eq!(replies[0]["ok"], true, "{compact}");
+            assert!(text.len() <= 1_000_000, "{compact}: {}", text.len());
+        } else {
+            assert_eq!(
+                replies[0],
+                json!({ "ok": false, "type": "policy_get_result", "requestId": "g", "error": "policy_too_large" }),
+                "{compact}"
+            );
+            assert!(!text.contains("a.test"));
+        }
+        assert_eq!(replies[1]["state"], "ready", "the host keeps serving");
+        assert_eq!(policy_bytes(&tmp), before, "and changes nothing");
+    }
 }

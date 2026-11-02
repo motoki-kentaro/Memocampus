@@ -230,6 +230,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some("policy_status" | "policy_initialize") => {
                 write_message(&gate.handle(&value))?;
             }
+            Some("policy_get") => {
+                write_message(&gate.get(&value))?;
+            }
+            Some("policy_migrate") => {
+                write_message(&gate.migrate(&value))?;
+            }
             Some("policy_evaluate_batch") => {
                 write_message(&gate.evaluate_batch(&value))?;
             }

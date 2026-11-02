@@ -52,6 +52,17 @@ mod legacy {
                         .any(|p| path_matches(&url.path, p))))
     }
 
+    /// The former evaluator knew string rules only.
+    fn texts(rules: &[RuleSpec]) -> Vec<String> {
+        rules
+            .iter()
+            .map(|rule| match rule {
+                RuleSpec::Text(text) => text.clone(),
+                RuleSpec::Typed(_) => panic!("version 1 only"),
+            })
+            .collect()
+    }
+
     pub fn evaluate(policy: &Policy, input: &str) -> Decision {
         if policy.validate().is_err() {
             return Decision::NeverSave;
@@ -63,7 +74,7 @@ mod legacy {
         let b = &policy.layers.save_but_no_mcp;
         let c = &policy.categories;
         if a.enabled
-            && (matches_any(&a.rules, &url)
+            && (matches_any(&texts(&a.rules), &url)
                 || (c.authentication
                     && (matches_any(&BUILTINS.authentication, &url)
                         || BUILTINS
@@ -75,7 +86,7 @@ mod legacy {
             return Decision::NeverSave;
         }
         if b.enabled
-            && (matches_any(&b.rules, &url)
+            && (matches_any(&texts(&b.rules), &url)
                 || (c.government && matches_any(&BUILTINS.government, &url))
                 || (c.webmail && matches_any(&BUILTINS.webmail, &url))
                 || (c.ai_chats && matches_any(&BUILTINS.ai_chats, &url)))
@@ -86,10 +97,18 @@ mod legacy {
     }
 }
 
+/// Version 1, as the former evaluator knew it.
 fn policy(never: &[&str], private: &[&str]) -> Policy {
-    let mut policy = Policy::default();
-    policy.layers.never_save.rules = never.iter().map(|r| r.to_string()).collect();
-    policy.layers.save_but_no_mcp.rules = private.iter().map(|r| r.to_string()).collect();
+    let text = |rules: &[&str]| -> Vec<RuleSpec> {
+        rules.iter().map(|&r| RuleSpec::Text(r.into())).collect()
+    };
+    let mut policy = Policy {
+        schema_version: 1,
+        engine_version: 1,
+        ..Policy::default()
+    };
+    policy.layers.never_save.rules = text(never);
+    policy.layers.save_but_no_mcp.rules = text(private);
     policy
 }
 
@@ -280,11 +299,15 @@ fn invalid_rules_refuse_the_whole_policy_even_in_a_disabled_layer() {
     }
     for unusable in [
         Policy {
-            engine_version: 2,
+            engine_version: 3,
             ..Policy::default()
         },
         Policy {
-            schema_version: 2,
+            schema_version: 3,
+            ..Policy::default()
+        },
+        Policy {
+            schema_version: 1,
             ..Policy::default()
         },
         Policy {
@@ -346,8 +369,8 @@ fn a_thousand_rules_compile_and_every_one_of_them_works() {
         .map(|n| format!("same.example/dir{n}/*"))
         .collect();
     let mut many = Policy::default();
-    many.layers.never_save.rules = hosts;
-    many.layers.save_but_no_mcp.rules = paths;
+    many.layers.never_save.rules = hosts.into_iter().map(Into::into).collect();
+    many.layers.save_but_no_mcp.rules = paths.into_iter().map(Into::into).collect();
     let compiled = CompiledPolicy::compile(&many).unwrap();
     for n in [0, 1, 499, 998, 999] {
         assert_eq!(
@@ -390,12 +413,241 @@ fn judging_url_after_url_parses_no_rule() {
 }
 
 #[test]
-fn the_stored_form_of_a_policy_is_unchanged() {
+fn a_new_policy_is_version_2_and_written_as_bundled() {
     let stored = serde_json::to_value(Policy::default()).unwrap();
-    assert_eq!(stored["schemaVersion"], 1);
-    assert_eq!(stored["engineVersion"], 1);
+    assert_eq!(stored["schemaVersion"], 2);
+    assert_eq!(stored["engineVersion"], 2);
     assert_eq!(
         stored,
         serde_json::from_str::<serde_json::Value>(DEFAULT_JSON).unwrap()
     );
+}
+
+// --- Version 2: typed rules ------------------------------------------------------------------
+
+fn v2(never: &[&str], private: &[&str]) -> Policy {
+    policy(never, private).migrated().unwrap()
+}
+
+fn parse_json(value: serde_json::Value) -> Result<Policy, Error> {
+    Policy::parse(&serde_json::to_vec(&value).unwrap())
+}
+
+fn with_rules(version: u32, never: serde_json::Value) -> serde_json::Value {
+    let mut value = serde_json::to_value(Policy::default()).unwrap();
+    value["schemaVersion"] = version.into();
+    value["engineVersion"] = version.into();
+    value["layers"]["neverSave"]["rules"] = never;
+    value
+}
+
+#[test]
+fn a_typed_rule_reads_and_writes_as_kind_and_pattern() {
+    let value = with_rules(
+        2,
+        serde_json::json!([{ "kind": "pattern", "pattern": "*.example.com" }]),
+    );
+    let parsed = parse_json(value.clone()).unwrap();
+    assert_eq!(
+        parsed.layers.never_save.rules,
+        [RuleSpec::Typed(TypedRule::Pattern {
+            pattern: "*.example.com".into()
+        })]
+    );
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), value);
+    let v1 = parse_json(with_rules(1, serde_json::json!(["*.example.com"]))).unwrap();
+    assert_eq!(
+        v1.layers.never_save.rules,
+        [RuleSpec::Text("*.example.com".into())]
+    );
+}
+
+#[test]
+fn regex_unknown_kinds_malformed_rules_and_other_versions_are_refused() {
+    let regex = with_rules(
+        2,
+        serde_json::json!([{ "kind": "regex", "pattern": "^https://a\\.test/" }]),
+    );
+    assert_eq!(parse_json(regex).unwrap_err(), Error::UnsupportedRule);
+    let mut regex_private = with_rules(2, serde_json::json!([]));
+    regex_private["layers"]["saveButNoMcp"]["rules"] =
+        serde_json::json!([{ "kind": "regex", "pattern": "x" }]);
+    assert_eq!(
+        parse_json(regex_private).unwrap_err(),
+        Error::UnsupportedRule
+    );
+    let mut regex_off = with_rules(2, serde_json::json!([{ "kind": "regex", "pattern": "x" }]));
+    regex_off["layers"]["neverSave"]["enabled"] = false.into();
+    assert_eq!(
+        parse_json(regex_off).unwrap_err(),
+        Error::UnsupportedRule,
+        "even in a disabled layer"
+    );
+    for rules in [
+        serde_json::json!([{ "kind": "glob", "pattern": "a.test" }]),
+        serde_json::json!([{ "kind": "Pattern", "pattern": "a.test" }]),
+        serde_json::json!([{ "kind": "pattern" }]),
+        serde_json::json!([{ "pattern": "a.test" }]),
+        serde_json::json!([{ "kind": "pattern", "pattern": "a.test", "isRegex": false }]),
+        serde_json::json!([{ "kind": "pattern", "pattern": 1 }]),
+        serde_json::json!([{ "kind": "pattern", "pattern": "https://a.test/*" }]),
+        serde_json::json!([{ "kind": "pattern", "pattern": "a.test/x" }]),
+        serde_json::json!([1]),
+        serde_json::json!([null]),
+        serde_json::json!(["a.test"]),
+        serde_json::json!([{ "kind": "pattern", "pattern": "a.test" }, "b.test"]),
+    ] {
+        assert_eq!(
+            parse_json(with_rules(2, rules.clone())).unwrap_err(),
+            Error::InvalidPolicy,
+            "{rules}"
+        );
+    }
+    assert_eq!(
+        parse_json(with_rules(
+            1,
+            serde_json::json!([{ "kind": "pattern", "pattern": "a.test" }])
+        ))
+        .unwrap_err(),
+        Error::InvalidPolicy,
+        "version 1 holds strings only"
+    );
+    for (schema, engine) in [(2, 1), (1, 2), (3, 3), (0, 0), (3, 2)] {
+        let mut value = with_rules(2, serde_json::json!([]));
+        value["schemaVersion"] = schema.into();
+        value["engineVersion"] = engine.into();
+        assert_eq!(
+            parse_json(value).unwrap_err(),
+            Error::InvalidPolicy,
+            "{schema}/{engine}"
+        );
+    }
+}
+
+const SAMPLE: [&str; 7] = [
+    "https://example.com/",
+    "https://www.example.com/",
+    "https://a.b.example.com/",
+    "https://example.com/private",
+    "https://example.com/private/",
+    "https://example.com/private/a",
+    "https://example.com/private/a/b",
+];
+
+#[test]
+fn a_migrated_policy_decides_exactly_as_the_original() {
+    let urls = urls();
+    let some: Vec<String> = urls
+        .iter()
+        .step_by(11)
+        .cloned()
+        .chain(SAMPLE.map(str::to_owned))
+        .collect();
+    let mut cases = vec![
+        policy(&RULES, &[]),
+        policy(&[], &RULES),
+        policy(&["*.example.com"], &["example.com/private/*"]),
+        policy(&["example.com"], &["*.example.com"]),
+        policy(&["example.com/private/*"], &[]),
+    ];
+    for rule in RULES {
+        cases.push(policy(&[rule], &[rule]));
+    }
+    let mut switched = policy(&RULES[..6], &RULES[6..]);
+    switched.categories.credentials = false;
+    switched.layers.save_but_no_mcp.enabled = false;
+    cases.push(switched);
+    for original in cases {
+        let migrated = original.migrated().unwrap();
+        let (old, new) = (
+            CompiledPolicy::compile(&original).unwrap(),
+            CompiledPolicy::compile(&migrated).unwrap(),
+        );
+        for url in &some {
+            assert_eq!(old.evaluate(url), new.evaluate(url), "{url}");
+        }
+    }
+    // The cases found between the two runtimes.
+    let open = policy(&[], &[]).migrated().unwrap();
+    assert_eq!(
+        serde_json::to_value(&open).unwrap(),
+        serde_json::to_value(Policy::default()).unwrap(),
+        "a new install starts where a migrated empty policy arrives"
+    );
+    for url in [
+        "https://example.com/??token=x",
+        "https://example.com/???token=x",
+        "https://example.com/?a?token=x",
+        "https://example.com/?%3Ftoken=x",
+        "https://xn--a.example.com/",
+    ] {
+        assert_eq!(open.evaluate(url), Decision::NeverSave, "{url}");
+    }
+}
+
+#[test]
+fn the_stated_meaning_of_patterns_holds_in_both_versions() {
+    for (rule, expected) in [
+        ("example.com", [true, false, false, true, true, true, true]),
+        ("*.example.com", [true, true, true, true, true, true, true]),
+        (
+            "example.com/private/*",
+            [false, false, false, false, true, true, true],
+        ),
+    ] {
+        for policy in [policy(&[rule], &[]), v2(&[rule], &[])] {
+            let compiled = CompiledPolicy::compile(&policy).unwrap();
+            let got = SAMPLE.map(|url| compiled.evaluate(url) == Decision::NeverSave);
+            assert_eq!(got, expected, "{rule} v{}", policy.schema_version);
+        }
+    }
+}
+
+#[test]
+fn migration_converts_every_rule_in_order_and_changes_nothing_else() {
+    let mut original = policy(&["c.test", "a.test", "*.b.test/x/*"], &["z.test", "y.test"]);
+    original.revision = 7;
+    original.categories.webmail = false;
+    original.layers.save_but_no_mcp.enabled = false;
+    let migrated = original.migrated().unwrap();
+    assert_eq!((migrated.schema_version, migrated.engine_version), (2, 2));
+    assert_eq!(migrated.revision, 7, "the store sets the next revision");
+    assert_eq!(migrated.categories, original.categories);
+    let patterns = |layer: &Layer| -> Vec<String> {
+        layer
+            .rules
+            .iter()
+            .map(|rule| match rule {
+                RuleSpec::Typed(TypedRule::Pattern { pattern }) => pattern.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    };
+    assert_eq!(
+        patterns(&migrated.layers.never_save),
+        ["c.test", "a.test", "*.b.test/x/*"]
+    );
+    assert_eq!(
+        patterns(&migrated.layers.save_but_no_mcp),
+        ["z.test", "y.test"]
+    );
+    assert!(migrated.layers.never_save.enabled);
+    assert!(!migrated.layers.save_but_no_mcp.enabled);
+}
+
+#[test]
+fn only_a_valid_version_1_policy_can_be_migrated() {
+    assert_eq!(
+        v2(&["a.test"], &[]).migrated().unwrap_err(),
+        Error::NotMigratable
+    );
+    assert_eq!(
+        policy(&["*"], &[]).migrated().unwrap_err(),
+        Error::InvalidPolicy
+    );
+    let future = Policy {
+        engine_version: 3,
+        ..Policy::default()
+    };
+    assert_eq!(future.migrated().unwrap_err(), Error::NotMigratable);
 }

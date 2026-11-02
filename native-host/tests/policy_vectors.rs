@@ -1,4 +1,17 @@
-use memocampus_native_host::policy::{normalize_url, Decision, Policy, Rule};
+use memocampus_native_host::policy::{normalize_url, Decision, Policy, Rule, RuleSpec, TypedRule};
+
+fn as_version_1(policy: &Policy) -> Policy {
+    let mut old = policy.clone();
+    (old.schema_version, old.engine_version) = (1, 1);
+    for layer in [&mut old.layers.never_save, &mut old.layers.save_but_no_mcp] {
+        for rule in &mut layer.rules {
+            if let RuleSpec::Typed(TypedRule::Pattern { pattern }) = rule {
+                *rule = RuleSpec::Text(pattern.clone());
+            }
+        }
+    }
+    old
+}
 use serde_json::Value;
 
 #[test]
@@ -14,6 +27,18 @@ fn shared_conformance_vectors() {
             policy.evaluate(v["url"].as_str().unwrap()),
             expected,
             "{}",
+            v["name"]
+        );
+        // The same policy in the other version decides the same.
+        let other = if policy.schema_version == 1 {
+            policy.migrated().unwrap()
+        } else {
+            as_version_1(&policy)
+        };
+        assert_eq!(
+            other.evaluate(v["url"].as_str().unwrap()),
+            expected,
+            "other version {}",
             v["name"]
         );
     }

@@ -1,4 +1,5 @@
-//! Version 1 URL/rule contract; see docs/issue-010-privacy-policy.md.
+//! URL/rule contract; see docs/issue-010-privacy-policy.md. Version 1 stores each rule as a string,
+//! version 2 as a typed rule (docs/issue-025-policy-engine.md). A pattern means the same in both.
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -35,12 +36,54 @@ pub struct Layers {
 #[serde(deny_unknown_fields)]
 pub struct Layer {
     pub enabled: bool,
-    pub rules: Vec<String>,
+    pub rules: Vec<RuleSpec>,
+}
+/// One stored rule: a string in version 1, a typed rule in version 2. A policy holds one form only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RuleSpec {
+    Text(String),
+    Typed(TypedRule),
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum TypedRule {
+    Pattern {
+        pattern: String,
+    },
+    /// Reserved: no regular expression is evaluated yet, so a policy holding one is refused whole.
+    Regex {
+        pattern: String,
+    },
+}
+/// A pattern in the current form (version 2). A version 1 rule is written `RuleSpec::Text`.
+impl From<&str> for RuleSpec {
+    fn from(rule: &str) -> Self {
+        rule.to_owned().into()
+    }
+}
+impl From<String> for RuleSpec {
+    fn from(pattern: String) -> Self {
+        Self::Typed(TypedRule::Pattern { pattern })
+    }
+}
+impl RuleSpec {
+    /// The pattern of a rule this version can evaluate.
+    fn pattern(&self) -> Result<&str, Error> {
+        match self {
+            Self::Text(pattern) | Self::Typed(TypedRule::Pattern { pattern }) => Ok(pattern),
+            Self::Typed(TypedRule::Regex { .. }) => Err(Error::UnsupportedRule),
+        }
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     InvalidPolicy,
     InvalidUrl,
+    /// A rule of a kind this version knows but does not evaluate. The policy cannot be used.
+    UnsupportedRule,
+    /// Only a valid version 1 policy can be migrated.
+    NotMigratable,
 }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,15 +107,23 @@ impl Policy {
         policy.validate()?;
         Ok(policy)
     }
+    /// Versions 1 and 2 only, and each with its own form of rule throughout.
     fn check_header(&self) -> Result<(), Error> {
-        if self.schema_version != 1
-            || self.engine_version != 1
-            || !(1..=MAX_REVISION).contains(&self.revision)
-        {
+        let typed = match (self.schema_version, self.engine_version) {
+            (1, 1) => false,
+            (2, 2) => true,
+            _ => return Err(Error::InvalidPolicy),
+        };
+        if !(1..=MAX_REVISION).contains(&self.revision) {
             return Err(Error::InvalidPolicy);
         }
         for layer in [&self.layers.never_save, &self.layers.save_but_no_mcp] {
-            if layer.rules.len() > 1000 {
+            if layer.rules.len() > 1000
+                || layer
+                    .rules
+                    .iter()
+                    .any(|rule| matches!(rule, RuleSpec::Typed(_)) != typed)
+            {
                 return Err(Error::InvalidPolicy);
             }
         }
@@ -82,10 +133,46 @@ impl Policy {
         self.check_header()?;
         for layer in [&self.layers.never_save, &self.layers.save_but_no_mcp] {
             for rule in &layer.rules {
-                Rule::parse(rule)?;
+                Rule::parse(rule.pattern()?)?;
             }
         }
         Ok(())
+    }
+    /// The version 2 form of a valid version 1 policy: every rule becomes a pattern rule with the
+    /// same text, in the same layer and order, and nothing else changes. The caller stores it.
+    pub fn migrated(&self) -> Result<Self, Error> {
+        if (self.schema_version, self.engine_version) != (1, 1) {
+            return Err(Error::NotMigratable);
+        }
+        self.validate()?;
+        let typed = |layer: &Layer| -> Result<Layer, Error> {
+            let rules = layer
+                .rules
+                .iter()
+                .map(|rule| match rule {
+                    RuleSpec::Text(pattern) => Ok(RuleSpec::Typed(TypedRule::Pattern {
+                        pattern: pattern.clone(),
+                    })),
+                    RuleSpec::Typed(_) => Err(Error::NotMigratable),
+                })
+                .collect::<Result<_, _>>()?;
+            Ok(Layer {
+                enabled: layer.enabled,
+                rules,
+            })
+        };
+        let candidate = Self {
+            schema_version: 2,
+            engine_version: 2,
+            revision: self.revision,
+            categories: self.categories.clone(),
+            layers: Layers {
+                never_save: typed(&self.layers.never_save)?,
+                save_but_no_mcp: typed(&self.layers.save_but_no_mcp)?,
+            },
+        };
+        candidate.validate()?;
+        Ok(candidate)
     }
     /// For one URL. To judge several, compile once and use `CompiledPolicy::evaluate`.
     /// Invalid configuration or URL always denies automatic recording and MCP disclosure.
@@ -114,6 +201,9 @@ impl Zone {
     }
     fn add_all(&mut self, rules: &[String]) -> Result<(), Error> {
         rules.iter().try_for_each(|rule| self.add(rule))
+    }
+    fn add_specs(&mut self, rules: &[RuleSpec]) -> Result<(), Error> {
+        rules.iter().try_for_each(|rule| self.add(rule.pattern()?))
     }
     fn matches(&self, url: &NormalizedUrl) -> bool {
         let covers = |paths: &Vec<Option<String>>| {
@@ -155,12 +245,12 @@ impl CompiledPolicy {
         let b = &policy.layers.save_but_no_mcp;
         let c = &policy.categories;
         let mut blind = Zone::default();
-        blind.add_all(&a.rules)?;
+        blind.add_specs(&a.rules)?;
         if c.authentication {
             blind.add_all(&BUILTINS.authentication)?;
         }
         let mut private = Zone::default();
-        private.add_all(&b.rules)?;
+        private.add_specs(&b.rules)?;
         for (enabled, rules) in [
             (c.government, &BUILTINS.government),
             (c.webmail, &BUILTINS.webmail),

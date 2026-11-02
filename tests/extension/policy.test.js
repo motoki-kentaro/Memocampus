@@ -79,6 +79,16 @@ test("every label encoded as xn-- must decode and encode back to itself", () => 
   }
 });
 
+test("the test evaluator reads version 2 like version 1, and refuses what the host refuses", () => {
+  const v1 = { ...defaults, schemaVersion: 1, engineVersion: 1, layers: { neverSave: { enabled: true, rules: ["a.test"] }, saveButNoMcp: { enabled: true, rules: ["*.b.test"] } } };
+  const v2 = { ...defaults, layers: { neverSave: { enabled: true, rules: [{ kind: "pattern", pattern: "a.test" }] }, saveButNoMcp: { enabled: true, rules: [{ kind: "pattern", pattern: "*.b.test" }] } } };
+  for (const url of ["https://a.test/", "https://b.test/", "https://x.b.test/", "https://c.test/"]) assert.equal(evaluatePolicy(v2, url), evaluatePolicy(v1, url), url);
+  for (const rule of [{ kind: "regex", pattern: "a" }, { kind: "pattern" }, { kind: "pattern", pattern: "a.test", x: 1 }, "a.test"]) {
+    assert.throws(() => validatePolicy({ ...v2, layers: { ...v2.layers, neverSave: { enabled: true, rules: [rule] } } }), JSON.stringify(rule));
+  }
+  assert.throws(() => validatePolicy({ ...v1, layers: { ...v1.layers, neverSave: { enabled: true, rules: [{ kind: "pattern", pattern: "a.test" }] } } }));
+});
+
 test("exceptions that are not URL rejections are not reported as invalid_url", () => {
   const realDecode = globalThis.decodeURIComponent;
   const RealUrl = globalThis.URL;

@@ -23,7 +23,7 @@ const clone = (value) => structuredClone(value);
 function withRule(rule, base = defaults) {
   const policy = clone(base);
   policy.revision += 1;
-  policy.layers.neverSave.rules.push(rule);
+  policy.layers.neverSave.rules.push({ kind: "pattern", pattern: rule });
   return policy;
 }
 
@@ -54,13 +54,13 @@ function fakeHost(overrides = {}) {
       }
       if (message.type === "policy_status") {
         this.statusRequests += 1;
-        return { ok: true, type: "policy_result", requestId: message.requestId, state: this.state, ...(this.state === "ready" ? { policy: this.policy, etag: `rev-${this.policy.revision}` } : {}) };
+        return { ok: true, type: "policy_result", requestId: message.requestId, state: this.state, ...(this.state === "ready" ? { revision: this.policy.revision, etag: `rev-${this.policy.revision}`, schemaVersion: 1, engineVersion: 1 } : {}) };
       }
       if (message.type === "policy_initialize") {
         this.initializations += 1;
         if (this.state !== "uninitialized") return { ok: false, type: "policy_result", requestId: message.requestId, error: "policy_already_initialized" };
         this.state = "ready";
-        return { ok: true, type: "policy_result", requestId: message.requestId, state: "ready", policy: this.policy, etag: "rev-1" };
+        return { ok: true, type: "policy_result", requestId: message.requestId, state: "ready", revision: this.policy.revision, etag: "rev-1", schemaVersion: 1, engineVersion: 1 };
       }
       this.received.push(message);
       return this.answer ? this.answer(message) : { ok: true, eventId: message.id };
@@ -524,7 +524,7 @@ test("the cache expires, and an expired or failed check forgets the policy", asy
 });
 
 test("only the state ready gives a decision, whatever else the answer contains", async () => {
-  const gate = createPolicyGate({ send: async (message) => ({ ok: true, type: "policy_result", requestId: message.requestId, state: "something-new", policy: defaults, etag: "e" }) });
+  const gate = createPolicyGate({ send: async (message) => ({ ok: true, type: "policy_result", requestId: message.requestId, state: "something-new", revision: 1, etag: "e" }) });
   assert.equal((await gate.current()).ok, false);
 });
 
@@ -554,8 +554,52 @@ test("the decision separates a refused URL from a missing policy, for shared-vec
 test("a ready answer without a usable revision gives no decision", async () => {
   const host = fakeHost();
   host.policy = null;
-  const gate = gateWith({ ...host, respond: (message) => ({ ok: true, type: "policy_result", requestId: message.requestId, state: "ready", etag: "e", policy: null }) }, { now: 0 });
+  const gate = gateWith({ ...host, respond: (message) => ({ ok: true, type: "policy_result", requestId: message.requestId, state: "ready", etag: "e", revision: "1" }) }, { now: 0 });
   assert.deepEqual(await gate.current(), { ok: false, code: "policy_invalid" });
+});
+
+test("the status alone keeps recording working; a policy document in it is neither needed nor used", async () => {
+  const host = fakeHost();
+  const plain = host.respond.bind(host);
+  host.respond = (message) => {
+    const reply = plain(message);
+    // A document that would refuse everything, were it read.
+    if (message.type === "policy_status") return { ...reply, policy: { ...defaults, layers: { neverSave: { enabled: true, rules: ["normal.test"] }, saveButNoMcp: defaults.layers.saveButNoMcp } } };
+    return reply;
+  };
+  const worker = await startWorker({ host });
+  await worker.navigate(NORMAL_URL);
+  await worker.message({ type: "flush-queue" });
+  assert.deepEqual(host.received.map((event) => event.url), [NORMAL_URL]);
+});
+
+test("a policy with a rule this version cannot use is reported and records nothing", async () => {
+  const host = fakeHost({ state: "unsupported" });
+  const worker = await startWorker({ host });
+  await worker.navigate(NORMAL_URL);
+  assertNoTrace(worker, NORMAL_URL);
+  const status = await worker.message({ type: "policy-status" });
+  assert.equal(status.state, "unsupported");
+  assert.equal(status.code, "policy_unsupported");
+  assert.match(status.message, /正規表現/);
+  assert.equal(worker.badge.text, "!");
+});
+
+test("the extension never asks for the policy document or a migration", async () => {
+  const types = new Set();
+  const host = fakeHost();
+  const plain = host.respond.bind(host);
+  host.respond = (message) => (types.add(message.type), plain(message));
+  const worker = await startWorker({ host, query: [tabOf(1, NORMAL_URL)], data: seeded([visit("v1", AUTH_URL)]) });
+  await worker.navigate(NORMAL_URL);
+  await worker.message({ type: "record-all-tabs" });
+  await worker.message({ type: "flush-queue" });
+  await worker.message({ type: "policy-status" });
+  assert.ok(!types.has("policy_get") && !types.has("policy_migrate"), [...types].join());
+  for (const name of readdirSync(extensionDir).filter((file) => file.endsWith(".js"))) {
+    const source = readFileSync(path.join(extensionDir, name), "utf8");
+    assert.ok(!source.includes("policy_get") && !source.includes("policy_migrate"), name);
+  }
 });
 
 // --- The host is the only judge -------------------------------------------------------------------
@@ -760,7 +804,7 @@ test("canaries: blind leaves no trace anywhere; private and public are delivered
   const PRIVATE = "https://private.example/path";
   const PUBLIC = "https://public.example/path";
   const host = fakeHost();
-  host.policy.layers.saveButNoMcp.rules.push("private.example");
+  host.policy.layers.saveButNoMcp.rules.push({ kind: "pattern", pattern: "private.example" });
   const worker = await startWorker({ host });
   const logged = await withConsoleWatch(async () => {
     await worker.navigate(BLIND, 1);

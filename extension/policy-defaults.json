@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "engineVersion": 1,
+  "schemaVersion": 2,
+  "engineVersion": 2,
   "revision": 1,
   "categories": {
     "authentication": true,

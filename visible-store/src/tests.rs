@@ -96,7 +96,7 @@ impl Fixture {
         } else {
             &mut next.layers.save_but_no_mcp
         };
-        layer.rules.push(rule.to_owned());
+        layer.rules.push(rule.into());
         store.update(&current, next).unwrap();
     }
 
@@ -1127,7 +1127,7 @@ fn damaged_policies_mean_no_data_and_recovery_needs_only_the_next_read() {
     let path = f.app.join("policy.json");
     let good = fs::read(&path).unwrap();
     let mut unsupported: serde_json::Value = serde_json::from_slice(&good).unwrap();
-    unsupported["engineVersion"] = 2.into();
+    unsupported["engineVersion"] = 3.into();
     for bad in [
         b"{broken".to_vec(),
         b"{}".to_vec(),
@@ -1189,11 +1189,11 @@ fn a_finished_policy_change_applies_to_the_next_read() {
     next.layers
         .never_save
         .rules
-        .retain(|rule| rule != "*.public.test");
+        .retain(|rule| *rule != "*.public.test".into());
     next.layers
         .save_but_no_mcp
         .rules
-        .retain(|rule| rule != "one.public.test");
+        .retain(|rule| *rule != "one.public.test".into());
     store.update(&current, next).unwrap();
     assert_eq!(f.urls().len(), 2);
 }
@@ -2675,7 +2675,7 @@ fn perf_report() {
             .layers
             .save_but_no_mcp
             .rules
-            .push(format!("*.host{n}.example"));
+            .push(format!("*.host{n}.example").into());
     }
     store.update(&current, policy.clone()).unwrap();
     let vault_bytes = fs::metadata(&f.vault).unwrap().len();
@@ -2809,7 +2809,7 @@ fn perf_images() {
             .layers
             .save_but_no_mcp
             .rules
-            .push(format!("*.host{n}.example"));
+            .push(format!("*.host{n}.example").into());
     }
     store.update(&current, policy.clone()).unwrap();
 
@@ -2891,4 +2891,123 @@ fn perf_images() {
         "PERF-IMG rows={rows} public={percent}% rules={rules} compile={compile:?} total={total:?} lock_held={lock_held:?} judge_build={judge_build:?} query={query:?} hits={hits} set={:.1}MiB host_commits={commits} host_failures={failures} worst_commit={worst:?} reads={reads} read_busy={busy}",
         set_bytes as f64 / 1_048_576.0,
     );
+}
+
+// --- Policy version 2 (Issue #25 Slice 3) --------------------------------------------------------
+
+/// The fixture's policy written back as version 1, with its rules as strings.
+fn as_version_1(f: &Fixture) {
+    use memocampus_native_host::policy::{RuleSpec, TypedRule};
+    let store = f.policy_store();
+    let mut policy = store.load().unwrap().policy;
+    (policy.schema_version, policy.engine_version) = (1, 1);
+    for layer in [
+        &mut policy.layers.never_save,
+        &mut policy.layers.save_but_no_mcp,
+    ] {
+        for rule in &mut layer.rules {
+            if let RuleSpec::Typed(TypedRule::Pattern { pattern }) = rule {
+                *rule = RuleSpec::Text(pattern.clone());
+            }
+        }
+    }
+    fs::write(
+        store.policy_path(),
+        serde_json::to_vec_pretty(&policy).unwrap(),
+    )
+    .unwrap();
+}
+
+fn everything_visible(f: &Fixture) -> Vec<String> {
+    let mut seen = vec![
+        format!("{:?}", f.store.search_visits(&ALL)),
+        format!("{:?}", f.store.search_images(&ALL_IMAGES)),
+    ];
+    for item in image_page(f).items {
+        seen.push(format!("{:?}", sources_of(f, &item.id)));
+    }
+    seen
+}
+
+fn seed_images(f: &Fixture) {
+    let db = writer(&f.vault);
+    let blob_id = blob(&db, 1);
+    save(&db, blob_id, &PUBLIC_SAVE);
+    save(
+        &db,
+        blob_id,
+        &Save {
+            id: "CANARY-b",
+            page: Some("https://b-layer.test/CANARY"),
+            ..PUBLIC_SAVE
+        },
+    );
+    save(
+        &db,
+        blob(&db, 2),
+        &Save {
+            id: "CANARY-a",
+            image: "https://a-layer.test/CANARY.png",
+            ..PUBLIC_SAVE
+        },
+    );
+}
+
+#[test]
+fn version_1_and_its_explicit_migration_publish_exactly_the_same() {
+    let f = Fixture::new();
+    f.seed();
+    seed_images(&f);
+    as_version_1(&f);
+    let store = f.policy_store();
+    let v1 = store.load().unwrap();
+    assert_eq!(v1.policy.schema_version, 1);
+    let before = everything_visible(&f);
+    assert_clean(&before);
+    assert_eq!(f.store.search_visits(&ALL).unwrap().total, 2);
+    assert_eq!(
+        image_page(&f).items[0].public_save_count,
+        1,
+        "the layer B save is private"
+    );
+    let migrated = store.migrate(&v1).unwrap();
+    assert_eq!(migrated.policy.schema_version, 2);
+    assert_eq!(everything_visible(&f), before, "the same set, the same ids");
+    assert_eq!(store.load().unwrap().etag, migrated.etag);
+}
+
+#[test]
+fn version_2_keeps_layer_b_private() {
+    let f = Fixture::new();
+    f.seed();
+    seed_images(&f);
+    assert_eq!(f.policy_store().load().unwrap().policy.schema_version, 2);
+    let visible = everything_visible(&f);
+    assert_clean(&visible);
+    assert_eq!(f.store.search_visits(&ALL).unwrap().total, 2);
+    assert_eq!(image_page(&f).items.len(), 1);
+    assert_eq!(image_page(&f).items[0].public_save_count, 1);
+}
+
+#[test]
+fn a_policy_with_a_regex_rule_publishes_nothing() {
+    let f = Fixture::new();
+    f.seed();
+    seed_images(&f);
+    let id = image_page(&f).items.remove(0).id;
+    let path = f.app.join("policy.json");
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    value["layers"]["saveButNoMcp"]["rules"] =
+        serde_json::json!([{ "kind": "regex", "pattern": "^https://CANARY" }]);
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert_failed(f.store.search_visits(&ALL), VisibleError::PolicyUnavailable);
+    assert_failed(
+        f.store.search_images(&ALL_IMAGES),
+        VisibleError::PolicyUnavailable,
+    );
+    assert_failed(sources_of(&f, &id), VisibleError::PolicyUnavailable);
+    // Disabling the layer does not make it usable: the rule cannot be judged.
+    value["layers"]["saveButNoMcp"]["enabled"] = false.into();
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert_failed(f.store.search_visits(&ALL), VisibleError::PolicyUnavailable);
 }

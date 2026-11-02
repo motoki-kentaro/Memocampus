@@ -1,5 +1,5 @@
 //! Native Host is the sole writer. Construction and reads never initialize policy implicitly.
-use crate::policy::{Decision, Policy, MAX_REVISION};
+use crate::policy::{Decision, Error, Policy, MAX_REVISION};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -12,6 +12,10 @@ pub enum StoreError {
     Unavailable,
     Missing,
     Invalid,
+    /// Valid, but holds a rule this version does not evaluate.
+    Unsupported,
+    /// `migrate` was asked for anything but a version 1 policy.
+    NotMigratable,
     AlreadyInitialized,
     Busy,
     Conflict,
@@ -22,6 +26,12 @@ pub struct Snapshot {
     pub policy: Policy,
     /// Hash of exact bytes, also detects unsupported external edits without a revision bump.
     pub etag: String,
+}
+/// The one place a replacement may change the policy's version.
+#[derive(Clone, Copy)]
+enum Change {
+    SameVersion,
+    Migration,
 }
 pub struct PolicyStore {
     dir: PathBuf,
@@ -125,10 +135,15 @@ impl PolicyStore {
         self.load_unlocked()
     }
     /// Callers edit the loaded policy without changing revision. Host increments it under lock.
-    pub fn update(
+    /// An update keeps the policy's version: only `migrate` changes it.
+    pub fn update(&self, expected: &Snapshot, candidate: Policy) -> Result<Snapshot, StoreError> {
+        self.replace(expected, candidate, Change::SameVersion)
+    }
+    fn replace(
         &self,
         expected: &Snapshot,
         mut candidate: Policy,
+        change: Change,
     ) -> Result<Snapshot, StoreError> {
         candidate.validate().map_err(|_| StoreError::Invalid)?;
         let _lock = self.lock()?;
@@ -139,12 +154,34 @@ impl PolicyStore {
         {
             return Err(StoreError::Conflict);
         }
+        let versions = |policy: &Policy| (policy.schema_version, policy.engine_version);
+        let allowed = match change {
+            Change::SameVersion => versions(&current.policy) == versions(&candidate),
+            Change::Migration => {
+                versions(&current.policy) == (1, 1) && versions(&candidate) == (2, 2)
+            }
+        };
+        if !allowed {
+            return Err(StoreError::Invalid);
+        }
         if current.policy.revision == MAX_REVISION {
             return Err(StoreError::Invalid);
         }
         candidate.revision = current.policy.revision + 1;
         self.persist(&candidate)?;
         self.load_unlocked()
+    }
+    /// Explicit only: nothing calls it on a load or a decision. Converts the version 1 policy of
+    /// `expected` to version 2 and stores it only if `expected` is still the stored policy, so a
+    /// newer policy is never replaced by a conversion of an older one. All or nothing: on any
+    /// failure the file, revision and ETag stay as they were.
+    pub fn migrate(&self, expected: &Snapshot) -> Result<Snapshot, StoreError> {
+        let candidate = expected.policy.migrated().map_err(|error| match error {
+            Error::NotMigratable => StoreError::NotMigratable,
+            _ => StoreError::Invalid,
+        })?;
+        crate::policy::CompiledPolicy::compile(&candidate).map_err(|_| StoreError::Invalid)?;
+        self.replace(expected, candidate, Change::Migration)
     }
     fn persist(&self, policy: &Policy) -> Result<(), StoreError> {
         let bytes = serde_json::to_vec_pretty(policy).map_err(|_| StoreError::Invalid)?;
@@ -196,7 +233,10 @@ fn read_regular(path: &Path) -> Result<Vec<u8>, StoreError> {
 }
 fn snapshot(bytes: &[u8]) -> Result<Snapshot, StoreError> {
     Ok(Snapshot {
-        policy: Policy::parse(bytes).map_err(|_| StoreError::Invalid)?,
+        policy: Policy::parse(bytes).map_err(|error| match error {
+            Error::UnsupportedRule => StoreError::Unsupported,
+            _ => StoreError::Invalid,
+        })?,
         etag: format!("{:x}", Sha256::digest(bytes)),
     })
 }
@@ -332,7 +372,7 @@ mod tests {
         );
         for bytes in [b"{broken".to_vec(), b"{}".to_vec(), {
             let mut p = first.policy.clone();
-            p.engine_version = 2;
+            p.engine_version = 3;
             serde_json::to_vec(&p).unwrap()
         }] {
             fs::write(store.policy_path(), &bytes).unwrap();
@@ -437,6 +477,173 @@ mod tests {
             StoreError::Invalid
         );
         assert_eq!(store.load().unwrap().etag, last.etag);
+    }
+    /// A version 1 policy as an older Memocampus wrote it, rules as strings.
+    fn write_v1(store: &PolicyStore, never_save: &[&str]) -> Snapshot {
+        let mut policy = Policy {
+            schema_version: 1,
+            engine_version: 1,
+            ..Policy::default()
+        };
+        policy.layers.never_save.rules = never_save
+            .iter()
+            .map(|&rule| crate::policy::RuleSpec::Text(rule.into()))
+            .collect();
+        fs::write(
+            store.policy_path(),
+            serde_json::to_vec_pretty(&policy).unwrap(),
+        )
+        .unwrap();
+        store.load().unwrap()
+    }
+    #[test]
+    fn a_new_policy_is_version_2_and_an_update_never_changes_the_version() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        let first = store.initialize().unwrap();
+        assert_eq!(
+            (first.policy.schema_version, first.policy.engine_version),
+            (2, 2)
+        );
+        let as_v1 = Policy {
+            schema_version: 1,
+            engine_version: 1,
+            ..first.policy.clone()
+        };
+        assert_eq!(
+            store.update(&first, as_v1).unwrap_err(),
+            StoreError::Invalid
+        );
+        let engine_only = Policy {
+            engine_version: 1,
+            ..first.policy.clone()
+        };
+        assert_eq!(
+            store.update(&first, engine_only).unwrap_err(),
+            StoreError::Invalid
+        );
+        assert_eq!(store.load().unwrap().etag, first.etag);
+        let v1 = write_v1(&dir.store(), &["a.test"]);
+        let as_v2 = v1.policy.migrated().unwrap();
+        assert_eq!(
+            store.update(&v1, as_v2).unwrap_err(),
+            StoreError::Invalid,
+            "only migrate"
+        );
+        let engine_only = Policy {
+            engine_version: 2,
+            ..v1.policy.clone()
+        };
+        assert_eq!(
+            store.update(&v1, engine_only).unwrap_err(),
+            StoreError::Invalid
+        );
+        assert_eq!(store.load().unwrap().etag, v1.etag);
+        let mut kept = v1.policy.clone();
+        kept.layers
+            .never_save
+            .rules
+            .push(crate::policy::RuleSpec::Text("b.test".into()));
+        assert_eq!(store.update(&v1, kept).unwrap().policy.schema_version, 1);
+    }
+    #[test]
+    fn the_migration_path_itself_accepts_only_version_1_to_2() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        let v2 = store.initialize().unwrap();
+        let same = v2.policy.clone();
+        assert_eq!(
+            store.replace(&v2, same, Change::Migration).unwrap_err(),
+            StoreError::Invalid
+        );
+        let v1 = write_v1(&store, &["a.test"]);
+        let unchanged = v1.policy.clone();
+        assert_eq!(
+            store
+                .replace(&v1, unchanged, Change::Migration)
+                .unwrap_err(),
+            StoreError::Invalid
+        );
+        assert_eq!(store.load().unwrap().etag, v1.etag);
+    }
+    #[test]
+    fn migration_is_all_or_nothing_and_only_from_the_current_version_1() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        store.initialize().unwrap();
+        let first = write_v1(&store, &["b.test"]);
+        let mut edited = first.policy.clone();
+        edited
+            .layers
+            .never_save
+            .rules
+            .push(crate::policy::RuleSpec::Text("*.a.test".into()));
+        let current = store.update(&first, edited).unwrap();
+        assert_eq!(
+            store.migrate(&first).unwrap_err(),
+            StoreError::Conflict,
+            "an older snapshot"
+        );
+        assert_eq!(store.load().unwrap().etag, current.etag);
+        let migrated = store.migrate(&current).unwrap();
+        assert_eq!(migrated.policy.schema_version, 2);
+        assert_eq!(migrated.policy.revision, current.policy.revision + 1);
+        assert_ne!(migrated.etag, current.etag);
+        for url in [
+            "https://b.test/",
+            "https://x.a.test/",
+            "https://a.test/",
+            "https://c.test/",
+        ] {
+            assert_eq!(
+                migrated.policy.evaluate(url),
+                current.policy.evaluate(url),
+                "{url}"
+            );
+        }
+        assert_eq!(
+            store.migrate(&migrated).unwrap_err(),
+            StoreError::NotMigratable
+        );
+        assert_eq!(store.migrate(&current).unwrap_err(), StoreError::Conflict);
+        assert_eq!(store.load().unwrap().etag, migrated.etag);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn a_migration_that_cannot_be_written_leaves_version_1_in_place() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = Scratch::new();
+        let store = dir.store();
+        store.initialize().unwrap();
+        let first = write_v1(&store, &["a.test"]);
+        let bytes = fs::read(store.policy_path()).unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(store.policy_path())
+            .unwrap();
+        assert_eq!(store.migrate(&first).unwrap_err(), StoreError::Io);
+        drop(held);
+        let after = store.load().unwrap();
+        assert_eq!(
+            (after.etag, after.policy.schema_version),
+            (first.etag.clone(), 1)
+        );
+        assert_eq!(fs::read(store.policy_path()).unwrap(), bytes);
+        assert_eq!(store.migrate(&first).unwrap().policy.schema_version, 2);
+    }
+    #[test]
+    fn reading_and_judging_a_version_1_policy_never_rewrites_it() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        store.initialize().unwrap();
+        write_v1(&store, &["a.test"]);
+        let bytes = fs::read(store.policy_path()).unwrap();
+        for _ in 0..3 {
+            store.load().unwrap();
+            store.evaluate("https://example.com/");
+        }
+        assert_eq!(fs::read(store.policy_path()).unwrap(), bytes);
     }
     #[cfg(windows)]
     #[test]

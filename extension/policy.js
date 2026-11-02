@@ -106,22 +106,30 @@ export function parseRule(rule) {
   return { host: normalized.host, wildcard, path };
 }
 
+// Version 1 holds strings, version 2 `{ kind: "pattern", pattern }`; a regex rule is not evaluated.
+const patternOf = (rule, typed) => {
+  if (!typed) return rule;
+  if (!keys(rule, ["kind", "pattern"]) || rule.kind !== "pattern") throw new Error("invalid_policy");
+  return rule.pattern;
+};
+
 export function validatePolicy(policy) {
+  const typed = policy?.schemaVersion === 2 && policy?.engineVersion === 2;
   if (!keys(policy, ["schemaVersion", "engineVersion", "revision", "categories", "layers"])
-    || policy.schemaVersion !== 1 || policy.engineVersion !== 1
+    || !(typed || (policy.schemaVersion === 1 && policy.engineVersion === 1))
     || !Number.isSafeInteger(policy.revision) || policy.revision < 1 || policy.revision > MAX_REVISION
     || !keys(policy.categories, categories) || categories.some(key => typeof policy.categories[key] !== "boolean")
     || !keys(policy.layers, ["neverSave", "saveButNoMcp"])) throw new Error("invalid_policy");
   for (const layer of Object.values(policy.layers)) {
     if (!keys(layer, ["enabled", "rules"]) || typeof layer.enabled !== "boolean"
       || !Array.isArray(layer.rules) || layer.rules.length > 1000) throw new Error("invalid_policy");
-    layer.rules.forEach(parseRule);
+    layer.rules.forEach((rule) => parseRule(patternOf(rule, typed)));
   }
   return policy;
 }
 
 function matches(rule, url) {
-  const parsed = parseRule(rule);
+  const parsed = parseRule(typeof rule === "string" ? rule : rule.pattern);
   return (url.host === parsed.host || (parsed.wildcard && url.host.endsWith("." + parsed.host)))
     && (parsed.path === null || url.path.startsWith(parsed.path));
 }

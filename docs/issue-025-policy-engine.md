@@ -1,6 +1,6 @@
 # Issue #25 — Privacy Policy engine
 
-Status: **Slice 1 merged; Slice 2 implemented, for review.** No regular expression, Policy v2, new rule syntax or settings UI exists.
+Status: **Slices 1 and 2 merged; Slice 3 implemented, for review.** Policy v2 exists as a data model; no regular expression is evaluated, and no new rule syntax or settings UI exists.
 Labels: **[verified]** was run, **[code]** was read in the source, **[inferred]** is reasoning not run.
 
 ## Slice 1: what changed
@@ -247,3 +247,81 @@ as it did before; a worker's first flush adds one for the sweep.
 1. Policy v2 and the rule model can change the host alone; the extension sees only decisions.
 2. Decide whether to retire `policy.js` and drop the policy document from `policy_status`.
 3. #23's rule test can use this message for the active policy; a draft needs its own message.
+
+## Slice 3: Policy v2, explicit migration, status without rules
+
+### The model
+
+```json
+{ "schemaVersion": 2, "engineVersion": 2, "revision": 3, "categories": { … },
+  "layers": {
+    "neverSave":    { "enabled": true, "rules": [ { "kind": "pattern", "pattern": "*.example.com" } ] },
+    "saveButNoMcp": { "enabled": true, "rules": [ { "kind": "pattern", "pattern": "example.com/private/*" } ] } } }
+```
+
+All other fields are as in version 1. In Rust a rule is `RuleSpec::Text(String)` (version 1) or `RuleSpec::Typed(TypedRule)` (version 2), with
+`TypedRule::Pattern { pattern }` and `TypedRule::Regex { pattern }`, `kind` as the tag and no other field allowed.
+
+| Policy | Result |
+|---|---|
+| `schemaVersion` and `engineVersion` both 1, every rule a string | Evaluated as before |
+| Both 2, every rule typed, every rule `pattern` | Evaluated; a pattern means what the same string means in version 1 |
+| Version 2 with a `regex` rule, also in a disabled layer | **Refused whole**: `policy_unsupported`, state `unsupported`. Not ignored, not read as a pattern |
+| Unknown `kind`, a missing or extra field, a string rule in version 2, a typed rule in version 1 | Invalid: `policy_invalid` |
+| Any other pair of versions, such as 2 and 1 | Invalid |
+
+A pattern goes through the same `Rule::parse` and `Zone` as before. Only the access to its text changed, so compiling and judging cost the same.
+
+**New installs start at version 2:** `policy-defaults.json` is version 2 with the same settings and no user rules, so a first initialization writes version 2.
+It is exactly what migrating the former empty default gives (tested). An existing version 1 policy is never touched by initialization, which refuses
+to run when a policy exists. Recording still starts only as before (#24).
+
+### Migration
+
+`PolicyStore::migrate(&expected)` and the message `policy_migrate`. Nothing else calls it: no load, status, judgement, write, `policy_get`, vault operation or
+extension start rewrites a version 1 file, which a test checks byte for byte after each of them.
+
+1. The caller sends the ETag it has seen. A missing one is `invalid_etag`, a different one `policy_conflict`.
+2. `Policy::migrated` requires a valid version 1 policy, and turns each string into `{ kind: "pattern", pattern }` in the same layer and order. Categories,
+   switches and everything else are copied. The candidate is validated and compiled.
+3. It is written under the writer lock only if the stored revision and ETag are still those of `expected`, with the next revision, through the same
+   temporary file and atomic replacement as every update. **Only this path may change the version, and only from 1 to 2:** `update` refuses any
+   candidate whose `schemaVersion` or `engineVersion` differs from the stored policy's.
+4. Any failure leaves the file, revision and ETag untouched: invalid source, `policy_not_migratable` for anything but version 1 (so a second migration is
+   refused), `policy_conflict`, `policy_busy` (not retried), and a failed write.
+
+The new ETag and revision make the extension sweep its queue again, as for any change. There is no long-lived compiled policy anywhere: the host and
+VisibleStore load and compile per request, so no process keeps judging with the old version after the file changed.
+
+```text
+→ { type: "policy_migrate", requestId, etag }
+← { ok: true, type: "policy_migrate_result", requestId, state: "ready", etag, revision, schemaVersion: 2, engineVersion: 2 }
+← { ok: false, type: "policy_migrate_result", requestId, error }
+```
+
+### Status and document
+
+```text
+→ { type: "policy_status", requestId }
+← { ok: true, type: "policy_result", requestId, state: "ready", etag, revision, schemaVersion, engineVersion }
+→ { type: "policy_get", requestId }
+← { ok: true, type: "policy_get_result", requestId, state: "ready", etag, revision, schemaVersion, engineVersion, policy }
+```
+
+`policy_status` and `policy_initialize` no longer carry the policy. The extension takes the revision from the status and never asks for `policy_get` or
+`policy_migrate`, which a test checks in its source and its messages. `policy_get` refuses with `policy_too_large` an answer over 1,000,000 bytes, since Chrome
+takes at most 1 MB from a host and the file may be up to 1 MiB.
+
+### Remaining risks
+
+- **Existing users stay at version 1** until they migrate explicitly; nothing asks them yet (#23).
+- The JS evaluator, kept for tests, reads version 2 as well, and refuses regex rules; it decides nothing in the product. Shared vectors stay version 1, and
+  the Rust test also judges each of them in the other version.
+- An extension older than this slice reads the revision from the policy document, which the status no longer carries, so it stops recording until it is updated.
+  Host and extension must be updated together, as before.
+
+### Handoff to Slice 4
+
+1. The regex evaluator replaces the `Err(UnsupportedRule)` of `RuleSpec::pattern` with its own compiled form, in a zone of its own.
+2. #23 reads with `policy_get`, offers `policy_migrate` when `schemaVersion` is 1, and needs a write message, which does not exist yet.
+3. `policy_too_large` is tested on both sides of the limit through the real host.

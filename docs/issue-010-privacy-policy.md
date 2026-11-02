@@ -71,7 +71,8 @@ The browser uses the generated ordinary ES module `policy-builtins.js`, so the e
 does not require JSON module imports. `node scripts/generate-policy-builtins.mjs` regenerates
 it, and an automatic test checks it against the canonical JSON.
 
-- `schemaVersion: 1`, `engineVersion: 1`, `revision: 1..9007199254740991` (JS-safe integer).
+- `schemaVersion: 1`, `engineVersion: 1`, `revision: 1..9007199254740991` (JS-safe integer). Version 2 (typed rules)
+  is described in `issue-025-policy-engine.md`. Since #25 Slice 3 a new install starts at version 2.
 - `layers.neverSave` and `layers.saveButNoMcp`: required `enabled` boolean and `rules` array.
   Each array allows at most 1,000 rules of at most 2,048 UTF-16 code units each.
 - `categories`: required booleans `authentication`, `credentials`, `government`, `webmail`,
