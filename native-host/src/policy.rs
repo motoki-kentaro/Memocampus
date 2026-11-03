@@ -99,6 +99,26 @@ pub enum Syntax {
     Version1,
     Version2,
 }
+/// One reason a draft policy cannot be used: a code, and the rule it belongs to when it belongs to
+/// one. It never holds the text of a rule or a URL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Problem {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule_index: Option<usize>,
+    pub code: &'static str,
+}
+impl Problem {
+    pub fn of(code: &'static str) -> Self {
+        Self {
+            layer: None,
+            rule_index: None,
+            code,
+        }
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     InvalidPolicy,
@@ -130,9 +150,13 @@ static BUILTINS: LazyLock<Builtins> = LazyLock::new(|| {
 
 impl Policy {
     pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
+        Self::parse_compiled(bytes).map(|(policy, _)| policy)
+    }
+    /// The policy and its compiled form, compiling each rule once: compiling is the validation.
+    pub fn parse_compiled(bytes: &[u8]) -> Result<(Self, CompiledPolicy), Error> {
         let policy: Self = serde_json::from_slice(bytes).map_err(|_| Error::InvalidPolicy)?;
-        policy.validate()?;
-        Ok(policy)
+        let compiled = CompiledPolicy::compile(&policy)?;
+        Ok((policy, compiled))
     }
     /// Versions 1 and 2 only, and each with its own form of rule throughout.
     fn check_header(&self) -> Result<(), Error> {
@@ -166,19 +190,73 @@ impl Policy {
             .filter(|rule| matches!(rule.form(), Form::Regex(_)))
             .count()
     }
-    /// Every rule, also of a disabled layer; a regex is compiled for it.
+    /// Every rule, also of a disabled layer. Valid means exactly that the policy compiles.
     pub fn validate(&self) -> Result<(), Error> {
-        self.check_header()?;
+        CompiledPolicy::compile(self).map(drop)
+    }
+    /// Why a policy does not compile, rule by rule where the rule is known; empty if it compiles.
+    /// A cause that belongs to no rule has no place, and none is guessed.
+    pub fn problems(&self) -> Vec<Problem> {
+        if CompiledPolicy::compile(self).is_ok() {
+            return Vec::new();
+        }
+        let mut found = Vec::new();
+        let typed = match (self.schema_version, self.engine_version) {
+            (1, 1) => Some(false),
+            (2, 2) => Some(true),
+            _ => {
+                found.push(Problem::of("invalid_version"));
+                None
+            }
+        };
+        if !(1..=MAX_REVISION).contains(&self.revision) {
+            found.push(Problem::of("invalid_revision"));
+        }
+        if self.regex_count() > MAX_REGEX_RULES {
+            found.push(Problem::of("too_many_regex_rules"));
+        }
         let budget = RegexBudget::of(self);
-        for layer in [&self.layers.never_save, &self.layers.save_but_no_mcp] {
-            for rule in &layer.rules {
-                match rule.form() {
-                    Form::Pattern(pattern, syntax) => drop(Rule::parse_in(pattern, syntax)?),
-                    Form::Regex(pattern) => drop(compile_regex(pattern, budget)?),
+        for (name, layer) in [
+            ("neverSave", &self.layers.never_save),
+            ("saveButNoMcp", &self.layers.save_but_no_mcp),
+        ] {
+            if layer.rules.len() > 1000 {
+                found.push(Problem {
+                    layer: Some(name),
+                    ..Problem::of("too_many_rules")
+                });
+            }
+            for (index, rule) in layer.rules.iter().enumerate() {
+                let at = |code| Problem {
+                    layer: Some(name),
+                    rule_index: Some(index),
+                    code,
+                };
+                if typed.is_some_and(|typed| matches!(rule, RuleSpec::Typed(_)) != typed) {
+                    found.push(at("invalid_rule_form"));
+                    continue;
                 }
+                let code = match rule.form() {
+                    Form::Pattern(pattern, syntax) => Rule::parse_in(pattern, syntax)
+                        .err()
+                        .map(|_| "invalid_pattern"),
+                    Form::Regex(pattern) => {
+                        compile_regex(pattern, budget)
+                            .err()
+                            .map(|error| match error {
+                                Error::UnsupportedRule => "unsupported_regex",
+                                Error::RegexLimit => "regex_limit",
+                                _ => "invalid_regex",
+                            })
+                    }
+                };
+                found.extend(code.map(at));
             }
         }
-        Ok(())
+        if found.is_empty() {
+            found.push(Problem::of("invalid_policy"));
+        }
+        found
     }
     /// The version 2 form of a valid version 1 policy: every rule becomes a pattern rule with the
     /// same text, in the same layer and order, and nothing else changes. The caller stores it.
@@ -648,6 +726,37 @@ fn regex_syntax_error(pattern: &str) -> Error {
         },
         Ok(_) => Error::InvalidPolicy,
     }
+}
+/// Whether one version 2 rule alone matches `url`, judged by the compiled form a policy uses: the
+/// rule alone in an enabled Blind Zone, with no builtin. This is no decision: a URL it does not
+/// match may still be refused by another rule or a builtin. An invalid URL is `InvalidUrl`, which
+/// a policy would refuse. The rule gets the regex budget of a policy holding only it.
+pub fn rule_matches(rule: &RuleSpec, url: &str) -> Result<bool, Error> {
+    if matches!(rule, RuleSpec::Text(_)) {
+        return Err(Error::InvalidPolicy);
+    }
+    normalize_url(url)?;
+    let alone = Policy {
+        categories: Categories {
+            authentication: false,
+            credentials: false,
+            government: false,
+            webmail: false,
+            ai_chats: false,
+        },
+        layers: Layers {
+            never_save: Layer {
+                enabled: true,
+                rules: vec![rule.clone()],
+            },
+            save_but_no_mcp: Layer {
+                enabled: false,
+                rules: Vec::new(),
+            },
+        },
+        ..Policy::default()
+    };
+    Ok(CompiledPolicy::compile(&alone)?.evaluate(url) == Decision::NeverSave)
 }
 fn path_matches(path: &str, prefix: &str) -> bool {
     path == prefix || path.starts_with(&format!("{prefix}/"))

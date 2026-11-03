@@ -26,7 +26,8 @@ hands out `decide()` only for a valid one.
 `type: "policy_result"`.
 
 - Ready: `{ok: true, state: "ready", etag, revision, schemaVersion, engineVersion}`. Since #25 Slice 3 no rule
-  or policy document; `policy_get` returns the document on an explicit request.
+  or policy document; `policy_get` returns the document on an explicit request. The management messages of #25
+  Slice 6 (`issue-025-policy-engine.md`) change no part of this ingress: the extension does not send them.
 - `policy_status` otherwise: `{ok: true, state: "uninitialized" | "invalid" | "unsupported" | "busy" | "unavailable"}`
 - `policy_initialize` otherwise: `{ok: false, error}`, including `policy_already_initialized`
 

@@ -12,14 +12,17 @@
 // `current` asks only whether a policy is usable and which version it is, in memory only, so a
 // restarted worker starts from "unknown". A failed check forgets the previous answer.
 
-import { callHost } from "./search-client.js";
+import { SEARCH_TIMEOUT_MS, callHost } from "./search-client.js";
 
 export const POLICY_TTL_MS = 30_000;
 export const FRESH_REUSE_MS = 1_000;
 // As the host's MAX_BATCH_ITEMS, which keeps an answer far below Chrome's 1 MB from a host.
 export const MAX_BATCH_ITEMS = 1000;
-// Well below Chrome's 64 MiB to a host, which also is the host's own limit.
-export const MAX_BATCH_BYTES = 32 * 1024 * 1024;
+// Far below Chrome's 64 MiB to a host. The host's time grows with the text it judges: at worst,
+// regex rules of the largest size, about 2 µs a byte, so an estimated megabyte (half of it URL text,
+// as the estimate counts each character twice) takes about a second, well inside the timeout.
+// Ordinary URLs fill MAX_BATCH_ITEMS first.
+export const MAX_BATCH_BYTES = 1024 * 1024;
 // The evaluator's limit: longer URLs are never recorded, so they are refused without being sent.
 const MAX_URL_LENGTH = 32768;
 const ITEM_OVERHEAD_BYTES = 64;
@@ -74,7 +77,7 @@ function readBatchAnswer(response, urlOfId) {
 
 const failureCode = (error) => (typeof error?.code === "string" ? error.code : "host_unavailable");
 
-export function createPolicyGate({ send, now = () => Date.now(), ttlMs = POLICY_TTL_MS, onChange = () => {} }) {
+export function createPolicyGate({ send, now = () => Date.now(), ttlMs = POLICY_TTL_MS, timeoutMs = SEARCH_TIMEOUT_MS, onChange = () => {} }) {
   let verdict = null;
   let checkedAt = 0;
   let loading = null;
@@ -128,7 +131,7 @@ export function createPolicyGate({ send, now = () => Date.now(), ttlMs = POLICY_
         const urlOfId = new Map(part.map((url, index) => [String(index), url]));
         const response = await callHost(
           { type: "policy_evaluate_batch", items: [...urlOfId].map(([id, url]) => ({ id, url })) },
-          { send, resultType: "policy_evaluate_batch_result" },
+          { send, resultType: "policy_evaluate_batch_result", timeoutMs },
         );
         const judged = readBatchAnswer(response, urlOfId);
         if (!judged) return settle({ ok: false, code: "invalid_response" }, atGeneration, true);

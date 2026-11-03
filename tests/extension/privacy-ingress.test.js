@@ -700,6 +700,25 @@ test("large URLs split by size too, and an overlong one is refused without being
   assert.ok(!JSON.stringify(sent).includes(over));
 });
 
+test("an estimated megabyte at most goes into one message, so a slow host still answers in time", async () => {
+  const sent = [];
+  const gate = createPolicyGate({ send: async (m) => (sent.push(m), batchReply(m, each(m, "allow"))) });
+  const urls = Array.from({ length: 200 }, (_, n) => `https://a.test/${n}/${"x".repeat(20_000)}`);
+  const { ok, decisions } = await gate.evaluate(urls);
+  assert.equal(ok, true);
+  assert.equal(decisions.size, 200);
+  assert.ok(sent.length >= 8, `${sent.length}`);
+  for (const message of sent) assert.ok(JSON.stringify(message.items).length <= 1024 * 1024 / 2 + 64 * message.items.length);
+});
+
+test("a host that does not answer in time leaves no decision", async () => {
+  let asked = 0;
+  const gate = createPolicyGate({ send: () => ((asked += 1), new Promise(() => {})), timeoutMs: 20 });
+  assert.deepEqual(await gate.evaluate([NORMAL_URL, AUTH_URL]), { ok: false, code: "timeout" });
+  assert.equal(asked, 1);
+  assert.equal(gate.problem(), "timeout");
+});
+
 test("a failure in any part of a split request leaves no decision, and nothing is kept", async () => {
   const query = Array.from({ length: 1500 }, (_, n) => tabOf(n + 1, `https://a.test/${n}`));
   for (const fail of [(h) => (h.down = true), (h) => (h.state = "busy")]) {

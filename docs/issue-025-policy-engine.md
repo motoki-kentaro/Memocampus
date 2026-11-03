@@ -1,6 +1,6 @@
 # Issue #25 — Privacy Policy engine
 
-Status: **Slices 1 to 4 merged; Slice 5 implemented, for review.** Version 2 has patterns with exact paths and a wildcard in the last path segment, path rules also meet the path with its slashes collapsed, and regex rules meet the whole URL. No settings UI exists.
+Status: **Slices 1 to 5 merged; Slice 6 implemented, for review.** Version 2 has patterns with exact paths and a wildcard in the last path segment, path rules also meet the path with its slashes collapsed, and regex rules meet the whole URL. The host offers messages to validate, test and apply a draft and to start a new install; no settings UI exists.
 Labels: **[verified]** was run, **[code]** was read in the source, **[inferred]** is reasoning not run.
 
 ## Slice 1: what changed
@@ -581,3 +581,201 @@ URLs).
 2. The editor should explain the URL a regex meets (lower case host, punycode, percent-encoding), and that the limit of one regex depends on how many there
    are.
 3. A test endpoint for regexes is still out of scope.
+
+## Slice 6: policy management API
+
+### Messages
+
+| Message | Writes | Purpose |
+|---|---|---|
+| `policy_status`, `policy_get`, `policy_evaluate_batch` | no | as before |
+| `policy_validate` | no | whether a draft could be applied as it is |
+| `policy_test_rule` | no | whether one rule alone matches a URL |
+| `policy_test_url` | no | the decision a draft would give a URL |
+| `policy_preset` | no | a preset, as a draft |
+| `policy_apply` | yes | a draft in place of the policy of a given ETag |
+| `policy_migrate` | yes | version 1 to 2, as before |
+| `policy_initialize` | yes | the bundled policy for a new install, as before |
+| `policy_start` | yes | a draft as the first policy of a new install, with a usable vault |
+
+Every reply: `{ ok: true, type: "<message>_result", requestId, … }` or `{ ok: false, type, requestId, error, errors? }`. No reply holds a URL or a rule
+of the request, except the documents of `policy_get` and `policy_preset`. A request without a string `requestId` is answered with `requestId: null`
+and `invalid_request_id`; an unknown `type` with `unknown_type`. The host keeps serving after either. A reply over 1,000,000 bytes becomes
+`policy_too_large`. A draft over 1 MiB of JSON is `policy_draft_too_large` and is not read further.
+
+### Draft and active policy
+
+A draft is a whole policy document in the request, `policy`, as `policy_get` returns it. The host keeps no draft: the page (#23) holds it and sends it with
+each request. Nothing but `policy_apply`, `policy_start`, `policy_migrate` and `policy_initialize` changes the file, revision or ETag; a test checks the
+bytes after each of the others.
+
+### `policy_validate`
+
+```text
+→ { type: "policy_validate", requestId, policy }
+← { ok: true, …, schemaVersion, engineVersion }
+← { ok: false, …, error: "policy_invalid" | "policy_unsupported", errors: [{ layer?, ruleIndex?, code }] }
+```
+
+Valid means exactly what applying needs: the draft compiles (`CompiledPolicy::compile`, every rule of both layers, enabled or not, with the regex budget of
+the whole draft) and fits the file. `error` is `policy_unsupported` only if every problem is an unsupported regex. Codes:
+
+| Code | Place |
+|---|---|
+| `invalid_pattern`, `invalid_regex`, `unsupported_regex`, `regex_limit`, `invalid_rule_form` | layer and index of the rule |
+| `too_many_rules` | layer |
+| `invalid_version`, `invalid_revision`, `too_many_regex_rules`, `policy_too_large`, `invalid_policy_document`, `invalid_policy` | none |
+
+`invalid_rule_form` is a string rule in version 2 or a typed one in version 1, or a rule that is no rule at all (`{ "kind": "glob" }`). A document that is
+no policy for another reason (an unknown field, a missing category) is `invalid_policy_document`, with no place: the host does not guess one. Whether a
+regex fits depends on how many regexes the draft has, so a regex may be `regex_limit` in one draft and valid in another. Nothing is corrected or dropped.
+
+### `policy_test_rule`
+
+```text
+→ { type: "policy_test_rule", requestId, rule: { kind, pattern }, url }
+← { ok: true, …, matched }
+← { ok: false, …, error: "invalid_rule" | "invalid_pattern" | "invalid_regex" | "unsupported_regex" | "regex_limit" | "invalid_url" }
+```
+
+The rule is judged by the compiled zone a policy uses: alone in an enabled Blind Zone, with no builtin. So the host wildcard, paths raw and collapsed, and
+the URL a regex meets are the same as in a decision. **A match is no decision**: `matched: false` does not mean a URL would be recorded, since another rule
+or a builtin (authentication, credentials) may refuse it. A version 2 rule only. A URL the production judge cannot read is `invalid_url`, which a policy
+refuses. A regex alone has the budget of a policy holding one regex; `policy_validate` checks it within the draft.
+
+### `policy_test_url`
+
+```text
+→ { type: "policy_test_url", requestId, policy, url }
+← { ok: true, …, decision: "allow" | "save_but_no_mcp" | "never_save" }
+```
+
+The draft is validated as above and judged like the stored policy: Blind before Private, builtins included, an unreadable URL `never_save`. An invalid
+draft gives no decision. **The decision permits nothing**: recording judges each event again with the stored policy only, which a test shows with a URL the
+draft allows and the stored policy refuses.
+
+### `policy_apply`
+
+```text
+→ { type: "policy_apply", requestId, expectedEtag, policy }
+← { ok: true, …, state: "ready", etag, revision, schemaVersion, engineVersion }
+← { ok: false, …, error, errors? }
+```
+
+1. `expectedEtag` must be a non-empty string: `invalid_etag`.
+2. The stored policy is loaded; another ETag is `policy_conflict`.
+3. The draft is validated whole (errors as `policy_validate`).
+4. Its version must be the stored one: `policy_version_mismatch`. Changing the version is `policy_migrate` only, and no draft migrates a policy.
+5. `PolicyStore::update`: under the writer lock it reads the file again, requires the same ETag and revision, and the draft's `revision` equal to the
+   stored one (otherwise `policy_conflict`), checks the version once more, validates again, and replaces the file atomically with revision + 1.
+6. Any failure leaves the file, revision and ETag as they were: invalid draft, conflict, `policy_busy`, a failed write (`policy_unavailable`; a test holds
+   the file open so that the replacement fails).
+
+The revision is the host's: the draft's revision only proves which policy it was made from. Of several writers with one ETag exactly one succeeds; the others
+get `policy_conflict` or `policy_busy` (a test runs four at once). Rules keep their order and layer.
+
+The extension sees the new ETag and revision at its next status or batch and judges its queue again; the new policy decides every later event, in the batch
+and again in `record_event`. A user may remove a Blind rule this way, which allows what it refused. That is an explicit change, not a loosening by the
+engine: nothing refused before is kept anywhere to be stored later, and nothing is fetched again.
+
+### `policy_preset`
+
+```text
+→ { type: "policy_preset", requestId, presetId: "default" }
+← { ok: true, …, presetId, schemaVersion, engineVersion, policy }
+```
+
+Only `default`, the bundled policy that a new install starts with. Neither #24 nor the docs settle the contents of another preset ("privacy focused"), so
+none exists; any other id is `unknown_preset`. A preset is a draft: getting one creates, changes and starts nothing, and nothing puts it back into a stored
+policy. It is applied with `policy_start` (new install) or `policy_apply`.
+
+### `policy_start` and when recording starts
+
+Recording already depends on the stored policy: before the first initialization the host answers `policy_not_initialized` to every judgement and every
+event, and the extension keeps no URL. A vault is chosen explicitly elsewhere. So "start recording" is the first initialization, and #24 asks for exactly
+that: the validated first policy, stored atomically with the existing marker and lock.
+
+```text
+→ { type: "policy_start", requestId, policy }
+← { ok: true, …, state: "ready", etag, revision: 1, schemaVersion, engineVersion }
+```
+
+Refused, writing nothing: an initialized store (`policy_already_initialized`, also for every existing install), no usable vault (the vault's code, such as
+`vault_not_configured`), an invalid draft, or a version other than 2 (`policy_version_mismatch`). The draft is checked whole, and its size, before the marker
+is written, since the marker is never rolled back. The revision becomes 1 whatever the draft says. After it the policy is in the file, so a restart of the
+worker or host finds recording on; nothing turns it on otherwise. Events from before are not recorded, since none was kept.
+
+What it does not do: the host cannot tell that a person clicked; the message is explicit, but any caller of the host could send it. The extension sends it
+nowhere yet; the first-run page (#24) will. `policy_initialize` stays as it was.
+
+### M-1: one compilation per request
+
+Before, every message compiled each regex twice: `Policy::parse` validated by compiling and dropping them, then the caller compiled the policy again.
+`record_event` did the same through `Policy::evaluate`.
+
+Now validating is compiling: `Policy::validate` is `CompiledPolicy::compile`, and `PolicyStore::load` returns the policy with its compiled form
+(`Snapshot::compiled`), made from the same bytes as its ETag. The gate judges batches and events with it, and VisibleStore builds its set with it and
+afterwards compares only the ETag of the file (`PolicyStore::current_etag`), which reads the bytes without compiling them. The compiled policy lives for
+the one request that loaded it; the next one reads the file again, so a changed policy is always the one used.
+
+| Request | Compilations before | after |
+|---|---:|---:|
+| `policy_evaluate_batch`, `record_event` | 2 | 1 |
+| VisibleStore read (policy before and after) | 3 | 1 |
+| `policy_validate`, `policy_test_url` | — | 1 (a failing draft once more for its problems) |
+| `policy_apply` | — | 5: the stored policy, the draft, the store's check of the draft, the stored policy under the lock, the result |
+
+### L-1: a slow batch
+
+Each `policy_evaluate_batch` is one `sendNativeMessage`, a host process of its own, which the extension waits for 10 s (`SEARCH_TIMEOUT_MS`). Past that it
+has no answer: no URL of the batch is kept, delivery pauses, and the next check asks again. The host process finishes and exits; it writes nothing for a
+batch. A test checks the timeout gives no decision.
+
+A batch now holds at most an estimated megabyte (`MAX_BATCH_BYTES`, 32 MiB before), counting each character twice, as well as at most 1,000 URLs. At the
+worst a policy can do (Slice 5: about 57 ms for a 31 KB URL, some 2 µs a byte) that is about a second per message. Ordinary URLs are bounded by the count:
+1,000 of them are about 100 KB. A worse case remains: a single URL can take at most about 60 ms, so no single message can time out, but a long list of
+large URLs takes as many seconds as it has megabytes, one message after the other.
+
+Not done: cancelling a running host, or splitting by the cost of the policy.
+
+### Measurements [verified]
+
+The real host process, release build, 999 Blind patterns and N Private regexes, time per message within one process (median of 5).
+
+| Message | 0 regex | 1 | 32 | 128 |
+|---|---:|---:|---:|---:|
+| `policy_evaluate_batch`, 100 URLs, Slice 5 | 2.8 ms | 3.1 ms | 7.3 ms | 14.7 ms |
+| the same, Slice 6 | 2.2 ms | 2.3 ms | 5.1 ms | 9.6 ms |
+| `record_event`, Slice 5 | 6.7 ms | 6.8 ms | 10.3 ms | 16.7 ms |
+| the same, Slice 6 | 2.0 ms | 2.1 ms | 4.5 ms | 8.3 ms |
+| `policy_validate` | 3.3 ms | 2.6 ms | 5.1 ms | 9.8 ms |
+| `policy_test_url` | 3.4 ms | 3.5 ms | 8.3 ms | 14.8 ms |
+| `policy_test_rule` (one regex) | 0.17 ms | 0.13 ms | 0.17 ms | 0.14 ms |
+| `policy_apply` (process included) | 20 ms | 21 ms | 39 ms | 57 ms |
+
+VisibleStore, 10,000 image rows, 50 % public, 999 patterns: 72.8 → 68.9 ms without regex, 160.0 → 145.9 ms with 128 regexes.
+
+### Remaining risks
+
+- `policy_start` and `policy_apply` can be sent by anything that can talk to the host; the host cannot prove a person's choice. Only the extension can.
+- A store whose policy is invalid or unsupported cannot be repaired with `policy_apply`, which needs a loaded ETag. Fail-closed, but #23 needs a way out
+  (for example `policy_get` failing with a reason, and an explicit reset), which this slice does not add.
+- `policy_apply` compiles five times; fine for a click, not for a loop.
+- Only the `default` preset exists.
+- The extension has no client for the new messages yet.
+- Not run: Chrome, CI.
+
+### Handoff to #23 (options page)
+
+1. Read with `policy_get`, keep the draft in the page, check it with `policy_validate` and show `errors` by layer and index. Do not show the draft's own
+   text back from the host; it never sends it.
+2. Explain that `policy_test_rule` is a match, not a decision, and use `policy_test_url` for the decision.
+3. Apply with `policy_apply` and the ETag read; on `policy_conflict` read again and let the person merge, never retry blindly.
+4. Version 1 policies: offer `policy_migrate`, then edit.
+
+### Handoff to #24 (first run)
+
+1. Show `policy_preset` `default`, let the person edit it, check with `policy_validate`.
+2. Ask for a vault with the existing vault messages; `policy_start` refuses without one.
+3. "記憶を開始する" sends `policy_start` with the draft. Before it, nothing is recorded; the existing uninitialized state already holds that.
+4. Existing installs are initialized: `policy_start` refuses them, so they keep their policy and recording.

@@ -1,9 +1,10 @@
 //! Native Host is the sole writer. Construction and reads never initialize policy implicitly.
-use crate::policy::{Decision, Error, Policy, MAX_REVISION};
+use crate::policy::{CompiledPolicy, Decision, Error, Policy, MAX_REVISION};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const MAX_BYTES: u64 = 1_048_576;
 const MARKER: &[u8] = b"Memocampus policy initialization v1\n";
@@ -26,6 +27,9 @@ pub struct Snapshot {
     pub policy: Policy,
     /// Hash of exact bytes, also detects unsupported external edits without a revision bump.
     pub etag: String,
+    /// `policy` compiled once while it was loaded, for the one request that loaded it. Nothing
+    /// keeps it longer: the next request reads and compiles the file again.
+    pub compiled: Arc<CompiledPolicy>,
 }
 /// The one place a replacement may change the policy's version.
 #[derive(Clone, Copy)]
@@ -75,8 +79,12 @@ impl PolicyStore {
         Ok(file)
     }
     pub fn load(&self) -> Result<Snapshot, StoreError> {
-        // Readers only open an existing lock. No directory or file is created by a read.
-        // Sharing this OS lock avoids Windows delete-pending races during replacement.
+        let _lock = self.read_lock()?;
+        self.load_unlocked()
+    }
+    /// Readers only open an existing lock. No directory or file is created by a read.
+    /// Sharing this OS lock avoids Windows delete-pending races during replacement.
+    fn read_lock(&self) -> Result<File, StoreError> {
         let path = self.dir.join("policy.lock");
         let metadata = fs::symlink_metadata(&path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -90,7 +98,7 @@ impl PolicyStore {
         }
         let lock = File::open(path).map_err(|_| StoreError::Io)?;
         lock.try_lock_shared().map_err(|_| StoreError::Busy)?;
-        self.load_unlocked()
+        Ok(lock)
     }
     fn load_unlocked(&self) -> Result<Snapshot, StoreError> {
         if read_regular(&self.marker_path())? != MARKER {
@@ -109,11 +117,34 @@ impl PolicyStore {
     }
     pub fn evaluate(&self, url: &str) -> Decision {
         self.load()
-            .map_or(Decision::NeverSave, |s| s.policy.evaluate(url))
+            .map_or(Decision::NeverSave, |s| s.compiled.evaluate(url))
+    }
+    /// The ETag of the stored policy, read like `load` but not parsed: enough to tell that the
+    /// policy a reader started with is still the stored one, which was valid when it was loaded.
+    pub fn current_etag(&self) -> Result<String, StoreError> {
+        let _lock = self.read_lock()?;
+        if read_regular(&self.marker_path())? != MARKER {
+            return Err(StoreError::Invalid);
+        }
+        Ok(etag_of(&read_regular(&self.policy_path())?))
     }
     /// Explicit first-run operation only. An interrupted initialization requires manual recovery;
     /// the marker is written and flushed first and is NEVER rolled back on an error.
     pub fn initialize(&self) -> Result<Snapshot, StoreError> {
+        self.initialize_with(&Policy::default())
+    }
+    /// `initialize` with a policy of the caller's, at revision 1. It is checked whole, and its
+    /// size, before anything is written, since the marker is never rolled back.
+    pub fn initialize_with(&self, policy: &Policy) -> Result<Snapshot, StoreError> {
+        let mut first = policy.clone();
+        first.revision = 1;
+        first.validate().map_err(|error| match error {
+            Error::UnsupportedRule => StoreError::Unsupported,
+            _ => StoreError::Invalid,
+        })?;
+        if !fits(&first) {
+            return Err(StoreError::Invalid);
+        }
         let _lock = self.lock()?;
         for path in [self.marker_path(), self.policy_path()] {
             match fs::symlink_metadata(path) {
@@ -131,7 +162,7 @@ impl PolicyStore {
         marker.sync_all().map_err(|_| StoreError::Io)?;
         drop(marker);
         sync_dir(&self.dir)?;
-        self.persist(&Policy::default())?;
+        self.persist(&first)?;
         self.load_unlocked()
     }
     /// Callers edit the loaded policy without changing revision. Host increments it under lock.
@@ -232,13 +263,22 @@ fn read_regular(path: &Path) -> Result<Vec<u8>, StoreError> {
     Ok(bytes)
 }
 fn snapshot(bytes: &[u8]) -> Result<Snapshot, StoreError> {
+    let (policy, compiled) = Policy::parse_compiled(bytes).map_err(|error| match error {
+        Error::UnsupportedRule => StoreError::Unsupported,
+        _ => StoreError::Invalid,
+    })?;
     Ok(Snapshot {
-        policy: Policy::parse(bytes).map_err(|error| match error {
-            Error::UnsupportedRule => StoreError::Unsupported,
-            _ => StoreError::Invalid,
-        })?,
-        etag: format!("{:x}", Sha256::digest(bytes)),
+        policy,
+        etag: etag_of(bytes),
+        compiled: Arc::new(compiled),
     })
+}
+fn etag_of(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+/// Whether the policy fits the file as `persist` writes it.
+pub fn fits(policy: &Policy) -> bool {
+    serde_json::to_vec_pretty(policy).is_ok_and(|bytes| bytes.len() as u64 <= MAX_BYTES)
 }
 #[cfg(windows)]
 fn atomic_replace(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -676,5 +716,53 @@ mod tests {
                 .revision,
             2
         );
+    }
+
+    #[test]
+    fn a_first_policy_is_checked_whole_before_anything_is_written() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        let mut invalid = Policy::default();
+        invalid.layers.never_save.rules = vec!["bad/*/x".into()];
+        let mut huge = Policy::default();
+        huge.layers.never_save.rules = vec![format!("a.test/{}/*", "x".repeat(2000)).into(); 600];
+        for draft in [invalid, huge] {
+            assert_eq!(
+                store.initialize_with(&draft).unwrap_err(),
+                StoreError::Invalid
+            );
+            assert!(store.never_initialized(), "no marker, no file");
+        }
+        let mut first = Policy {
+            revision: 9,
+            ..Policy::default()
+        };
+        first.layers.never_save.rules = vec!["kept.test".into()];
+        let started = store.initialize_with(&first).unwrap();
+        assert_eq!(started.policy.revision, 1);
+        assert_eq!(started.policy.layers, first.layers);
+        assert_eq!(
+            store.initialize_with(&first).unwrap_err(),
+            StoreError::AlreadyInitialized
+        );
+        assert_eq!(store.current_etag().unwrap(), started.etag);
+    }
+
+    #[test]
+    fn the_current_etag_is_that_of_the_bytes_and_fails_like_a_load() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        assert_eq!(store.current_etag().unwrap_err(), StoreError::Missing);
+        let first = store.initialize().unwrap();
+        assert_eq!(store.current_etag().unwrap(), first.etag);
+        let second = store.update(&first, first.policy.clone()).unwrap();
+        assert_eq!(store.current_etag().unwrap(), second.etag);
+        let _held = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.0.join("policy.lock"))
+            .unwrap();
+        _held.try_lock().unwrap();
+        assert_eq!(store.current_etag().unwrap_err(), StoreError::Busy);
     }
 }

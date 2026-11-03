@@ -2060,8 +2060,10 @@ fn a_batch_compiles_once_and_judges_with_that_one_policy() {
         .split("pub fn handle")
         .next()
         .unwrap();
+    // The load compiles the policy once (Slice 6); the batch judges with that compiled form.
     assert_eq!(body.matches("self.load()").count(), 1);
-    assert_eq!(body.matches("CompiledPolicy::compile").count(), 1);
+    assert_eq!(body.matches("compile(").count(), 0);
+    assert_eq!(body.matches("snapshot.compiled.evaluate").count(), 1);
     assert!(!body.contains("self.decide") && !body.contains("policy.evaluate"));
 }
 
@@ -2679,4 +2681,758 @@ fn an_unusable_regex_stops_every_judgement_and_is_never_echoed() {
             );
         }
     }
+}
+
+// --- Policy management API (Issue #25 Slice 6) -----------------------------------------------
+
+fn call(tmp: &TempDir, message: Value) -> Value {
+    exchange(tmp, &[message]).remove(0)
+}
+
+/// The active policy as `policy_get` returns it, and its ETag.
+fn active(tmp: &TempDir) -> (Value, String) {
+    let reply = call(tmp, json!({ "type": "policy_get", "requestId": "g" }));
+    assert_eq!(reply["ok"], true, "{reply}");
+    (
+        reply["policy"].clone(),
+        reply["etag"].as_str().unwrap().to_owned(),
+    )
+}
+
+fn regex_json(pattern: &str) -> Value {
+    json!({ "kind": "regex", "pattern": pattern })
+}
+
+fn pattern_json(pattern: &str) -> Value {
+    json!({ "kind": "pattern", "pattern": pattern })
+}
+
+fn with_never(mut policy: Value, rules: Value) -> Value {
+    policy["layers"]["neverSave"]["rules"] = rules;
+    policy
+}
+
+fn refusal(result: &str, id: &str, code: &str) -> Value {
+    json!({ "ok": false, "type": result, "requestId": id, "error": code })
+}
+
+#[test]
+fn validate_judges_the_whole_draft_rule_by_rule_and_changes_nothing() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let (policy, _) = active(&tmp);
+    let before = policy_bytes(&tmp);
+    let validate = |draft: Value| {
+        call(
+            &tmp,
+            json!({ "type": "policy_validate", "requestId": "v", "policy": draft }),
+        )
+    };
+    assert_eq!(
+        validate(policy.clone()),
+        json!({ "ok": true, "type": "policy_validate_result", "requestId": "v", "schemaVersion": 2, "engineVersion": 2 })
+    );
+    let many: Vec<Value> = (0..129)
+        .map(|n| regex_json(&format!("CANARY{n}")))
+        .collect();
+    let mut schema_3 = policy.clone();
+    schema_3["schemaVersion"] = 3.into();
+    let mut revision_0 = policy.clone();
+    revision_0["revision"] = 0.into();
+    let mut disabled = with_never(
+        policy.clone(),
+        json!([pattern_json("ok.test"), pattern_json("CANARY.test/*/x")]),
+    );
+    disabled["layers"]["neverSave"]["enabled"] = false.into();
+    let mut private = policy.clone();
+    private["layers"]["saveButNoMcp"]["rules"] =
+        json!([pattern_json("ok.test"), regex_json("(CANARY")]);
+    let mut unknown_field = policy.clone();
+    unknown_field["CANARY"] = true.into();
+    let at = |layer: &str, index: usize, code: &str| json!({ "layer": layer, "ruleIndex": index, "code": code });
+    let only = |code: &str| json!({ "code": code });
+    for (draft, error, errors) in [
+        (schema_3, "policy_invalid", json!([only("invalid_version")])),
+        (
+            revision_0,
+            "policy_invalid",
+            json!([only("invalid_revision")]),
+        ),
+        (
+            disabled,
+            "policy_invalid",
+            json!([at("neverSave", 1, "invalid_pattern")]),
+        ),
+        (
+            private,
+            "policy_invalid",
+            json!([at("saveButNoMcp", 1, "invalid_regex")]),
+        ),
+        (
+            with_never(policy.clone(), json!([regex_json("(?<=CANARY)x")])),
+            "policy_unsupported",
+            json!([at("neverSave", 0, "unsupported_regex")]),
+        ),
+        (
+            with_never(
+                policy.clone(),
+                json!([regex_json("(?<=CANARY)x"), regex_json("(CANARY")]),
+            ),
+            "policy_invalid",
+            json!([
+                at("neverSave", 0, "unsupported_regex"),
+                at("neverSave", 1, "invalid_regex")
+            ]),
+        ),
+        (
+            with_never(policy.clone(), json!([regex_json("\\w{100}CANARY")])),
+            "policy_invalid",
+            json!([at("neverSave", 0, "regex_limit")]),
+        ),
+        (
+            with_never(policy.clone(), json!(many)),
+            "policy_invalid",
+            json!([only("too_many_regex_rules")]),
+        ),
+        (
+            with_never(policy.clone(), json!(["CANARY.test"])),
+            "policy_invalid",
+            json!([at("neverSave", 0, "invalid_rule_form")]),
+        ),
+        (
+            with_never(
+                policy.clone(),
+                json!([pattern_json("ok.test"), { "kind": "glob", "pattern": "CANARY" }]),
+            ),
+            "policy_invalid",
+            json!([at("neverSave", 1, "invalid_rule_form")]),
+        ),
+        (
+            unknown_field,
+            "policy_invalid",
+            json!([only("invalid_policy_document")]),
+        ),
+    ] {
+        let reply = validate(draft);
+        assert_eq!(
+            reply,
+            json!({ "ok": false, "type": "policy_validate_result", "requestId": "v", "error": error, "errors": errors })
+        );
+        assert!(!reply.to_string().contains("CANARY"), "{reply}");
+    }
+    for missing in [
+        json!({ "type": "policy_validate", "requestId": "v" }),
+        json!({ "type": "policy_validate", "requestId": "v", "policy": "CANARY" }),
+        json!({ "type": "policy_validate", "requestId": "v", "policy": [] }),
+    ] {
+        assert_eq!(
+            call(&tmp, missing),
+            refusal("policy_validate_result", "v", "invalid_policy_draft")
+        );
+    }
+    let mut huge = policy.clone();
+    huge["layers"]["neverSave"]["rules"] =
+        json!(vec![
+            pattern_json(&format!("a.test/{}/*", "x".repeat(2000)));
+            600
+        ]);
+    assert_eq!(
+        validate(huge),
+        refusal("policy_validate_result", "v", "policy_draft_too_large")
+    );
+    assert_eq!(policy_bytes(&tmp), before, "validation writes nothing");
+}
+
+#[test]
+fn a_rule_is_tested_alone_by_the_production_matcher() {
+    let tmp = TempDir::new();
+    let test = |rule: Value, url: &str| {
+        call(
+            &tmp,
+            json!({ "type": "policy_test_rule", "requestId": "r", "rule": rule, "url": url }),
+        )
+    };
+    let matched = |rule: Value, url: &str| {
+        let reply = test(rule, url);
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply.as_object().unwrap().len(), 4, "{reply}");
+        reply["matched"].as_bool().unwrap()
+    };
+    for (rule, url, expected) in [
+        (
+            pattern_json("example.com/private"),
+            "https://example.com/private",
+            true,
+        ),
+        (
+            pattern_json("example.com/private"),
+            "https://example.com/private/",
+            false,
+        ),
+        (
+            pattern_json("example.com/images/*.png"),
+            "https://example.com/images/a.png",
+            true,
+        ),
+        (
+            pattern_json("example.com/images/*.png"),
+            "https://example.com/images/b/a.png",
+            false,
+        ),
+        (pattern_json("*.example.com"), "https://example.com/", true),
+        (
+            pattern_json("*.example.com"),
+            "https://a.b.example.com/",
+            true,
+        ),
+        (
+            pattern_json("*.example.com"),
+            "https://example.com.evil.test/",
+            false,
+        ),
+        (
+            pattern_json("example.com/private/*"),
+            "https://example.com//private/a",
+            true,
+        ),
+        (
+            pattern_json("example.com/private/*"),
+            "https://example.com/private%2Fa",
+            true,
+        ),
+        (
+            regex_json("[?&]q=secret(?:&|$)"),
+            "https://x.test/?a=1&q=secret",
+            true,
+        ),
+        (regex_json("a%2Fb"), "https://x.test/a%2Fb", true),
+        (regex_json("a/b"), "https://x.test/a%2Fb", false),
+        (
+            regex_json(r"^https://example\.com/"),
+            "https://example.com./x",
+            true,
+        ),
+        (
+            regex_json(r"^https://example\.com/"),
+            "blob:https://example.com/x",
+            true,
+        ),
+        (
+            regex_json("^HTTPS://EXAMPLE"),
+            "HTTPS://EXAMPLE.COM/",
+            false,
+        ),
+        // No decision: a credential the builtins would refuse does not match an unrelated rule.
+        (
+            pattern_json("other.test"),
+            "https://example.com/?token=x",
+            false,
+        ),
+    ] {
+        assert_eq!(matched(rule.clone(), url), expected, "{rule} {url}");
+    }
+    for (rule, url, code) in [
+        (
+            pattern_json("CANARY.test/*/x"),
+            "https://a.test/",
+            "invalid_pattern",
+        ),
+        (regex_json("(CANARY"), "https://a.test/", "invalid_regex"),
+        (
+            regex_json("(?<=CANARY)x"),
+            "https://a.test/",
+            "unsupported_regex",
+        ),
+        (
+            regex_json("\\w{21}CANARY"),
+            "https://a.test/",
+            "regex_limit",
+        ),
+        (json!("CANARY.test"), "https://a.test/", "invalid_rule"),
+        (
+            json!({ "kind": "glob", "pattern": "CANARY" }),
+            "https://a.test/",
+            "invalid_rule",
+        ),
+        (
+            json!({ "kind": "pattern", "pattern": "a.test", "x": 1 }),
+            "https://a.test/",
+            "invalid_rule",
+        ),
+        (pattern_json("a.test"), "not a url CANARY", "invalid_url"),
+        (pattern_json("a.test"), "ftp://a.test/CANARY", "invalid_url"),
+        (
+            pattern_json("a.test"),
+            "https://a.test/%FFCANARY",
+            "invalid_url",
+        ),
+    ] {
+        let reply = test(rule, url);
+        assert_eq!(reply, refusal("policy_test_rule_result", "r", code));
+    }
+    let no_url = call(
+        &tmp,
+        json!({ "type": "policy_test_rule", "requestId": "r", "rule": pattern_json("a.test") }),
+    );
+    assert_eq!(
+        no_url,
+        refusal("policy_test_rule_result", "r", "invalid_url")
+    );
+    assert!(
+        store_of(&tmp).never_initialized(),
+        "testing a rule needs and writes no policy"
+    );
+}
+
+#[test]
+fn a_draft_decides_a_url_and_permits_nothing() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    // The active policy refuses blind.example; the draft, made from it, does not.
+    add_never_save_rule(&tmp, "blind.example");
+    let (policy, _) = active(&tmp);
+    let before = policy_bytes(&tmp);
+    let mut draft = with_never(policy.clone(), json!([regex_json("CANARY-blind")]));
+    draft["layers"]["saveButNoMcp"]["rules"] = json!([
+        pattern_json("private.example"),
+        regex_json("^https://mixed\\.example/")
+    ]);
+    let decide = |draft: &Value, url: &str| {
+        call(
+            &tmp,
+            json!({ "type": "policy_test_url", "requestId": "u", "policy": draft, "url": url }),
+        )
+    };
+    for (url, decision) in [
+        ("https://public.example/", "allow"),
+        ("https://blind.example/", "allow"),
+        ("https://private.example/x", "save_but_no_mcp"),
+        ("https://mixed.example/x", "save_but_no_mcp"),
+        ("https://public.example/CANARY-blind", "never_save"),
+        ("https://private.example/CANARY-blind", "never_save"),
+        ("https://accounts.google.com/signin", "never_save"),
+        ("https://public.example/?token=CANARY", "never_save"),
+        ("not a url CANARY", "never_save"),
+    ] {
+        let reply = decide(&draft, url);
+        assert_eq!(
+            reply,
+            json!({ "ok": true, "type": "policy_test_url_result", "requestId": "u", "decision": decision }),
+            "{url}"
+        );
+    }
+    let invalid = with_never(policy.clone(), json!([regex_json("(CANARY")]));
+    let reply = decide(&invalid, "https://public.example/");
+    assert_eq!(reply["error"], "policy_invalid");
+    assert_eq!(
+        reply["errors"],
+        json!([{ "layer": "neverSave", "ruleIndex": 0, "code": "invalid_regex" }])
+    );
+    assert!(!reply.to_string().contains("CANARY"));
+    assert_eq!(
+        call(
+            &tmp,
+            json!({ "type": "policy_test_url", "requestId": "u", "policy": draft })
+        ),
+        refusal("policy_test_url_result", "u", "invalid_url")
+    );
+    // An allow of the draft is no permit: the stored policy still refuses the URL.
+    assert_eq!(
+        exchange(&tmp, &[visit("b", "https://blind.example/", AT)]),
+        [dropped("b")]
+    );
+    assert_eq!(policy_bytes(&tmp), before, "testing a draft writes nothing");
+    assert!(row_dump(&tmp.default_vault()).is_empty());
+}
+
+#[test]
+fn a_preset_is_a_draft_that_neither_starts_nor_changes_anything() {
+    let tmp = TempDir::new();
+    let preset = call(
+        &tmp,
+        json!({ "type": "policy_preset", "requestId": "p", "presetId": "default" }),
+    );
+    let bundled: Value =
+        serde_json::from_str(memocampus_native_host::policy::DEFAULT_JSON).unwrap();
+    assert_eq!(
+        preset,
+        json!({ "ok": true, "type": "policy_preset_result", "requestId": "p", "presetId": "default",
+                "schemaVersion": 2, "engineVersion": 2, "policy": bundled })
+    );
+    for id in [
+        json!("privacy-focused"),
+        json!("DEFAULT"),
+        json!(1),
+        Value::Null,
+    ] {
+        assert_eq!(
+            call(
+                &tmp,
+                json!({ "type": "policy_preset", "requestId": "p", "presetId": id })
+            ),
+            refusal("policy_preset_result", "p", "unknown_preset")
+        );
+    }
+    assert!(store_of(&tmp).never_initialized(), "no policy was created");
+    assert_eq!(status(&tmp)["state"], "uninitialized");
+    // After setup, a preset is never put back into the stored policy.
+    create_default_vault(&tmp);
+    add_never_save_rule(&tmp, "kept.example");
+    let before = policy_bytes(&tmp);
+    call(
+        &tmp,
+        json!({ "type": "policy_preset", "requestId": "p", "presetId": "default" }),
+    );
+    assert_eq!(policy_bytes(&tmp), before);
+}
+
+#[test]
+fn apply_replaces_the_policy_of_its_etag_all_or_nothing() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let (policy, etag) = active(&tmp);
+    let before = policy_bytes(&tmp);
+    let apply = |draft: &Value, etag: Option<&str>| {
+        let mut message = json!({ "type": "policy_apply", "requestId": "a", "policy": draft });
+        if let Some(etag) = etag {
+            message["expectedEtag"] = etag.into();
+        }
+        call(&tmp, message)
+    };
+    let edited = with_never(
+        policy.clone(),
+        json!([
+            pattern_json("c.example"),
+            regex_json("CANARY-applied"),
+            pattern_json("a.example")
+        ]),
+    );
+    assert_eq!(
+        apply(&edited, None),
+        refusal("policy_apply_result", "a", "invalid_etag")
+    );
+    assert_eq!(
+        apply(&edited, Some("")),
+        refusal("policy_apply_result", "a", "invalid_etag")
+    );
+    assert_eq!(
+        apply(&edited, Some("stale")),
+        refusal("policy_apply_result", "a", "policy_conflict")
+    );
+    let mut v1 = edited.clone();
+    (v1["schemaVersion"], v1["engineVersion"]) = (1.into(), 1.into());
+    v1["layers"]["neverSave"]["rules"] = json!(["c.example"]);
+    assert_eq!(
+        apply(&v1, Some(&etag)),
+        refusal("policy_apply_result", "a", "policy_version_mismatch")
+    );
+    let mut ahead = edited.clone();
+    ahead["revision"] = 5.into();
+    assert_eq!(
+        apply(&ahead, Some(&etag)),
+        refusal("policy_apply_result", "a", "policy_conflict")
+    );
+    for bad in [
+        regex_json("(CANARY"),
+        regex_json("\\w{100}CANARY"),
+        regex_json("(?<=CANARY)x"),
+        pattern_json("CANARY/*/x"),
+    ] {
+        let draft = with_never(policy.clone(), json!([pattern_json("ok.example"), bad]));
+        let reply = apply(&draft, Some(&etag));
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["errors"][0]["ruleIndex"], 1, "{reply}");
+        assert!(!reply.to_string().contains("CANARY"));
+    }
+    assert_eq!(
+        policy_bytes(&tmp),
+        before,
+        "every refusal left the file as it was"
+    );
+
+    let applied = apply(&edited, Some(&etag));
+    assert_eq!(applied["ok"], true, "{applied}");
+    assert_eq!(applied["revision"], 2);
+    let (written, new_etag) = active(&tmp);
+    assert_eq!(applied["etag"], new_etag.as_str());
+    assert_ne!(new_etag, etag);
+    let mut expected = edited.clone();
+    expected["revision"] = 2.into();
+    assert_eq!(
+        written, expected,
+        "every rule, in order and layer, and nothing else"
+    );
+    // The same ETag again is stale now.
+    assert_eq!(
+        apply(&edited, Some(&etag)),
+        refusal("policy_apply_result", "a", "policy_conflict")
+    );
+    // The extension sees a new ETag and revision, and the store judges with the new policy.
+    let reply = call(
+        &tmp,
+        batch(json!([{ "id": "1", "url": "https://x.test/CANARY-applied" }])),
+    );
+    assert_eq!(decisions(&reply), [("1".into(), "never_save".into())]);
+    assert_eq!(
+        (reply["etag"].as_str(), reply["revision"].as_u64()),
+        (Some(new_etag.as_str()), Some(2))
+    );
+    assert_eq!(
+        exchange(&tmp, &[visit("v", "https://x.test/CANARY-applied", AT)]),
+        [dropped("v")]
+    );
+    // An explicit change may also allow what was refused; it is the user's own choice.
+    let mut relaxed = policy.clone();
+    relaxed["revision"] = 2.into();
+    assert_eq!(apply(&relaxed, Some(&new_etag))["revision"], 3);
+    assert_eq!(
+        exchange(&tmp, &[visit("w", "https://x.test/CANARY-applied", AT)]),
+        [stored("w")]
+    );
+    // Nothing comes back of what was refused before.
+    let rows = row_dump(&tmp.default_vault());
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].starts_with("v|w|"));
+}
+
+#[test]
+fn apply_needs_a_policy_and_never_migrates() {
+    let tmp = TempDir::new();
+    let (policy, _) = (
+        serde_json::from_str::<Value>(memocampus_native_host::policy::DEFAULT_JSON).unwrap(),
+        (),
+    );
+    let message =
+        json!({ "type": "policy_apply", "requestId": "a", "expectedEtag": "e", "policy": policy });
+    assert_eq!(
+        call(&tmp, message.clone()),
+        refusal("policy_apply_result", "a", "policy_not_initialized")
+    );
+    assert!(store_of(&tmp).never_initialized());
+    // A version 1 policy stays version 1: a version 2 draft is refused, a version 1 one applied.
+    create_default_vault(&tmp);
+    with_canary_rules(&tmp);
+    let (v1, etag) = active(&tmp);
+    assert_eq!(v1["schemaVersion"], 1);
+    let mut as_v2 = policy.clone();
+    as_v2["revision"] = v1["revision"].clone();
+    let mut message =
+        json!({ "type": "policy_apply", "requestId": "a", "expectedEtag": etag, "policy": as_v2 });
+    assert_eq!(
+        call(&tmp, message.clone()),
+        refusal("policy_apply_result", "a", "policy_version_mismatch")
+    );
+    let mut edited = v1.clone();
+    edited["layers"]["neverSave"]["rules"] = json!(["only.example"]);
+    message["policy"] = edited;
+    let reply = call(&tmp, message);
+    assert_eq!(
+        (reply["ok"].as_bool(), reply["schemaVersion"].as_u64()),
+        (Some(true), Some(1)),
+        "{reply}"
+    );
+}
+
+#[test]
+fn concurrent_applies_of_one_etag_store_exactly_one() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let (policy, etag) = active(&tmp);
+    let replies: Vec<Value> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .map(|n| {
+                let draft = with_never(policy.clone(), json!([pattern_json(&format!("writer{n}.example"))]));
+                let message = json!({ "type": "policy_apply", "requestId": "a", "expectedEtag": etag, "policy": draft });
+                let tmp = &tmp;
+                scope.spawn(move || call(tmp, message))
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let winners: Vec<&Value> = replies.iter().filter(|r| r["ok"] == true).collect();
+    assert_eq!(winners.len(), 1, "{replies:?}");
+    for loser in replies.iter().filter(|r| r["ok"] != true) {
+        assert!(
+            ["policy_conflict", "policy_busy"].contains(&loser["error"].as_str().unwrap()),
+            "{loser}"
+        );
+    }
+    let (written, stored_etag) = active(&tmp);
+    assert_eq!(written["revision"], 2);
+    assert_eq!(winners[0]["etag"], stored_etag.as_str());
+    assert_eq!(
+        written["layers"]["neverSave"]["rules"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn start_initializes_a_new_install_once_with_a_usable_vault_and_a_valid_draft() {
+    let tmp = TempDir::new();
+    let mut draft: Value =
+        serde_json::from_str(memocampus_native_host::policy::DEFAULT_JSON).unwrap();
+    draft["revision"] = 7.into();
+    draft["layers"]["neverSave"]["rules"] = json!([pattern_json("blind.example")]);
+    let start = |draft: &Value| {
+        call(
+            &tmp,
+            json!({ "type": "policy_start", "requestId": "s", "policy": draft }),
+        )
+    };
+    // Before it, nothing is recorded and nothing is kept for later.
+    let early = exchange(&tmp, &[visit("e", "https://early.example/", AT)]);
+    assert_policy_failure(&early[0], "e", "policy_not_initialized");
+    // No vault: recording cannot start.
+    assert_eq!(
+        start(&draft),
+        refusal("policy_start_result", "s", "vault_not_configured")
+    );
+    assert!(store_of(&tmp).never_initialized());
+    let created = call(
+        &tmp,
+        json!({ "type": "vault_create", "requestId": "c", "useDefault": true }),
+    );
+    assert_eq!(created["ok"], true, "{created}");
+    assert!(store_of(&tmp).never_initialized(), "a vault starts nothing");
+    let invalid = with_never(draft.clone(), json!([regex_json("(CANARY")]));
+    let reply = start(&invalid);
+    assert_eq!(reply["error"], "policy_invalid");
+    assert!(!reply.to_string().contains("CANARY"));
+    let mut v1 = draft.clone();
+    (v1["schemaVersion"], v1["engineVersion"]) = (1.into(), 1.into());
+    v1["layers"]["neverSave"]["rules"] = json!(["blind.example"]);
+    assert_eq!(
+        start(&v1),
+        refusal("policy_start_result", "s", "policy_version_mismatch")
+    );
+    assert_eq!(
+        call(&tmp, json!({ "type": "policy_start", "requestId": "s" })),
+        refusal("policy_start_result", "s", "invalid_policy_draft")
+    );
+    assert!(
+        store_of(&tmp).never_initialized(),
+        "no refusal wrote anything"
+    );
+
+    let started = start(&draft);
+    assert_eq!(started["ok"], true, "{started}");
+    assert_eq!(started["revision"], 1, "the host sets the first revision");
+    let (written, _) = active(&tmp);
+    let mut expected = draft.clone();
+    expected["revision"] = 1.into();
+    assert_eq!(written, expected);
+    // A new host process finds it started, and records with it.
+    assert_eq!(status(&tmp)["state"], "ready");
+    assert_eq!(
+        exchange(
+            &tmp,
+            &[
+                visit("b", "https://blind.example/", AT),
+                visit("n", "https://normal.example/", AT)
+            ]
+        ),
+        [dropped("b"), stored("n")]
+    );
+    let rows = row_dump(&tmp.default_vault());
+    assert_eq!(rows.len(), 1);
+    assert!(!rows[0].contains("early.example"));
+    // Once only: never over an existing policy.
+    let before = policy_bytes(&tmp);
+    assert_eq!(
+        start(&draft),
+        refusal("policy_start_result", "s", "policy_already_initialized")
+    );
+    assert_eq!(policy_bytes(&tmp), before);
+    let other = TempDir::new();
+    create_default_vault(&other);
+    assert_eq!(
+        call(
+            &other,
+            json!({ "type": "policy_start", "requestId": "s", "policy": draft })
+        ),
+        refusal("policy_start_result", "s", "policy_already_initialized")
+    );
+    // An existing install is told it is initialized, before anything about its vault.
+    let no_vault = TempDir::new();
+    initialize_policy(&no_vault);
+    assert_eq!(
+        call(
+            &no_vault,
+            json!({ "type": "policy_start", "requestId": "s", "policy": draft })
+        ),
+        refusal("policy_start_result", "s", "policy_already_initialized")
+    );
+}
+
+#[test]
+fn the_management_messages_share_one_connection_and_survive_bad_requests() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let (policy, _) = active(&tmp);
+    let replies = exchange(
+        &tmp,
+        &[
+            json!({ "type": "policy_validate", "policy": policy }),
+            json!({ "type": "policy_validate", "requestId": 1, "policy": policy }),
+            json!({ "type": "policy_test_rule", "requestId": "1", "rule": pattern_json("a.test"), "url": "https://a.test/" }),
+            json!({ "type": "policy_test_url", "requestId": "2", "policy": policy, "url": "https://a.test/" }),
+            json!({ "type": "policy_preset", "requestId": "3", "presetId": "default" }),
+            json!({ "type": "policy_validate", "requestId": "4", "policy": policy }),
+            json!({ "type": "policy_reset", "requestId": "5" }),
+            json!({ "type": "policy_apply", "requestId": "6" }),
+        ],
+    );
+    assert_eq!(
+        replies[0],
+        json!({ "ok": false, "type": "policy_validate_result", "requestId": null, "error": "invalid_request_id" })
+    );
+    assert_eq!(replies[1]["error"], "invalid_request_id");
+    for (reply, id) in replies[2..6].iter().zip(["1", "2", "3", "4"]) {
+        assert_eq!(
+            (reply["ok"].as_bool(), reply["requestId"].as_str()),
+            (Some(true), Some(id)),
+            "{reply}"
+        );
+    }
+    assert_eq!(
+        replies[6],
+        json!({ "ok": false, "eventId": null, "error": "unknown_type" })
+    );
+    assert_eq!(
+        replies[7],
+        refusal("policy_apply_result", "6", "invalid_etag")
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_failed_write_applies_nothing() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let (policy, etag) = active(&tmp);
+    let before = policy_bytes(&tmp);
+    let draft = with_never(policy, json!([pattern_json("new.example")]));
+    let message =
+        json!({ "type": "policy_apply", "requestId": "a", "expectedEtag": etag, "policy": draft });
+    // Shared for reading only: the replacement of the file fails.
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(store_of(&tmp).policy_path())
+        .unwrap();
+    assert_eq!(
+        call(&tmp, message.clone()),
+        refusal("policy_apply_result", "a", "policy_unavailable")
+    );
+    drop(held);
+    assert_eq!(policy_bytes(&tmp), before);
+    assert_eq!(
+        call(&tmp, message)["revision"],
+        2,
+        "the same ETag still applies once"
+    );
 }
