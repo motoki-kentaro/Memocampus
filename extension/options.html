@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Memocampus — Privacy設定</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main id="options" class="options" aria-labelledby="options-title">
+      <h1 id="options-title">Memocampus — Privacy設定</h1>
+
+      <section class="card" aria-labelledby="active-heading">
+        <h2 id="active-heading" tabindex="-1">適用中のプライバシー設定</h2>
+        <dl class="facts">
+          <div><dt>状態</dt><dd><span id="policy-state" class="state" data-state="loading" role="status" aria-live="polite"></span></dd></div>
+          <div><dt>Schema / Engine Version</dt><dd id="policy-version"></dd></div>
+          <div><dt>Revision</dt><dd id="policy-revision"></dd></div>
+        </dl>
+        <p id="policy-explanation" class="explanation" aria-live="polite"></p>
+        <div class="actions">
+          <button id="reload" type="button">再読み込み</button>
+        </div>
+        <div id="reload-confirm" class="confirm" role="alertdialog" aria-labelledby="reload-confirm-text" hidden>
+          <p id="reload-confirm-text">未適用の変更があります。再読み込みすると、この変更は失われます。</p>
+          <button id="reload-confirm-yes" type="button">変更を破棄して再読み込み</button>
+          <button id="reload-confirm-no" type="button">やめる</button>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="categories-heading" aria-describedby="categories-description">
+        <h2 id="categories-heading">基本保護</h2>
+        <p id="categories-description" class="explanation">Memocampusに組み込まれた保護です。ONの項目に一致したURLは、それぞれのグループと同じ扱いになります。</p>
+        <p id="categories-note" class="note" hidden></p>
+        <ul id="categories" class="categories">
+          <li>
+            <input id="category-authentication" type="checkbox" aria-describedby="category-authentication-detail category-authentication-note category-authentication-warning">
+            <div>
+              <label for="category-authentication">認証関連</label>
+              <span class="group-tag">保存しないグループ</span>
+              <p id="category-authentication-detail" class="detail">Google・Microsoft・OpenAI・Appleのログイン画面と、ログインやパスワード再設定のページ（/login、/signin、/reset-password など）。</p>
+              <p id="category-authentication-note" class="note" hidden></p>
+              <p id="category-authentication-warning" class="warning" hidden>OFFにすると、これらのページもMemocampusに保存されるようになります。</p>
+            </div>
+          </li>
+          <li>
+            <input id="category-credentials" type="checkbox" aria-describedby="category-credentials-detail category-credentials-note category-credentials-warning">
+            <div>
+              <label for="category-credentials">認証情報</label>
+              <span class="group-tag">保存しないグループ</span>
+              <p id="category-credentials-detail" class="detail">トークン・パスワード・APIキー・署名などをURLに含むページ、ユーザー名やパスワード付きのURL、OAuthの認可コードを含むURL。</p>
+              <p id="category-credentials-note" class="note" hidden></p>
+              <p id="category-credentials-warning" class="warning" hidden>OFFにすると、認証情報を含むURLもMemocampusに保存されるようになります。</p>
+            </div>
+          </li>
+          <li>
+            <input id="category-government" type="checkbox" aria-describedby="category-government-detail category-government-note category-government-warning">
+            <div>
+              <label for="category-government">行政サイト</label>
+              <span class="group-tag">MCPサーバに見せないグループ</span>
+              <p id="category-government-detail" class="detail">マイナポータル（*.myna.go.jp）と国税庁（*.nta.go.jp）。</p>
+              <p id="category-government-note" class="note" hidden></p>
+              <p id="category-government-warning" class="warning" hidden>OFFにすると、これらのページがMCPサーバ向けの公開対象になります。</p>
+            </div>
+          </li>
+          <li>
+            <input id="category-webmail" type="checkbox" aria-describedby="category-webmail-detail category-webmail-note category-webmail-warning">
+            <div>
+              <label for="category-webmail">Webメール</label>
+              <span class="group-tag">MCPサーバに見せないグループ</span>
+              <p id="category-webmail-detail" class="detail">Gmail（mail.google.com）とOutlook（outlook.live.com、outlook.office.com）。</p>
+              <p id="category-webmail-note" class="note" hidden></p>
+              <p id="category-webmail-warning" class="warning" hidden>OFFにすると、メールのページがMCPサーバ向けの公開対象になります。</p>
+            </div>
+          </li>
+          <li>
+            <input id="category-aiChats" type="checkbox" aria-describedby="category-aiChats-detail category-aiChats-note category-aiChats-warning">
+            <div>
+              <label for="category-aiChats">AIチャット</label>
+              <span class="group-tag">MCPサーバに見せないグループ</span>
+              <p id="category-aiChats-detail" class="detail">ChatGPT（chatgpt.com）・Claude（claude.ai）・Gemini（gemini.google.com）。</p>
+              <p id="category-aiChats-note" class="note" hidden></p>
+              <p id="category-aiChats-warning" class="warning" hidden>OFFにすると、AIチャットのページがMCPサーバ向けの公開対象になります。</p>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <section class="card" aria-labelledby="never-save-heading" aria-describedby="never-save-description">
+        <h2 id="never-save-heading">保存しないグループ</h2>
+        <p id="never-save-description" class="explanation">一致したURLはMemocampusに保存されません。</p>
+        <p id="never-save-state" class="note"></p>
+        <div id="never-save-table" class="table-wrap">
+          <table>
+            <caption class="visually-hidden">保存しないグループのルール</caption>
+            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th></tr></thead>
+            <tbody id="never-save-rules"></tbody>
+          </table>
+        </div>
+        <p id="never-save-empty" class="empty" hidden></p>
+      </section>
+
+      <section class="card" aria-labelledby="save-but-no-mcp-heading" aria-describedby="save-but-no-mcp-description">
+        <h2 id="save-but-no-mcp-heading">MCPサーバに見せないグループ</h2>
+        <p id="save-but-no-mcp-description" class="explanation">一致したURLはVaultに保存されますが、MCPサーバ向けの公開対象から除外されます。</p>
+        <p id="save-but-no-mcp-state" class="note"></p>
+        <div id="save-but-no-mcp-table" class="table-wrap">
+          <table>
+            <caption class="visually-hidden">MCPサーバに見せないグループのルール</caption>
+            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th></tr></thead>
+            <tbody id="save-but-no-mcp-rules"></tbody>
+          </table>
+        </div>
+        <p id="save-but-no-mcp-empty" class="empty" hidden></p>
+      </section>
+
+      <section class="card planned" aria-labelledby="url-test-heading">
+        <h2 id="url-test-heading">URLテスト</h2>
+        <p class="note">今後実装予定です。URLがどのグループに当たるかを、Native Hostの判定で確認できるようになります。</p>
+      </section>
+
+      <section class="card planned" aria-labelledby="manage-heading">
+        <h2 id="manage-heading">管理</h2>
+        <ul class="planned-list">
+          <li>旧形式（v1）からの明示的な移行（Migration）— 今後実装予定</li>
+          <li>読み取れなくなったプライバシー設定の復旧 — 今後実装予定</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="apply-bar" aria-label="変更の適用">
+      <p id="dirty-status" class="dirty-status" role="status" aria-live="polite"></p>
+      <div class="actions">
+        <button id="discard" type="button" disabled>変更を破棄</button>
+        <button id="apply" type="button" class="primary" disabled aria-describedby="apply-reason">適用</button>
+      </div>
+      <p id="apply-reason" class="note">ルール編集と適用機能は次の開発段階で利用可能になります。</p>
+    </footer>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

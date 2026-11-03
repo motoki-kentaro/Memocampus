@@ -309,7 +309,8 @@ VisibleStore load and compile per request, so no process keeps judging with the 
 ```
 
 `policy_status` and `policy_initialize` no longer carry the policy. The extension takes the revision from the status and never asks for `policy_get` or
-`policy_migrate`, which a test checks in its source and its messages. `policy_get` refuses with `policy_too_large` an answer over 1,000,000 bytes, since Chrome
+`policy_migrate`, which a test checks in its source and its messages. Since #23 Slice 1 one exception: the Privacy settings page (`options-state.js`),
+opened explicitly, reads the document with `policy_get`; the service worker never loads that module, which the same test checks. `policy_get` refuses with `policy_too_large` an answer over 1,000,000 bytes, since Chrome
 takes at most 1 MB from a host and the file may be up to 1 MiB.
 
 ### Remaining risks

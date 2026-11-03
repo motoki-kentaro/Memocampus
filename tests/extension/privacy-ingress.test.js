@@ -596,10 +596,24 @@ test("the extension never asks for the policy document or a migration", async ()
   await worker.message({ type: "flush-queue" });
   await worker.message({ type: "policy-status" });
   assert.ok(!types.has("policy_get") && !types.has("policy_migrate"), [...types].join());
+  // Only the Privacy settings page (#23), opened explicitly, reads the document; the worker never
+  // loads its module.
+  const READS_DOCUMENT = "options-state.js";
   for (const name of readdirSync(extensionDir).filter((file) => file.endsWith(".js"))) {
     const source = readFileSync(path.join(extensionDir, name), "utf8");
-    assert.ok(!source.includes("policy_get") && !source.includes("policy_migrate"), name);
+    assert.ok(!source.includes("policy_migrate"), name);
+    if (name !== READS_DOCUMENT) assert.ok(!source.includes("policy_get"), name);
+    const importers = name === "options-page.js" ? [] : [READS_DOCUMENT];
+    for (const imported of importers) assert.ok(!source.includes(`./${imported}`), `${name} imports ${imported}`);
   }
+  const workerGraph = new Set();
+  const walkImports = (name) => {
+    if (workerGraph.has(name)) return;
+    workerGraph.add(name);
+    for (const [, next] of readFileSync(path.join(extensionDir, name), "utf8").matchAll(/from "\.\/([\w.-]+\.js)"/g)) walkImports(next);
+  };
+  walkImports("service-worker.js");
+  assert.ok(workerGraph.has("policy-gate.js") && !workerGraph.has(READS_DOCUMENT), [...workerGraph].join());
 });
 
 // --- The host is the only judge -------------------------------------------------------------------

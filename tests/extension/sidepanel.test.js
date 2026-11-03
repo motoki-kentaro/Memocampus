@@ -121,6 +121,19 @@ test("a late vault status never takes focus or the tab away from a user who alre
   assert.equal($("#tab-settings").title, "設定（Vaultの確認が必要です）");
 });
 
+test("the settings tab opens the Privacy settings page and asks the host nothing for it", async () => {
+  const { $, host } = await loadSidePanel({ vaults: { A: pages("A", 1) }, active: "A" });
+  await settle(30);
+  const before = host.requests.length;
+  $("#tab-settings").dispatch("click");
+  await settle(20);
+  $("#open-privacy-settings").dispatch("click");
+  await settle(0);
+  assert.equal(host.optionsOpened, 1);
+  assert.ok(host.requests.slice(before).every((message) => !message.type.startsWith("policy_")), "no policy message from the side panel");
+  assert.equal($("#tab-settings").getAttribute("aria-selected"), "true", "the side panel stays as it was");
+});
+
 test("a late vault status still redirects with focus when the user has not acted", async () => {
   const { $ } = await loadSidePanel({ vaults: {}, active: null, statusDelay: 80 });
   await settle(120);
