@@ -1,7 +1,7 @@
 # Issue #23: Privacy settings page (options page)
 
-Status: Slice 1 (page, basic protection, draft) merged. Slice 2 (rule editing, validation, tests, apply) implemented, for review. Slice 3
-(migration, recovery) is open. CSV import and export is postponed.
+Status: Slice 1 (page, basic protection, draft) and Slice 2 (rule editing, validation, tests, apply) merged. Slice 3 (URL checker: adding and
+changing rules only after a host match) implemented, for review. Migration and recovery are open (see Handoff). CSV import and export is postponed.
 
 ## Slice 1: the page and the draft
 
@@ -100,6 +100,9 @@ page module.
 
 ### Two tables
 
+Slice 3 replaced the typed rows and ルール追加 below: rows are shown, not typed into, and a rule is added or changed through the URL checker only (see
+"Slice 3"). Deleting, the layer switch and the dirty comparison are unchanged.
+
 | Table | Draft | Columns |
 |---|---|---|
 | 保存しないグループ | `layers.neverSave` | 種類 (select: Pattern / Regex), ルール (text field), 操作 (削除), テスト |
@@ -137,6 +140,8 @@ Codes become Japanese text (`PROBLEM_TEXT`, `ERROR_TEXT` in `options-page.js`): 
 Errors are words and a mark, not colour alone. A check is all or nothing: no rule is dropped to make a draft pass.
 
 ### Rule test and URL test
+
+Slice 3 moved the rule test into the URL checker and renamed the URL test Policy全体テスト; the URL test below is otherwise unchanged.
 
 One field (URLテスト) holds the test URL. It is sent to the host for the test only: not stored, not queued, not logged, gone with the page.
 
@@ -236,15 +241,173 @@ conflict, one click, success with a failed read, lost answer applied, unknown an
 classification and the comparison); each relaxing change with its confirmation; hostile text and URLs in no attribute, message or log; the messages
 sent. The Slice 1 tests stay, adapted where Slice 2 changed the page (editable rows, 適用, Unsupported).
 
+## Slice 3: URL checker
+
+The person writes a rule and a URL, the host says whether the rule matches, and only a match lets the rule enter a group of the draft. This is a
+change of the page only: the host's matching (`policy_test_rule`, `policy::rule_matches`) and the policy engine are unchanged, and applying is
+Slice 2's 適用.
+
+### Page
+
+Sections, top to bottom: 適用中のプライバシー設定, 基本保護, **URLチェッカー**, 保存しないグループ, MCPサーバに見せないグループ, Policy全体テスト, 管理,
+and the apply bar. The checker, top to bottom:
+
+```text
+ルールの種類   ○ Pattern  ○ Regex            radio group (name="checker-kind"), Pattern first
+ルール [?]     [ text field ]                  input type="text"; ? = help
+チェック対象URL [ text field ]                  input type="text" (not type="url")
+[ マッチングを確認 ]                             also Enter in either field
+判定結果       未チェック / 確認中… / 一致しました / …   role="status", aria-live="polite"
+               この結果はルール単体の一致確認です。実際の保存判定は、適用中のPolicy全体で決まります。
+[ 保存しないグループに追加 ]  [ MCPサーバに見せないグループに追加 ]   or, while editing: [ 変更を反映 ] [ 編集をやめる ]
+```
+
+- **Fields as typed.** Neither field is trimmed, case-folded, normalized, percent-decoded or completed; what is on screen is what is sent and what is
+  added. A long URL scrolls inside its field. The fields live in the page's memory only (no storage, console or telemetry) and stay after an add, a
+  reload or a discard; closing the page loses them.
+- **Enter** in the rule or URL field checks, except while an input method composes (`isComposing`, or `keyCode` 229). With a field empty nothing is
+  sent and focus moves to the empty field. While a question is on its way, the same question is not sent again (Enter or click, any number of times).
+- **Help** (`?`): one sentence, "PatternはMemocampusのパターン照合です。RegexはRust Regex構文で判定します。先読み・後読みには対応していません。" It opens on
+  hover, on keyboard focus and on click (a click keeps it open; Escape closes it), with `aria-expanded`. No cheat sheet. The page links nowhere: its
+  no-external-URL test stays.
+
+### Host matching
+
+マッチングを確認 sends `policy_test_rule` with `{ kind, pattern }` and `url`, as typed, through `callHost` (request id and reply type checked). The page
+has no matching of its own: no `RegExp`, no URL parsing, no pattern logic (a test checks the page's modules for them). The answer becomes a state
+(`matchState`):
+
+| Host answer | 判定結果 | Groups |
+|---|---|---|
+| none yet | 未チェック | disabled |
+| on its way | 確認中… | disabled |
+| `matched: true` (a boolean) | 一致しました | enabled (unless already there) |
+| `matched: false` | 一致しませんでした | disabled |
+| `invalid_rule`, `invalid_pattern`, `invalid_regex`, `unsupported_regex`, `regex_limit` | ルールを確認してください。 + the reason | disabled |
+| `invalid_url` | URLを確認してください。 + the reason | disabled |
+| timeout, no host, a disconnect, a malformed or foreign reply, any other code | 判定できませんでした。 + the reason | disabled |
+
+The text names the result; colour and mark (✓ ✕ ▲) only repeat it. No message contains the rule or the URL.
+
+### Match gate
+
+保存しないグループに追加 / MCPサーバに見せないグループに追加 add the rule only if all of these hold, checked both when the buttons are drawn and again
+inside the click (so a script's `click()`, a double click or a stale button gets nothing):
+
+1. a ready version 2 policy, and no apply or read-back running;
+2. a known kind and a rule text that is not empty, and a URL that is not empty;
+3. the latest answer is a match (`matched: true`, reply checked by `callHost` and `testRule`);
+4. that answer is about exactly the kind, text and URL the checker holds now, in this reading of the policy;
+5. the target group does not have the rule (see Duplicates).
+
+Staleness: each check records the kind, text and URL it asked about and a token (`createLatestGate`). Any change of the kind, the text or the URL
+drops the answer at once, and an answer arriving after such a change, or after a later question, is dropped. A reload, a discard and an apply
+(refused or not) forget the check and any edit, and drop an answer still on its way, so a match found before one is not used after it. A change that reaches the fields without an event (a script) is still caught:
+the gate compares the answer with the fields every time.
+
+### Duplicates
+
+A rule is the pair `kind` and `pattern`, compared exactly (`sameRule`): case, spaces and Unicode form count; Pattern and Regex are different rules; two
+regexes that mean the same but are written differently are two rules. The check is per group: a rule of 保存しないグループ may be added to
+MCPサーバに見せないグループ too (the page then notes that 保存しないグループ wins, so a matching URL is not saved). A group that has the rule shows
+"登録済み" and its button stays disabled; the click checks again, and the draft model (`appendRule`) refuses a duplicate as well.
+
+### Adding: draft only
+
+An add appends the rule to `draft.policy.layers.neverSave.rules` or `…saveButNoMcp.rules`, nothing else: the active policy stays as it is, no
+`policy_validate` or `policy_apply` is sent, and the draft becomes dirty, so the rule is applied by Slice 2's 適用 (checked and guarded by the ETag).
+After an add the page scrolls to the new row (smoothly, or at once under `prefers-reduced-motion`), marks it for two seconds with an outline (no
+animation under reduced motion), moves focus to its チェッカーで編集, and says "下書きに追加しました"; the fields stay, so the same rule can be added to the
+other group. A disabled group takes the rule and says "このグループは無効です。ルールは追加されますが、適用後もグループを有効にするまで判定に使われません。";
+the page never turns a group on by itself.
+
+### Editing a rule
+
+The tables have no typed fields and no ルール追加: a row shows its kind and text and has チェッカーで編集 and 削除.
+
+1. チェッカーで編集 loads the row's kind and text into the checker and remembers the group, the row, the rule and the group's layout counter. The draft
+   does not change. The checker shows "編集中: 「…」のn行目のルール", hides the add buttons and shows 変更を反映 and 編集をやめる; the row is marked.
+2. The person changes the rule and the URL and checks. 変更を反映 is enabled only under the match gate above, and only if the rule differs from the
+   one being edited and no other rule of that group is the same.
+3. 変更を反映 replaces that rule only (`replaceRule`), and only if the row still holds the rule that was loaded and the group was not rearranged since
+   (a rule of it deleted, added or replaced, or the draft discarded or read again). Otherwise nothing changes and the page says that the rule changed
+   or was deleted; another row is never written. Other groups are untouched.
+4. 編集をやめる ends the edit; the draft stays as it was, the fields stay.
+
+An edited rule is "a rule of the active policy the draft no longer has", so applying asks first (Slice 2's confirmation). 削除 needs no match and still
+asks before applying. Categories and the group switch stay as they were: they change no rule.
+
+So there is no way to put a rule into the draft that the host has not just matched: not by typing in a table, not by an unchecked add, not by an
+edit. The active policy's own rules are shown, kept, deleted and applied again without any check.
+
+### Policy-wide test
+
+Policy全体テスト is Slice 2's URL test, with its own URL field: it sends the whole draft and the URL (`policy_test_url`) and shows 保存しません /
+Vaultに保存しますが、MCPには見せません / 保存対象です with "これは編集中の設定によるテスト結果です。現在適用されている設定とは異なる場合があります。" The
+checker answers whether one rule matches; this answers what the draft as a whole decides. The two fields and results are separate, and the text of each
+section says which is which. Neither stores, queues or logs a URL, and neither result is a permit: recording judges with the stored policy only.
+
+### Accessibility
+
+A fieldset with a legend groups the two radios (arrow keys move between them); both fields have labels; the result is a polite live region; the reason
+a button is disabled is in words under the result (`checker-gate`) and per group (`checker-…-note`), linked with `aria-describedby`. Focus: an empty
+field on a check without input, the rule field when an edit starts or is cancelled, the new or changed row after an add or a change, the group heading
+after the last rule is deleted. Typing in the checker draws the checker only, so no row is built again and focus stays. Dark theme and narrow windows
+use the page's colours and its 520 px rules; the group buttons wrap.
+
+### Measurements
+
+Synthetic policies only; a temporary `MEMOCAMPUS_APP_DIR` created by the harness with `policy_initialize`; Windows 11, Node 24, release host
+[verified, in this session].
+
+| Page work (fake DOM, 100 rules per group, median of 20) | ms |
+|---|---|
+| open and draw | 2.7 |
+| one keystroke in the checker's rule field | 0.010 |
+| one keystroke in the URL field, 30,000-character URL | 0.011 |
+| add a matched rule (table built again, scroll, focus) | 1.1 |
+| reflect an edit | 1.2 |
+| duplicate check (`hasRule`, 100 rules) | 0.003 |
+
+| Host round trip, including the host process start (median of 10) | ms |
+|---|---|
+| empty request (`unknown_type`): start alone | 22.1 |
+| `policy_test_rule`, regex and pattern | 20.8 |
+| `policy_test_rule`, 30,000-character URL | 25.4 |
+
+The real host, through the page: a regex and a pattern match; a non-match; look-around (`unsupported_regex`), `(` (`invalid_regex`), `a b` and
+` bank.example` (`invalid_pattern`), `not a url` and a 40,000-character URL (`invalid_url`) all refuse both groups; a duplicate shows 登録済み; an edit
+is reflected; Policy全体テスト says 保存しません; the policy files are byte for byte the same until 適用, which writes revision 2 with the rule.
+Chrome itself was not used.
+
+### Tests
+
+`tests/extension/options-checker.test.js` (new): the page's order and labels; fields sent as typed; Enter, composing, empty fields and repeated
+questions; a long URL; every host answer and its state; the host's answer shown whatever the rule looks like; stale answers after a rule, URL or kind
+change, out of order, after a reload, a discard or an apply; clicks without a current match (also after a change without an event); a second click and
+a duplicate that arrives meanwhile; nothing while applying; duplicate identity (case, spaces, kind, Unicode form, equivalent regexes) and per group;
+adding to each group (draft only, no apply, dirty, scroll, mark, focus), reduced motion, a disabled group; editing (loaded, nothing before a match, no
+match, unchanged, reflected in place, relaxation), a target deleted, moved or discarded or read again, a copy of another rule, cancelling, deleting
+without a match; the help; nothing logged, stored or put in an attribute; no matching code in the page's modules.
+
+`tests/extension/options-fixtures.js` (new) holds the fake host and the helpers both page test files use. The Slice 2 tests stay and now edit
+through the checker (`addRule`, `editRule`); their checks are unchanged, except that the per-row テスト (now the checker) is gone, an invalid draft is a
+matched rule the whole-draft check refuses (the empty rule cannot be added any more), and the lists of messages sent leave out the checker's
+`policy_test_rule`. The Slice 1 tests stay, adapted to three columns, read-only rows and the new labels.
+
 ## Handoff
 
-Slice 3:
+Slice 3 became the URL checker (above). Still open, for a later slice:
 
-1. Version 1: explicit `policy_migrate` with the ETag, then edit.
-2. Invalid or unsupported policy: a recovery message and its page. `policy_apply` cannot replace a policy that cannot be loaded (#25 Slice 6).
+1. Version 1: explicit `policy_migrate` with the ETag, then edit. Not implemented: a version 1 policy is still shown read-only, and the checker is
+   disabled for it.
+2. Invalid or unsupported policy: a recovery message and its page. `policy_apply` cannot replace a policy that cannot be loaded (#25 Slice 6). A
+   recovery that writes a new policy must go through the same gate: rules it brings come from a policy the host checked, not from typed text.
 3. Error cases end to end, Chrome dogfood.
 4. From Slice 2: a person with a conflict loses the draft on 再読み込み; a view of both, or carrying the draft over, is not built. The page does not
    notice a change made elsewhere until it reads again.
 5. Reordering rules, searching and filtering them.
+6. From Slice 3: the match gate checks one rule against one URL; it says nothing of the URLs the rule meets besides that one. A checked rule that
+   matches far more than intended is still added. The confirmation before applying compares rules, not what they match.
 
 Later: CSV import and export per group (`regex,pattern`, RFC 4180, UTF-8), not in Slices 1–3.

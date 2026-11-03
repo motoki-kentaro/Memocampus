@@ -88,10 +88,11 @@ function toggle($, key, checked) {
   input.dispatch("change");
 }
 
-// Each cell as text: an editable row gives its select and input values, and its buttons' labels.
+// Each cell as text: an editable row's actions give their buttons' labels (Slice 3: rows are shown,
+// not typed into; a rule changes through the URL checker).
 const cellText = (cell) => {
   const node = cell.children[0] ?? cell;
-  return node.tagName === "SELECT" || node.tagName === "INPUT" ? node.value : node.textContent;
+  return node.tagName === "DIV" ? node.children.map((button) => button.textContent).join("/") : node.textContent;
 };
 const ruleCells = ($, layer) => $(`${layer}-rules`).children.map((row) => row.children.map(cellText));
 
@@ -129,9 +130,13 @@ test("the page names the groups and buttons as decided", () => {
     "適用",
     "一致したURLはMemocampusに保存されません。",
     "一致したURLはVaultに保存されますが、MCPサーバ向けの公開対象から除外されます。",
-    "ルール追加",
+    "保存しないグループに追加",
+    "MCPサーバに見せないグループに追加",
     "このグループを有効にする",
-    "URLテスト",
+    "URLチェッカー",
+    "マッチングを確認",
+    "チェック対象URL",
+    "Policy全体テスト",
     "このURLを判定",
     "検証",
     "これは編集中の設定によるテスト結果です。現在適用されている設定とは異なる場合があります。",
@@ -141,7 +146,8 @@ test("the page names the groups and buttons as decided", () => {
   }
   assert.match(html, /<button id="apply" type="button" class="primary" disabled/);
   assert.doesNotMatch(html, /次の開発段階/, "nothing claims that applying comes later");
-  assert.equal(html.split('<th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th><th scope="col">テスト</th>').length, 3, "two tables, four columns");
+  assert.equal(html.split('<th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th></tr>').length, 3, "two tables, three columns");
+  assert.doesNotMatch(html, /ルール追加/, "no add button that skips the URL checker");
   for (const layer of ["never-save", "save-but-no-mcp"]) assert.match(html, new RegExp(`<label for="${layer}-enabled">`));
   for (const key of CATEGORY_KEYS) assert.match(html, new RegExp(`<label for="category-${key}">`), key);
 });
@@ -163,8 +169,8 @@ test("a ready version 2 policy is read, shown and becomes an editable draft", as
     assert.equal($(`category-${key}`).disabled, false);
   }
   assert.equal($("categories").hidden, false);
-  assert.deepEqual(ruleCells($, "never-save"), [["pattern", "*.bank.example", "削除", "テスト"], ["regex", "^https://a\\.example/", "削除", "テスト"]]);
-  assert.deepEqual(ruleCells($, "save-but-no-mcp"), [["pattern", "wiki.example/private/*", "削除", "テスト"]]);
+  assert.deepEqual(ruleCells($, "never-save"), [["Pattern", "*.bank.example", "チェッカーで編集/削除"], ["Regex", "^https://a\\.example/", "チェッカーで編集/削除"]]);
+  assert.deepEqual(ruleCells($, "save-but-no-mcp"), [["Pattern", "wiki.example/private/*", "チェッカーで編集/削除"]]);
   assert.equal($("never-save-empty").hidden, true);
   assert.match($("never-save-state").textContent, /有効です。ルール 2件/);
   assert.equal($("apply").disabled, true);
@@ -175,11 +181,13 @@ test("a version 1 policy is shown but not editable and asks for an explicit migr
   const { page, host, $ } = await openPage({ policy: v1({ neverSave: ["old.example", "*.old.example/x/*"] }) });
   assert.equal($("policy-version").textContent, "Schema 1 / Engine 1");
   assert.match($("policy-explanation").textContent, /旧形式（v1）.*明示的な移行（Migration）.*自動では移行しません/);
-  assert.deepEqual(ruleCells($, "never-save"), [["Pattern（v1）", "old.example", "編集不可", "—"], ["Pattern（v1）", "*.old.example/x/*", "編集不可", "—"]]);
+  assert.deepEqual(ruleCells($, "never-save"), [["Pattern（v1）", "old.example", "編集不可"], ["Pattern（v1）", "*.old.example/x/*", "編集不可"]]);
   for (const layer of ["never-save", "save-but-no-mcp"]) {
     assert.equal($(`${layer}-enabled`).disabled, true);
-    assert.equal($(`${layer}-add`).hidden, true);
+    assert.equal($(`${layer}-hint`).hidden, true);
+    assert.equal($(`checker-add-${layer}`).disabled, true);
   }
+  for (const id of ["checker-rule", "checker-url", "checker-run"]) assert.equal($(id).disabled, true, id);
   assert.equal($("validate").disabled, true);
   assert.equal($("apply").disabled, true);
   assert.match($("apply-reason").textContent, /旧形式（v1）/);

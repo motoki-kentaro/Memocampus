@@ -645,6 +645,9 @@ the URL a regex meets are the same as in a decision. **A match is no decision**:
 or a builtin (authentication, credentials) may refuse it. A version 2 rule only. A URL the production judge cannot read is `invalid_url`, which a policy
 refuses. A regex alone has the budget of a policy holding one regex; `policy_validate` checks it within the draft.
 
+Since #23 Slice 3 the Privacy settings page adds or changes a rule of its draft only after this answer is `matched: true` for exactly that rule and
+URL (the URL checker, `issue-023-privacy-policy-options.md`). That gate is the page's; the host's matching and its answers are unchanged.
+
 ### `policy_test_url`
 
 ```text

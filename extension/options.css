@@ -85,13 +85,22 @@ table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 th { color: var(--muted); font-size: 13px; font-weight: 600; }
 th:nth-child(1) { width: 8.5em; }
-th:nth-child(3) { width: 5.5em; }
-th:nth-child(4) { width: 10em; }
+th:nth-child(3) { width: 14em; }
 td code { font: 13px ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+.rule-text[data-invalid="true"] { outline: 2px solid var(--error-fg); outline-offset: 2px; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+/* The row being edited, and a row just added or changed: an outline, not a colour only. */
+tr[data-editing="true"] td { background: var(--surface); }
+tr[data-editing="true"] td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr[data-added="true"] td { animation: added 2s ease-out; box-shadow: inset 0 0 0 2px var(--ok-fg); }
+@keyframes added { from { background: var(--hover); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  tr[data-added="true"] td { animation: none; }
+}
 .empty { margin: 8px 0; color: var(--muted); }
 
-/* Rule editing: the inputs take the cell's width, so a long rule scrolls inside its field. */
-td select, td input[type="text"], .test-url-controls input {
+/* Text fields: a long rule or URL scrolls inside its field and is never shortened. */
+.checker-input, .test-url-controls input {
   width: 100%;
   min-height: 32px;
   padding: 4px 8px;
@@ -101,15 +110,41 @@ td select, td input[type="text"], .test-url-controls input {
   border: 1px solid var(--border);
   border-radius: 4px;
 }
-td input[type="text"] { font: 13px ui-monospace, Consolas, monospace; }
-td input[aria-invalid="true"] { border: 2px solid var(--error-fg); }
-td select:disabled, td input:disabled, .test-url-controls input:disabled { color: var(--muted); background: var(--surface); }
+.checker-input { display: block; font: 13px ui-monospace, Consolas, monospace; }
+.checker-input:disabled, .test-url-controls input:disabled { color: var(--muted); background: var(--surface); }
 td button { padding: 4px 10px; }
 .rule-error, .error-text { margin: 4px 0 0; color: var(--error-fg); font-size: 13px; font-weight: 600; white-space: pre-wrap; }
 .rule-error::before, .error-text::before { content: "✕ "; }
-.rule-test-result { display: block; margin-top: 4px; font-size: 12px; }
-.rule-test-result[data-result="match"] { color: var(--ok-fg); font-weight: 600; }
-.rule-test-result[data-result="error"] { color: var(--error-fg); }
+
+/* URL checker: kind, rule, URL, check, result, then where to add, top to bottom. */
+.checker-kind { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 8px 0 0; padding: 0; border: 0; }
+.checker-kind legend { padding: 0; margin-bottom: 4px; font-weight: 600; }
+.radio { display: inline-flex; align-items: center; gap: 6px; }
+.radio input { width: 16px; height: 16px; margin: 0; }
+.radio label { cursor: pointer; }
+.field-head { display: flex; align-items: center; gap: 6px; }
+.field-head .field-label { margin-right: 0; }
+.help-toggle { min-height: 24px; width: 24px; padding: 0; border-radius: 50%; font-weight: 600; line-height: 1; }
+.help-text { margin: 0 0 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 13px; }
+.help-text a { color: var(--accent); }
+.checker-input + .field-label { margin-top: 10px; }
+#checker-run { margin-top: 8px; }
+.checker-result-box { margin: 10px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.checker-result-box .field-label { margin: 0 0 2px; font-size: 13px; color: var(--muted); }
+.checker-result-box p { margin: 0; }
+.checker-result-box .note { margin-top: 4px; }
+/* The result is in the words; the mark and colour only repeat it. */
+.checker-result { font-weight: 600; white-space: pre-wrap; }
+.checker-result[data-result="match"] { color: var(--ok-fg); }
+.checker-result[data-result="match"]::before { content: "✓ "; }
+.checker-result[data-result="no_match"]::before { content: "✕ "; }
+.checker-result[data-result="rule_error"], .checker-result[data-result="url_error"], .checker-result[data-result="failed"] { color: var(--error-fg); }
+.checker-result[data-result="rule_error"]::before, .checker-result[data-result="url_error"]::before, .checker-result[data-result="failed"]::before { content: "▲ "; }
+.checker-targets { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 12px; margin-top: 4px; }
+.checker-target .note { margin-top: 4px; }
+.checker-edit { margin: 8px 0; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--surface); font-weight: 600; }
+#checker-edit-actions { margin-top: 4px; }
+#checker-status { margin: 8px 0 0; color: var(--ok-fg); }
 
 .layer-toggle { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; }
 .layer-toggle input { flex: none; width: 18px; height: 18px; margin: 0; }
@@ -189,9 +224,8 @@ button:disabled { color: var(--muted); background: transparent; border-color: va
 
 @media (max-width: 520px) {
   .facts dt { min-width: 0; }
-  th:nth-child(1) { width: 6.5em; }
-  th:nth-child(3) { width: 4.5em; }
-  th:nth-child(4) { width: 6em; }
+  th:nth-child(1) { width: 5.5em; }
+  th:nth-child(3) { width: 8em; }
   th, td { padding: 6px 4px; }
   td button { padding: 4px 6px; }
 }
