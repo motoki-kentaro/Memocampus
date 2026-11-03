@@ -86,8 +86,52 @@
         </ul>
       </section>
 
+      <section id="checker" class="card" aria-labelledby="checker-heading" aria-describedby="checker-description">
+        <h2 id="checker-heading" tabindex="-1">URLチェッカー</h2>
+        <p id="checker-description" class="explanation">ルールがURLに一致するかをNative Hostで確認し、一致したルールだけをグループに追加できます。追加は下書きへの追加で、「適用」を押すまで反映されません。</p>
+        <p id="checker-edit" class="checker-edit" hidden></p>
+        <fieldset class="checker-kind">
+          <legend>ルールの種類</legend>
+          <span class="radio"><input id="checker-kind-pattern" type="radio" name="checker-kind" value="pattern" checked disabled><label for="checker-kind-pattern">Pattern</label></span>
+          <span class="radio"><input id="checker-kind-regex" type="radio" name="checker-kind" value="regex" disabled><label for="checker-kind-regex">Regex</label></span>
+        </fieldset>
+        <div class="field-head">
+          <label for="checker-rule" class="field-label">ルール</label>
+          <button id="checker-help-toggle" type="button" class="help-toggle" aria-label="ルールの書き方について" aria-expanded="false" aria-controls="checker-help">?</button>
+        </div>
+        <p id="checker-help" class="help-text" role="note" hidden>PatternはMemocampusのパターン照合です。RegexはRust Regex構文で判定します。先読み・後読みには対応していません。</p>
+        <input id="checker-rule" type="text" class="checker-input" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="checker-gate" disabled>
+        <label for="checker-url" class="field-label">チェック対象URL</label>
+        <input id="checker-url" type="text" class="checker-input" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="checker-url-note" disabled>
+        <p id="checker-url-note" class="note">入力したルールとURLは確認のためにNative Hostへ送られますが、保存されません。この画面を閉じると消えます。</p>
+        <div class="actions">
+          <button id="checker-run" type="button" disabled>マッチングを確認</button>
+        </div>
+        <div class="checker-result-box">
+          <p class="field-label" id="checker-result-label">判定結果</p>
+          <p id="checker-result" class="checker-result" data-result="none" role="status" aria-live="polite" aria-labelledby="checker-result-label">未チェック</p>
+          <p id="checker-caveat" class="note">この結果はルール単体の一致確認です。実際の保存判定は、適用中のPolicy全体で決まります。</p>
+        </div>
+        <p id="checker-gate" class="note"></p>
+        <div id="checker-add" class="checker-targets">
+          <div class="checker-target">
+            <button id="checker-add-never-save" type="button" disabled aria-describedby="checker-gate checker-never-save-note">保存しないグループに追加</button>
+            <p id="checker-never-save-note" class="note" hidden></p>
+          </div>
+          <div class="checker-target">
+            <button id="checker-add-save-but-no-mcp" type="button" disabled aria-describedby="checker-gate checker-save-but-no-mcp-note">MCPサーバに見せないグループに追加</button>
+            <p id="checker-save-but-no-mcp-note" class="note" hidden></p>
+          </div>
+        </div>
+        <div id="checker-edit-actions" class="actions" hidden>
+          <button id="checker-apply-edit" type="button" class="primary" disabled aria-describedby="checker-gate">変更を反映</button>
+          <button id="checker-cancel-edit" type="button">編集をやめる</button>
+        </div>
+        <p id="checker-status" class="status" role="status" aria-live="polite" hidden></p>
+      </section>
+
       <section class="card" aria-labelledby="never-save-heading" aria-describedby="never-save-description">
-        <h2 id="never-save-heading">保存しないグループ</h2>
+        <h2 id="never-save-heading" tabindex="-1">保存しないグループ</h2>
         <p id="never-save-description" class="explanation">一致したURLはMemocampusに保存されません。</p>
         <div class="layer-toggle">
           <input id="never-save-enabled" type="checkbox" aria-describedby="never-save-warning">
@@ -99,18 +143,16 @@
         <div id="never-save-table" class="table-wrap">
           <table>
             <caption class="visually-hidden">保存しないグループのルール</caption>
-            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th><th scope="col">テスト</th></tr></thead>
+            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th></tr></thead>
             <tbody id="never-save-rules"></tbody>
           </table>
         </div>
         <p id="never-save-empty" class="empty" hidden></p>
-        <div class="actions">
-          <button id="never-save-add" type="button" hidden>ルール追加</button>
-        </div>
+        <p id="never-save-hint" class="note" hidden>新しいルールは、URLチェッカーで一致を確認してから追加します。内容の変更は「チェッカーで編集」から行います。</p>
       </section>
 
       <section class="card" aria-labelledby="save-but-no-mcp-heading" aria-describedby="save-but-no-mcp-description">
-        <h2 id="save-but-no-mcp-heading">MCPサーバに見せないグループ</h2>
+        <h2 id="save-but-no-mcp-heading" tabindex="-1">MCPサーバに見せないグループ</h2>
         <p id="save-but-no-mcp-description" class="explanation">一致したURLはVaultに保存されますが、MCPサーバ向けの公開対象から除外されます。</p>
         <div class="layer-toggle">
           <input id="save-but-no-mcp-enabled" type="checkbox" aria-describedby="save-but-no-mcp-warning">
@@ -122,25 +164,23 @@
         <div id="save-but-no-mcp-table" class="table-wrap">
           <table>
             <caption class="visually-hidden">MCPサーバに見せないグループのルール</caption>
-            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th><th scope="col">テスト</th></tr></thead>
+            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th></tr></thead>
             <tbody id="save-but-no-mcp-rules"></tbody>
           </table>
         </div>
         <p id="save-but-no-mcp-empty" class="empty" hidden></p>
-        <div class="actions">
-          <button id="save-but-no-mcp-add" type="button" hidden>ルール追加</button>
-        </div>
+        <p id="save-but-no-mcp-hint" class="note" hidden>新しいルールは、URLチェッカーで一致を確認してから追加します。内容の変更は「チェッカーで編集」から行います。</p>
       </section>
 
       <section class="card" aria-labelledby="url-test-heading" aria-describedby="url-test-description">
-        <h2 id="url-test-heading">URLテスト</h2>
-        <p id="url-test-description" class="explanation">URLを入力すると、編集中の設定でどう判定されるかをNative Hostで確認できます。各ルールの「テスト」も、ここに入力したURLを使います。</p>
+        <h2 id="url-test-heading">Policy全体テスト</h2>
+        <p id="url-test-description" class="explanation">URLが、編集中の下書き全体（基本保護と両グループ）でどう判定されるかをNative Hostで確認します。ルール1つの一致を確かめるURLチェッカーとは別の機能です。</p>
         <label for="test-url" class="field-label">テストするURL（http または https のURL）</label>
         <div class="test-url-controls">
           <input id="test-url" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-describedby="test-url-note" disabled>
           <button id="test-url-run" type="button" disabled>このURLを判定</button>
         </div>
-        <p id="test-url-note" class="note">入力したURLは判定のためにNative Hostへ送られますが、Memocampusには保存されません。この画面を閉じると消えます。ルールの「テスト」は、そのルール単体がURLに一致するかだけを示します。一致しなくても、ほかのルールや基本保護によって保存されないことがあります。</p>
+        <p id="test-url-note" class="note">入力したURLは判定のためにNative Hostへ送られますが、Memocampusには保存されません。この画面を閉じると消えます。判定結果は記録を許可するものではありません。</p>
         <div id="test-url-result" class="test-result" hidden>
           <p id="test-url-decision" class="decision" role="status" aria-live="polite"></p>
           <p id="test-url-caveat" class="note" hidden>これは編集中の設定によるテスト結果です。現在適用されている設定とは異なる場合があります。</p>

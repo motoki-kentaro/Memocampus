@@ -3,6 +3,10 @@
 // in place of the policy it was made from (its ETag). It never initializes, starts or migrates, and
 // never sends an apply twice by itself. Rule text and URLs are set as text or input values only and
 // never logged.
+//
+// A rule enters the draft, or changes in it, only through the URL checker, and only after the host
+// has matched exactly that rule against exactly that URL (see "URL checker" below). Rules are never
+// typed into the tables, and the page never matches a rule itself.
 
 import { describeErrorCode, createLatestGate } from "./search-client.js";
 import {
@@ -14,6 +18,8 @@ import {
   compareAfterApply,
   createDraft,
   loadActivePolicy,
+  matchState,
+  sameRule,
   testRule,
   testUrl,
   validateDraft,
@@ -121,7 +127,7 @@ export function startOptionsPage({ document, window, send }) {
   let validation = null;
   let validationNote = "";
   let applyNote = "";
-  /** Bumped by every change of the draft or the test URL: an older test answer is dropped. */
+  /** Bumped by every change of the draft or the test URL: an older URL test answer is dropped. */
   let testEpoch = 0;
   /** The draft and change the open privacy confirmation is about. */
   let confirming = null;
@@ -183,70 +189,54 @@ export function startOptionsPage({ document, window, send }) {
     return td;
   }
 
+  function ruleCode(rule) {
+    const code = document.createElement("code");
+    code.className = "rule-text";
+    code.textContent = typeof rule === "string" ? rule : rule.pattern;
+    return code;
+  }
+
   /** A rule of a draft that cannot be edited (version 1). */
   function readOnlyRow(rule) {
     const row = document.createElement("tr");
-    const code = document.createElement("code");
-    code.textContent = typeof rule === "string" ? rule : rule.pattern;
     const kind = typeof rule === "string" ? "Pattern（v1）" : KIND_LABEL[rule.kind];
-    row.append(textCell(kind), cell(code), textCell("編集不可", "muted"), textCell("—", "muted"));
+    row.append(textCell(kind), cell(ruleCode(rule)), textCell("編集不可", "muted"));
     return { row };
   }
 
-  /** A rule of an editable draft: kind, text, delete and test, edited in place. */
+  function button(text, className, label) {
+    const element = document.createElement("button");
+    element.type = "button";
+    element.className = className;
+    element.textContent = text;
+    element.setAttribute("aria-label", label);
+    return element;
+  }
+
+  /**
+   * A rule of an editable draft. Its kind and text are shown, not typed in: a change goes through
+   * the URL checker ("チェッカーで編集"). Deleting needs no match.
+   */
   function editableRow(layerKey, rule, index) {
     const id = `${LAYER_ID[layerKey]}-rule-${index}`;
     const place = `${LAYER_NAME[layerKey]} ${index + 1}行目`;
     const row = document.createElement("tr");
-
-    const kind = document.createElement("select");
-    kind.setAttribute("aria-label", `${place}の種類`);
-    for (const value of RULE_KINDS) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = KIND_LABEL[value];
-      option.selected = value === rule.kind;
-      kind.append(option);
-    }
-    kind.value = rule.kind;
-    // The text stays as written: switching the kind converts nothing.
-    kind.addEventListener("change", () => edited(draft?.setRule(layerKey, index, { kind: kind.value })));
-
-    const pattern = document.createElement("input");
-    pattern.type = "text";
-    pattern.id = `${id}-pattern`;
-    pattern.className = "rule-pattern";
-    pattern.autocomplete = "off";
-    pattern.spellcheck = false;
-    pattern.setAttribute("aria-label", `${place}のルール`);
-    pattern.setAttribute("aria-describedby", `${id}-error`);
-    pattern.value = rule.pattern;
-    pattern.addEventListener("input", () => edited(draft?.setRule(layerKey, index, { pattern: pattern.value })));
+    const code = ruleCode(rule);
+    code.id = `${id}-text`;
     const error = document.createElement("p");
     error.id = `${id}-error`;
     error.className = "rule-error";
     error.hidden = true;
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "rule-delete";
-    remove.textContent = "削除";
-    remove.setAttribute("aria-label", `${place}のルールを削除`);
+    const edit = button("チェッカーで編集", "rule-edit", `${place}のルールをURLチェッカーで編集`);
+    edit.setAttribute("aria-describedby", `${id}-error`);
+    edit.addEventListener("click", () => startEdit(layerKey, index));
+    const remove = button("削除", "rule-delete", `${place}のルールを削除`);
     remove.addEventListener("click", () => deleteRule(layerKey, index));
-
-    const test = document.createElement("button");
-    test.type = "button";
-    test.className = "rule-test";
-    test.textContent = "テスト";
-    test.setAttribute("aria-label", `${place}のルールをテスト`);
-    const result = document.createElement("span");
-    result.className = "rule-test-result";
-    result.setAttribute("aria-live", "polite");
-    const controls = { row, kind, pattern, error, remove, test, result, token: 0 };
-    test.addEventListener("click", () => void runRuleTest(layerKey, index, controls));
-
-    row.append(cell(kind), cell(pattern, error), cell(remove), cell(test, result));
-    return controls;
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    actions.append(edit, remove);
+    row.append(textCell(KIND_LABEL[rule.kind]), cell(code, error), cell(actions));
+    return { row, code, error, edit, remove };
   }
 
   /** Builds the rows of a layer again; only when rules are added, removed or replaced. */
@@ -274,14 +264,14 @@ export function startOptionsPage({ document, window, send }) {
     const empty = $(`${id}-empty`);
     empty.textContent = layer ? "ルールはありません。" : loading ? "" : NOT_SHOWN;
     empty.hidden = count > 0 || empty.textContent === "";
-    const add = $(`${id}-add`);
-    add.hidden = !draft?.editable;
-    add.disabled = !canEdit();
-    for (const controls of rows[key]) {
-      if (!controls.kind) continue;
-      for (const control of [controls.kind, controls.pattern, controls.remove]) control.disabled = !canEdit();
-      controls.test.disabled = locked();
-    }
+    $(`${id}-hint`).hidden = !draft?.editable;
+    rows[key].forEach((controls, index) => {
+      if (!controls.edit) return;
+      controls.edit.disabled = !canEdit();
+      controls.remove.disabled = !canEdit();
+      const target = editing !== null && editing.layer === key && editing.index === index && editTargetHolds();
+      controls.row.dataset.editing = target ? "true" : "";
+    });
   }
 
   /** Problems of the current validation on their rows and layers; the rest goes to the summary. */
@@ -296,8 +286,7 @@ export function startOptionsPage({ document, window, send }) {
         const own = problems.filter((problem) => problem.layer === key && problem.ruleIndex === index);
         controls.error.textContent = own.length ? `エラー: ${own.map((problem) => problemText(problem.code)).join(" ")}` : "";
         controls.error.hidden = own.length === 0;
-        if (own.length) controls.pattern.setAttribute("aria-invalid", "true");
-        else controls.pattern.removeAttribute("aria-invalid");
+        controls.code.dataset.invalid = own.length ? "true" : "";
       });
       for (const problem of problems.filter((problem) => problem.layer === key)) {
         if (problem.ruleIndex === null) layerMessages.push(problemText(problem.code));
@@ -360,6 +349,7 @@ export function startOptionsPage({ document, window, send }) {
     for (const key of LAYER_KEYS) renderLayer(key);
     renderValidation();
     renderTestControls();
+    renderChecker();
     renderFooter();
   }
 
@@ -368,13 +358,6 @@ export function startOptionsPage({ document, window, send }) {
   /** Drops every test answer shown or still to come: they were about another draft or URL. */
   function invalidateTests() {
     testEpoch += 1;
-    for (const key of LAYER_KEYS) {
-      for (const controls of rows[key]) {
-        if (!controls.result) continue;
-        controls.result.textContent = "";
-        controls.result.dataset.result = "";
-      }
-    }
     showUrlResult("", null);
   }
 
@@ -387,25 +370,6 @@ export function startOptionsPage({ document, window, send }) {
   }
 
   const testUrlValue = () => $("test-url").value.trim();
-
-  async function runRuleTest(layerKey, index, controls) {
-    if (!draft || locked()) return;
-    const url = testUrlValue();
-    if (url === "") {
-      controls.result.textContent = "URLテスト欄にURLを入力してください。";
-      controls.result.dataset.result = "";
-      return;
-    }
-    const rule = draft.layer(layerKey).rules[index];
-    const epoch = testEpoch;
-    const token = ++controls.token;
-    controls.result.textContent = "テスト中…";
-    controls.result.dataset.result = "";
-    const answer = await testRule({ send, rule, url });
-    if (epoch !== testEpoch || token !== controls.token) return;
-    controls.result.textContent = !answer.ok ? `テストできませんでした。${errorText(answer.code)}` : answer.matched ? "一致しました" : "一致しませんでした";
-    controls.result.dataset.result = !answer.ok ? "error" : answer.matched ? "match" : "no-match";
-  }
 
   async function runUrlTest() {
     if (!draft || locked()) return;
@@ -432,6 +396,7 @@ export function startOptionsPage({ document, window, send }) {
     if (!changed) return;
     notice = "";
     validationNote = "";
+    checkerNote = "";
     if (blocked === null) applyNote = "";
     hideRelaxConfirm(false);
     for (const key of rebuild) buildRules(key);
@@ -443,7 +408,232 @@ export function startOptionsPage({ document, window, send }) {
     if (!canEdit()) return;
     edited(draft.deleteRule(layerKey, index), [layerKey]);
     const next = rows[layerKey][index] ?? rows[layerKey][index - 1];
-    (next?.remove ?? $(`${LAYER_ID[layerKey]}-add`)).focus();
+    (next?.remove ?? $(`${LAYER_ID[layerKey]}-heading`)).focus();
+  }
+
+  // --- URL checker --------------------------------------------------------------------------------
+  //
+  // The person writes a rule and a URL; the host alone says whether the rule matches. A rule can be
+  // added to a group, or replace the rule being edited, only while the latest answer is a match about
+  // exactly the kind, text and URL the checker holds now. Every add and every change is checked again
+  // when it is made, not only when its button is drawn.
+
+  /** The rule being edited: `{ draft, layer, index, rule, layout }`, or null for a new rule. */
+  let editing = null;
+  /** The latest check, `{ token, kind, pattern, url, state, code }`; "checking" until answered. */
+  let check = null;
+  let checkerNote = "";
+  let helpPinned = false;
+  let highlighted = null;
+  const checkGate = createLatestGate();
+
+  const checkerKind = () => RULE_KINDS.find((kind) => $(`checker-kind-${kind}`).checked) ?? null;
+  /** What the checker holds, as typed: nothing is trimmed, converted or completed. */
+  const checkerInput = () => ({ kind: checkerKind(), pattern: $("checker-rule").value, url: $("checker-url").value });
+  const sameInput = (a, b) => a.kind === b.kind && a.pattern === b.pattern && a.url === b.url;
+  const complete = (input) => RULE_KINDS.includes(input.kind) && input.pattern !== "" && input.url !== "";
+  const canCheck = () => Boolean(draft?.editable) && !locked();
+  /** The latest check if it is about what the checker holds now. */
+  const currentCheck = () => (check && sameInput(check, checkerInput()) ? check : null);
+
+  /** The rule the host has just matched, exactly as the checker holds it; null otherwise. */
+  function currentMatch() {
+    const current = currentCheck();
+    if (!current || current.state !== "match" || !complete(current)) return null;
+    return { kind: current.kind, pattern: current.pattern };
+  }
+
+  function editTargetHolds() {
+    if (!editing || editing.draft !== draft || draft.layout(editing.layer) !== editing.layout) return false;
+    return sameRule(draft.rule(editing.layer, editing.index), editing.rule);
+  }
+
+  /** Why no rule can be added or changed now, or "" if the match allows it. */
+  function checkerReason() {
+    if (!draft) return "設定を読み込めていないため、ルールを追加できません。";
+    if (!draft.editable) return "旧形式（v1）の設定には、この画面からルールを追加できません。";
+    if (locked()) return "適用の処理中は、ルールを追加・変更できません。";
+    if (editing && !editTargetHolds()) return "編集対象のルールが変更または削除されたため、反映できません。「編集をやめる」を押してください。";
+    const current = currentCheck();
+    if (!current) {
+      return complete(checkerInput())
+        ? "「マッチングを確認」で一致を確認すると、追加できます。"
+        : "ルールとチェック対象URLを入力し、「マッチングを確認」で一致を確認してください。";
+    }
+    if (current.state === "checking") return "確認中です。";
+    if (current.state === "no_match") return "一致しなかったため、追加できません。ルールかURLを修正して、もう一度確認してください。";
+    if (current.state !== "match") return "判定できなかったため、追加できません。";
+    if (!editing) return "";
+    if (sameRule(current, editing.rule)) return "ルールが変更されていません。";
+    const others = draft.layer(editing.layer).rules.filter((_, index) => index !== editing.index);
+    if (others.some((other) => sameRule(other, current))) return "同じルールがこのグループにすでにあります（登録済み）。";
+    return "";
+  }
+
+  const canAddTo = (layerKey) => !editing && checkerReason() === "" && !draft.hasRule(layerKey, currentMatch());
+  const canReflect = () => editing !== null && checkerReason() === "";
+
+  const RESULT_TEXT = {
+    checking: () => "確認中…",
+    match: () => "一致しました",
+    no_match: () => "一致しませんでした",
+    rule_error: (code) => `ルールを確認してください。${problemText(code)}`,
+    url_error: (code) => `URLを確認してください。${errorText(code)}`,
+    failed: (code) => `判定できませんでした。${errorText(code ?? "invalid_response")}`,
+  };
+
+  function renderChecker() {
+    const enabled = canCheck();
+    for (const kind of RULE_KINDS) $(`checker-kind-${kind}`).disabled = !enabled;
+    for (const id of ["checker-rule", "checker-url", "checker-run"]) $(id).disabled = !enabled;
+
+    const current = currentCheck();
+    const result = $("checker-result");
+    result.textContent = current ? RESULT_TEXT[current.state](current.code) : "未チェック";
+    result.dataset.result = current ? current.state : "none";
+
+    const banner = $("checker-edit");
+    banner.hidden = editing === null;
+    banner.textContent = editing
+      ? `編集中: 「${LAYER_NAME[editing.layer]}」の${editing.index + 1}行目のルール。一致を確認してから「変更を反映」を押すと、下書きのこのルールだけが置き換わります。`
+      : "";
+    $("checker-add").hidden = editing !== null;
+    $("checker-edit-actions").hidden = editing === null;
+    $("checker-apply-edit").disabled = !canReflect();
+    $("checker-cancel-edit").disabled = locked();
+
+    const reason = checkerReason();
+    const match = currentMatch();
+    for (const key of LAYER_KEYS) {
+      $(`checker-add-${LAYER_ID[key]}`).disabled = !draft || !canAddTo(key);
+      const notes = [];
+      if (draft && match && draft.hasRule(key, match)) notes.push("登録済み: このグループに同じルールがあります。");
+      if (draft?.editable && !draft.layerEnabled(key)) {
+        notes.push("このグループは無効です。ルールは追加されますが、適用後もグループを有効にするまで判定に使われません。");
+      }
+      if (key === "saveButNoMcp" && draft && match && draft.hasRule("neverSave", match)) {
+        notes.push("同じルールが「保存しないグループ」にもあります。保存しないグループの判定が優先されるため、一致したURLは保存されません。");
+      }
+      const note = $(`checker-${LAYER_ID[key]}-note`);
+      note.textContent = notes.join(" ");
+      note.hidden = notes.length === 0;
+    }
+    $("checker-gate").textContent =
+      reason || (editing ? "一致しました。「変更を反映」で下書きのルールを置き換えられます。" : "一致しました。追加先のグループを選んでください。");
+    const status = $("checker-status");
+    status.textContent = checkerNote;
+    status.hidden = checkerNote === "";
+  }
+
+  /** A change of the kind, rule or URL: the answer about what was there before no longer counts. */
+  function checkerChanged() {
+    if (check && !sameInput(check, checkerInput())) {
+      check = null;
+      checkGate.next();
+    }
+    checkerNote = "";
+    renderChecker();
+  }
+
+  /** Forgets every check and edit: after a reload, a discard or an apply, a match is found again. */
+  function resetChecker() {
+    check = null;
+    editing = null;
+    checkGate.next();
+  }
+
+  async function runCheck() {
+    if (!canCheck()) return;
+    const input = checkerInput();
+    if (!complete(input)) {
+      check = null;
+      checkGate.next();
+      checkerNote = "";
+      renderChecker();
+      $(input.pattern === "" ? "checker-rule" : "checker-url").focus();
+      return;
+    }
+    // The question already on its way is not sent again.
+    if (currentCheck()?.state === "checking") return;
+    const token = checkGate.next();
+    check = { token, ...input, state: "checking", code: null };
+    checkerNote = "";
+    renderChecker();
+    const answer = await testRule({ send, rule: { kind: input.kind, pattern: input.pattern }, url: input.url });
+    if (!checkGate.isCurrent(token) || check?.token !== token) return;
+    check = { ...check, state: matchState(answer), code: answer.ok ? null : answer.code };
+    renderChecker();
+  }
+
+  /** Scrolls to a rule just added or changed, marks it for a moment and moves focus to it. */
+  function showRow(layerKey, index) {
+    const controls = rows[layerKey][index];
+    if (!controls) return;
+    if (highlighted) highlighted.dataset.added = "";
+    highlighted = controls.row;
+    const row = controls.row;
+    row.dataset.added = "true";
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+    row.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+    controls.edit.focus({ preventScroll: true });
+    const timer = setTimeout(() => {
+      if (row.dataset.added === "true") row.dataset.added = "";
+    }, 2000);
+    timer?.unref?.();
+  }
+
+  function addTo(layerKey) {
+    // Checked again here: a button drawn enabled earlier, or a click from a script, is not enough.
+    const match = currentMatch();
+    if (!match || !canAddTo(layerKey)) return renderChecker();
+    const index = draft.appendRule(layerKey, match);
+    if (index < 0) return renderChecker();
+    edited(true, [layerKey]);
+    checkerNote = `「${LAYER_NAME[layerKey]}」の下書きに追加しました（${index + 1}行目）。「適用」を押すまで反映されません。`;
+    renderChecker();
+    showRow(layerKey, index);
+  }
+
+  function startEdit(layerKey, index) {
+    if (!canEdit()) return;
+    const rule = draft.rule(layerKey, index);
+    if (!rule) return;
+    // Nothing in the draft changes until a match is reflected.
+    editing = { draft, layer: layerKey, index, rule, layout: draft.layout(layerKey) };
+    for (const kind of RULE_KINDS) $(`checker-kind-${kind}`).checked = kind === rule.kind;
+    $("checker-rule").value = rule.pattern;
+    check = null;
+    checkGate.next();
+    checkerNote = "";
+    render();
+    $("checker").scrollIntoView({ block: "start" });
+    $("checker-rule").focus({ preventScroll: true });
+  }
+
+  function reflectEdit() {
+    const match = currentMatch();
+    if (!match || !canReflect()) return renderChecker();
+    const { layer, index, rule, layout } = editing;
+    const outcome = draft.replaceRule(layer, index, { expected: rule, next: match, layoutSeen: layout });
+    if (outcome !== "replaced") return renderChecker();
+    editing = null;
+    edited(true, [layer]);
+    checkerNote = `「${LAYER_NAME[layer]}」の${index + 1}行目のルールを下書きで変更しました。「適用」を押すまで反映されません。`;
+    renderChecker();
+    showRow(layer, index);
+  }
+
+  function cancelEdit() {
+    if (!editing || locked()) return;
+    editing = null;
+    checkerNote = "編集をやめました。下書きは変更していません。";
+    render();
+    $("checker-rule").focus();
+  }
+
+  function showHelp(shown) {
+    $("checker-help").hidden = !shown;
+    $("checker-help-toggle").setAttribute("aria-expanded", String(shown));
   }
 
   // --- Validating and applying --------------------------------------------------------------------
@@ -481,6 +671,7 @@ export function startOptionsPage({ document, window, send }) {
     blocked = null;
     validation = null;
     validationNote = "";
+    resetChecker();
     for (const key of LAYER_KEYS) buildRules(key);
     invalidateTests();
     finish(note);
@@ -493,6 +684,7 @@ export function startOptionsPage({ document, window, send }) {
     const submitted = draft.policy;
     const expectedEtag = view.active.etag;
     busy = "applying";
+    resetChecker();
     validateGate.next();
     validationNote = "";
     applyNote = "下書きを検証しています…";
@@ -627,6 +819,8 @@ export function startOptionsPage({ document, window, send }) {
     $("reload-confirm").hidden = true;
     confirming = null;
     $("relax-confirm").hidden = true;
+    resetChecker();
+    checkerNote = "";
     for (const key of LAYER_KEYS) buildRules(key);
     invalidateTests();
     render();
@@ -657,24 +851,44 @@ export function startOptionsPage({ document, window, send }) {
       if (!canEdit()) return render();
       edited(draft.setLayerEnabled(key, event.target.checked));
     });
-    $(`${LAYER_ID[key]}-add`).addEventListener("click", () => {
-      if (!canEdit()) return;
-      const index = draft.addRule(key);
-      edited(index >= 0, [key]);
-      rows[key][index]?.pattern.focus();
-    });
+    $(`checker-add-${LAYER_ID[key]}`).addEventListener("click", () => addTo(key));
   }
-  $("test-url").addEventListener("input", () => invalidateTests());
-  $("test-url").addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
+  // Enter checks, except while an input method is composing.
+  const onEnter = (run) => (event) => {
+    if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
-    void runUrlTest();
+    void run();
+  };
+  for (const kind of RULE_KINDS) $(`checker-kind-${kind}`).addEventListener("change", checkerChanged);
+  for (const id of ["checker-rule", "checker-url"]) {
+    $(id).addEventListener("input", checkerChanged);
+    $(id).addEventListener("keydown", onEnter(runCheck));
+  }
+  $("checker-run").addEventListener("click", () => void runCheck());
+  $("checker-apply-edit").addEventListener("click", reflectEdit);
+  $("checker-cancel-edit").addEventListener("click", cancelEdit);
+  const help = $("checker-help-toggle");
+  help.addEventListener("click", () => {
+    helpPinned = !helpPinned;
+    showHelp(helpPinned);
   });
+  help.addEventListener("focus", () => showHelp(true));
+  help.addEventListener("blur", () => showHelp(helpPinned));
+  help.addEventListener("mouseenter", () => showHelp(true));
+  help.addEventListener("mouseleave", () => showHelp(helpPinned || document.activeElement === help));
+  help.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    helpPinned = false;
+    showHelp(false);
+  });
+  $("test-url").addEventListener("input", () => invalidateTests());
+  $("test-url").addEventListener("keydown", onEnter(runUrlTest));
   $("test-url-run").addEventListener("click", () => void runUrlTest());
   $("validate").addEventListener("click", () => void runValidation());
   $("discard").addEventListener("click", () => {
     if (!draft?.dirty() || locked()) return;
     draft.discard();
+    resetChecker();
     edited(true, LAYER_KEYS);
     notice = "変更を破棄しました。";
     render();
@@ -716,6 +930,8 @@ export function startOptionsPage({ document, window, send }) {
     event.returnValue = "";
   });
 
+  // The checker starts on Pattern, as options.html marks it.
+  if (!checkerKind()) $("checker-kind-pattern").checked = true;
   const ready = load();
   return {
     ready,

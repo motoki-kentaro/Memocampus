@@ -99,7 +99,9 @@ class FakeElement {
   focus() {
     this.ownerDocument.activeElement = this;
   }
-  scrollIntoView() {}
+  scrollIntoView(options) {
+    this.ownerDocument.scrolledTo = { element: this, options };
+  }
 }
 
 export function createDocument() {

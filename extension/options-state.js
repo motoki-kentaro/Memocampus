@@ -106,6 +106,14 @@ export function sameValue(a, b) {
   return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameValue(a[key], b[key]));
 }
 
+/**
+ * The identity of a rule: its kind and its text, compared exactly (case, spaces and Unicode form
+ * all count). Two rules that mean the same but are written differently are two rules.
+ */
+export const sameRule = (a, b) => isObject(a) && isObject(b) && a.kind === b.kind && a.pattern === b.pattern;
+/** A version 2 rule the person may add: a known kind and a text that is not empty. */
+const isNewRule = (rule) => isRule(rule, 2) && rule.pattern !== "";
+
 const ruleKey = (rule) => (typeof rule === "string" ? `pattern\n${rule}` : `${rule.kind}\n${rule.pattern}`);
 
 /**
@@ -145,6 +153,7 @@ export function relaxations(active, draft) {
 export function createDraft(active, { editable }) {
   let draft = structuredClone(active.policy);
   let version = 0;
+  const layout = { neverSave: 0, saveButNoMcp: 0 };
   const changed = () => {
     version += 1;
     return true;
@@ -163,6 +172,11 @@ export function createDraft(active, { editable }) {
     category: (key) => draft.categories[key],
     layer: (key) => structuredClone(draft.layers[key]),
     layerEnabled: (key) => draft.layers[key].enabled,
+    /** A copy of one rule of an editable draft, or null if there is none at `index`. */
+    rule(layerKey, index) {
+      const rules = rulesOf(layerKey);
+      return editable && rules && isIndex(rules, index) ? { kind: rules[index].kind, pattern: rules[index].pattern } : null;
+    },
     /** Each change below changes the draft only; false (or -1) if this draft cannot take it. */
     setCategory(key, value) {
       if (!editable || !CATEGORY_KEYS.includes(key) || typeof value !== "boolean") return false;
@@ -175,30 +189,45 @@ export function createDraft(active, { editable }) {
       draft.layers[layerKey].enabled = enabled;
       return changed();
     },
-    /** Adds `{ kind: "pattern", pattern: "" }` at the end of the layer; returns its index. */
-    addRule(layerKey) {
+    /**
+     * Adds `rule` at the end of the layer; returns its index, or -1 if the draft cannot take it: not a
+     * rule, an empty text, or a rule the layer already has (the same kind and the very same text).
+     * The page adds only a rule the host has just matched (see options-page.js).
+     */
+    appendRule(layerKey, rule) {
       const rules = rulesOf(layerKey);
-      if (!editable || !rules) return -1;
-      rules.push({ kind: "pattern", pattern: "" });
+      if (!editable || !rules || !isNewRule(rule) || rules.some((other) => sameRule(other, rule))) return -1;
+      rules.push({ kind: rule.kind, pattern: rule.pattern });
+      layout[layerKey] += 1;
       changed();
       return rules.length - 1;
     },
-    /** Sets the kind or the text of one rule. The text is kept as written, whatever the kind. */
-    setRule(layerKey, index, { kind, pattern }) {
+    /**
+     * Replaces the rule at `index` with `next`, only if that place still holds `expected` and the
+     * layer has not been rearranged since `layoutSeen` (see `layout`). Resolves to "replaced",
+     * "unchanged" (`next` is `expected`), "missing" (the place holds another rule now), "duplicate"
+     * (another rule of the layer is `next`) or "refused".
+     */
+    replaceRule(layerKey, index, { expected, next, layoutSeen }) {
       const rules = rulesOf(layerKey);
-      if (!editable || !rules || !isIndex(rules, index)) return false;
-      if (kind !== undefined && !RULE_KINDS.includes(kind)) return false;
-      if (pattern !== undefined && typeof pattern !== "string") return false;
-      const rule = rules[index];
-      if ((kind ?? rule.kind) === rule.kind && (pattern ?? rule.pattern) === rule.pattern) return true;
-      if (kind !== undefined) rule.kind = kind;
-      if (pattern !== undefined) rule.pattern = pattern;
-      return changed();
+      if (!editable || !rules || !isNewRule(next) || !isRule(expected, 2)) return "refused";
+      if (layout[layerKey] !== layoutSeen || !isIndex(rules, index) || !sameRule(rules[index], expected)) return "missing";
+      if (sameRule(next, expected)) return "unchanged";
+      if (rules.some((other, at) => at !== index && sameRule(other, next))) return "duplicate";
+      rules[index] = { kind: next.kind, pattern: next.pattern };
+      layout[layerKey] += 1;
+      changed();
+      return "replaced";
     },
+    /** Whether the layer has this rule: the same kind and the very same text. */
+    hasRule: (layerKey, rule) => Boolean(rulesOf(layerKey)?.some((other) => sameRule(other, rule))),
+    /** Counts the changes of which rule is where in a layer: an edit started before one is stale. */
+    layout: (layerKey) => layout[layerKey],
     deleteRule(layerKey, index) {
       const rules = rulesOf(layerKey);
       if (!editable || !rules || !isIndex(rules, index)) return false;
       rules.splice(index, 1);
+      layout[layerKey] += 1;
       return changed();
     },
     dirty: () => !sameValue(draft, active.policy),
@@ -207,6 +236,7 @@ export function createDraft(active, { editable }) {
     relaxations: () => relaxations(active.policy, draft),
     discard() {
       draft = structuredClone(active.policy);
+      for (const key of LAYER_KEYS) layout[key] += 1;
       changed();
     },
   };
@@ -236,6 +266,22 @@ export async function validateDraft({ send, policy }) {
   } catch (error) {
     return refused(error);
   }
+}
+
+// What `policy_test_rule` may refuse, by what the person should look at.
+const RULE_CODES = new Set(["invalid_rule", "invalid_pattern", "invalid_regex", "unsupported_regex", "regex_limit"]);
+const URL_CODES = new Set(["invalid_url"]);
+
+/**
+ * The state of a URL checker answer: "match", "no_match", "rule_error" (check the rule),
+ * "url_error" (check the URL) or "failed" (no usable answer). Only "match" lets a rule be added.
+ */
+export function matchState(answer) {
+  if (answer?.ok === true && answer.matched === true) return "match";
+  if (answer?.ok === true && answer.matched === false) return "no_match";
+  if (RULE_CODES.has(answer?.code)) return "rule_error";
+  if (URL_CODES.has(answer?.code)) return "url_error";
+  return "failed";
 }
 
 /** Whether one rule alone matches `url`, as the host judges it. A match, never a decision. */
