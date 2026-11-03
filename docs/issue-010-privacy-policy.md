@@ -115,6 +115,9 @@ Both implementations use URL parsers (Rust `url`, JavaScript WHATWG `URL`):
   parser writes it (lower-case host, punycode, percent-encoding kept), with their own limits; an unusable
   regex refuses the whole policy, also in a disabled layer. Only the Rust host evaluates them, never
   JavaScript (`issue-025-policy-engine.md`, Slice 5).
+- Since #25 Slice 6 a settings page validates, tests and applies a whole draft through the host
+  (`policy_validate`, `policy_test_rule`, `policy_test_url`, `policy_apply` with the ETag read), and a
+  new install starts with `policy_start`. Only applying and starting write; testing permits nothing.
 - Percent-decode path once as strict UTF-8, including encoded slash; collapse dot segments.
   Invalid escapes/UTF-8, decoded controls/backslash/percent (including double encodings) are
   denied. This intentionally errs on the side of blocking ambiguous URLs. Query/fragment

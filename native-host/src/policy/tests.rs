@@ -1435,3 +1435,117 @@ fn the_regexes_of_a_policy_share_one_budget() {
     let budget = RegexBudget::of(&Policy::default());
     assert_eq!((budget.size, budget.dfa), (1 << 20, 256 << 10));
 }
+
+// --- Slice 6: problems of a draft, one rule tested alone ---------------------------------------
+
+#[test]
+fn problems_name_each_rule_that_fails_and_nothing_for_a_policy_that_compiles() {
+    assert_eq!(Policy::default().problems(), []);
+    let mut draft = v2_typed(&["ok.test", "ok2.test"], &["ok3.test"]);
+    draft.layers.never_save.rules[1] = regex("(?<=a)b");
+    draft.layers.save_but_no_mcp.rules.push("bad/*/x".into());
+    draft.layers.save_but_no_mcp.rules.push(regex("(a"));
+    draft.layers.save_but_no_mcp.rules.push(regex(r"\w{100}"));
+    draft
+        .layers
+        .save_but_no_mcp
+        .rules
+        .push(RuleSpec::Text("v1.test".into()));
+    draft.layers.save_but_no_mcp.enabled = false;
+    let at = |layer, index, code| Problem {
+        layer: Some(layer),
+        rule_index: Some(index),
+        code,
+    };
+    assert_eq!(
+        draft.problems(),
+        [
+            at("neverSave", 1, "unsupported_regex"),
+            at("saveButNoMcp", 1, "invalid_pattern"),
+            at("saveButNoMcp", 2, "invalid_regex"),
+            at("saveButNoMcp", 3, "regex_limit"),
+            at("saveButNoMcp", 4, "invalid_rule_form"),
+        ]
+    );
+    // What compiling says and what the problems say agree.
+    assert!(draft.validate().is_err());
+    let header = Policy {
+        schema_version: 9,
+        revision: 0,
+        ..Policy::default()
+    };
+    assert_eq!(
+        header.problems(),
+        [
+            Problem::of("invalid_version"),
+            Problem::of("invalid_revision")
+        ]
+    );
+    let mut too_many = Policy::default();
+    too_many.layers.never_save.rules = vec!["a.test".into(); 1001];
+    assert_eq!(
+        too_many.problems(),
+        [Problem {
+            layer: Some("neverSave"),
+            ..Problem::of("too_many_rules")
+        }]
+    );
+    // The budget of each regex depends on how many a policy has, as when compiling.
+    let mut crowded = with_regexes(&[], &[]);
+    crowded.layers.never_save.rules = (0..127).map(|n| regex(&format!("r{n}"))).collect();
+    crowded.layers.never_save.rules.push(regex(r"\w{20}"));
+    assert_eq!(
+        crowded.problems(),
+        [Problem {
+            layer: Some("neverSave"),
+            rule_index: Some(127),
+            code: "regex_limit"
+        }]
+    );
+    assert!(with_regexes(&[r"\w{20}"], &[]).problems().is_empty());
+}
+
+#[test]
+fn a_rule_that_matches_alone_refuses_in_any_policy_that_holds_it() {
+    let urls = urls();
+    let some: Vec<String> = urls.iter().step_by(17).cloned().collect();
+    let rules: Vec<RuleSpec> = RULES
+        .iter()
+        .map(|&rule| rule.into())
+        .chain(
+            [
+                "example.com/private",
+                "example.com/*.png",
+                "*.example.com/login",
+            ]
+            .map(RuleSpec::from),
+        )
+        .chain(["private", r"(?i)^https://[^/]*example\.com/", "token="].map(regex))
+        .filter(|rule| rule_matches(rule, "https://example.com/").is_ok())
+        .collect();
+    assert!(rules.len() > 15);
+    for rule in &rules {
+        let mut holding = v2(&RULES[..3], &RULES[3..6]);
+        holding.layers.never_save.rules.push(rule.clone());
+        let compiled = CompiledPolicy::compile(&holding).unwrap();
+        for url in &some {
+            match rule_matches(rule, url) {
+                Ok(true) => assert_eq!(
+                    compiled.evaluate(url),
+                    Decision::NeverSave,
+                    "{rule:?} {url}"
+                ),
+                Ok(false) => {}
+                Err(error) => {
+                    assert_eq!(error, Error::InvalidUrl);
+                    assert_eq!(compiled.evaluate(url), Decision::NeverSave, "{url}");
+                }
+            }
+        }
+    }
+    // A string is a version 1 rule, which this test does not take.
+    assert_eq!(
+        rule_matches(&RuleSpec::Text("a.test".into()), "https://a.test/"),
+        Err(Error::InvalidPolicy)
+    );
+}

@@ -239,6 +239,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some("policy_evaluate_batch") => {
                 write_message(&gate.evaluate_batch(&value))?;
             }
+            Some("policy_validate") => write_message(&gate.validate(&value))?,
+            Some("policy_test_rule") => write_message(&gate.test_rule(&value))?,
+            Some("policy_test_url") => write_message(&gate.test_url(&value))?,
+            Some("policy_preset") => write_message(&gate.preset(&value))?,
+            Some("policy_apply") => write_message(&gate.apply(&value))?,
+            Some("policy_start") => {
+                // Opening the active vault creates nothing; without one, recording cannot start.
+                let vault = session.read(|_| ()).map_err(vault::VaultError::code);
+                write_message(&gate.start(&value, vault))?;
+            }
             // `visit`, `tab_snapshot`, and anything unrecognised.
             _ => {
                 let event_id = value

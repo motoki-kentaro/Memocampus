@@ -43,7 +43,7 @@ mod visible_images;
 mod visible_set;
 
 use memocampus_native_host::policy::CompiledPolicy;
-use memocampus_native_host::policy_store::{PolicyStore, Snapshot, StoreError};
+use memocampus_native_host::policy_store::{PolicyStore, StoreError};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use visible_images::VisibleImages;
@@ -306,16 +306,16 @@ impl VisibleStore {
         query: impl Fn(&Set) -> Result<T, VisibleError>,
     ) -> Result<T, VisibleError> {
         for _ in 0..POLICY_CHANGE_ATTEMPTS {
-            let policy = self.load_policy()?;
-            // Once for this attempt. A policy that does not compile gives no decision at all.
-            let compiled = CompiledPolicy::compile(&policy.policy)
-                .map_err(|_| VisibleError::PolicyUnavailable)?;
+            // Compiled once for this attempt, as it was loaded. A policy that does not compile
+            // gives no decision at all.
+            let policy = self.read_policy(PolicyStore::load)?;
             stage(Stage::PolicyLoaded);
             let rows = read(&self.vault, stage)?;
             stage(Stage::VaultClosed);
-            let set = build(rows, &compiled, &self.id_key)?;
+            let set = build(rows, &policy.compiled, &self.id_key)?;
             stage(Stage::SetBuilt);
-            if self.load_policy()?.etag == policy.etag {
+            // The same bytes as loaded, so the same valid policy: no need to compile it again.
+            if self.read_policy(PolicyStore::current_etag)? == policy.etag {
                 return query(&set);
             }
         }
@@ -323,10 +323,13 @@ impl VisibleStore {
     }
 
     /// Uninitialized, damaged, unsupported and locked policies all mean that no decision exists.
-    fn load_policy(&self) -> Result<Snapshot, VisibleError> {
+    fn read_policy<T>(
+        &self,
+        read: fn(&PolicyStore) -> Result<T, StoreError>,
+    ) -> Result<T, VisibleError> {
         let mut attempt = 0;
         loop {
-            match self.policy.load() {
+            match read(&self.policy) {
                 Ok(snapshot) => return Ok(snapshot),
                 Err(StoreError::Busy) if attempt < POLICY_BUSY_RETRIES => {
                     attempt += 1;
