@@ -89,34 +89,62 @@
       <section class="card" aria-labelledby="never-save-heading" aria-describedby="never-save-description">
         <h2 id="never-save-heading">保存しないグループ</h2>
         <p id="never-save-description" class="explanation">一致したURLはMemocampusに保存されません。</p>
+        <div class="layer-toggle">
+          <input id="never-save-enabled" type="checkbox" aria-describedby="never-save-warning">
+          <label for="never-save-enabled">このグループを有効にする</label>
+        </div>
+        <p id="never-save-warning" class="warning" hidden>無効にすると、このグループのルールと基本保護（認証関連・認証情報）が判定に使われなくなり、これらに一致するURLもMemocampusに保存されるようになります。ルールは削除されません。</p>
         <p id="never-save-state" class="note"></p>
+        <p id="never-save-error" class="error-text" hidden></p>
         <div id="never-save-table" class="table-wrap">
           <table>
             <caption class="visually-hidden">保存しないグループのルール</caption>
-            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th></tr></thead>
+            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th><th scope="col">テスト</th></tr></thead>
             <tbody id="never-save-rules"></tbody>
           </table>
         </div>
         <p id="never-save-empty" class="empty" hidden></p>
+        <div class="actions">
+          <button id="never-save-add" type="button" hidden>ルール追加</button>
+        </div>
       </section>
 
       <section class="card" aria-labelledby="save-but-no-mcp-heading" aria-describedby="save-but-no-mcp-description">
         <h2 id="save-but-no-mcp-heading">MCPサーバに見せないグループ</h2>
         <p id="save-but-no-mcp-description" class="explanation">一致したURLはVaultに保存されますが、MCPサーバ向けの公開対象から除外されます。</p>
+        <div class="layer-toggle">
+          <input id="save-but-no-mcp-enabled" type="checkbox" aria-describedby="save-but-no-mcp-warning">
+          <label for="save-but-no-mcp-enabled">このグループを有効にする</label>
+        </div>
+        <p id="save-but-no-mcp-warning" class="warning" hidden>無効にすると、このグループのルールと基本保護（行政サイト・Webメール・AIチャット）が判定に使われなくなり、これらに一致するURLもMCPサーバ向けの公開対象になります。ルールは削除されません。</p>
         <p id="save-but-no-mcp-state" class="note"></p>
+        <p id="save-but-no-mcp-error" class="error-text" hidden></p>
         <div id="save-but-no-mcp-table" class="table-wrap">
           <table>
             <caption class="visually-hidden">MCPサーバに見せないグループのルール</caption>
-            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th></tr></thead>
+            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th><th scope="col">テスト</th></tr></thead>
             <tbody id="save-but-no-mcp-rules"></tbody>
           </table>
         </div>
         <p id="save-but-no-mcp-empty" class="empty" hidden></p>
+        <div class="actions">
+          <button id="save-but-no-mcp-add" type="button" hidden>ルール追加</button>
+        </div>
       </section>
 
-      <section class="card planned" aria-labelledby="url-test-heading">
+      <section class="card" aria-labelledby="url-test-heading" aria-describedby="url-test-description">
         <h2 id="url-test-heading">URLテスト</h2>
-        <p class="note">今後実装予定です。URLがどのグループに当たるかを、Native Hostの判定で確認できるようになります。</p>
+        <p id="url-test-description" class="explanation">URLを入力すると、編集中の設定でどう判定されるかをNative Hostで確認できます。各ルールの「テスト」も、ここに入力したURLを使います。</p>
+        <label for="test-url" class="field-label">テストするURL（http または https のURL）</label>
+        <div class="test-url-controls">
+          <input id="test-url" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-describedby="test-url-note" disabled>
+          <button id="test-url-run" type="button" disabled>このURLを判定</button>
+        </div>
+        <p id="test-url-note" class="note">入力したURLは判定のためにNative Hostへ送られますが、Memocampusには保存されません。この画面を閉じると消えます。ルールの「テスト」は、そのルール単体がURLに一致するかだけを示します。一致しなくても、ほかのルールや基本保護によって保存されないことがあります。</p>
+        <div id="test-url-result" class="test-result" hidden>
+          <p id="test-url-decision" class="decision" role="status" aria-live="polite"></p>
+          <p id="test-url-caveat" class="note" hidden>これは編集中の設定によるテスト結果です。現在適用されている設定とは異なる場合があります。</p>
+        </div>
       </section>
 
       <section class="card planned" aria-labelledby="manage-heading">
@@ -131,10 +159,24 @@
     <footer class="apply-bar" aria-label="変更の適用">
       <p id="dirty-status" class="dirty-status" role="status" aria-live="polite"></p>
       <div class="actions">
+        <button id="validate" type="button" disabled>検証</button>
         <button id="discard" type="button" disabled>変更を破棄</button>
         <button id="apply" type="button" class="primary" disabled aria-describedby="apply-reason">適用</button>
       </div>
-      <p id="apply-reason" class="note">ルール編集と適用機能は次の開発段階で利用可能になります。</p>
+      <p id="apply-reason" class="note"></p>
+      <p id="validation-status" class="status" role="status" aria-live="polite" hidden></p>
+      <p id="apply-status" class="status" role="status" aria-live="polite" tabindex="-1" hidden></p>
+      <div class="actions">
+        <button id="apply-recheck" type="button" hidden>適用結果を再確認</button>
+      </div>
+      <div id="relax-confirm" class="confirm" role="alertdialog" aria-labelledby="relax-confirm-title" aria-describedby="relax-confirm-text" hidden>
+        <p id="relax-confirm-title" class="confirm-title">保護が弱くなる可能性がある変更が含まれています</p>
+        <p id="relax-confirm-text">この変更により、これまで保存されなかったURLが保存されるようになる可能性があります。また、MCPサーバ向けに非公開だったURLが公開対象になる可能性があります。変更を適用しますか？</p>
+        <ul id="relax-confirm-list" class="relax-list"></ul>
+        <p class="note">変更内容を単純に比べた注意です。実際に保護が弱くなるかどうかを判定したものではありません。</p>
+        <button id="relax-confirm-no" type="button">キャンセル</button>
+        <button id="relax-confirm-yes" type="button">適用する</button>
+      </div>
     </footer>
     <script type="module" src="options.js"></script>
   </body>

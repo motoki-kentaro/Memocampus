@@ -595,14 +595,16 @@ test("the extension never asks for the policy document or a migration", async ()
   await worker.message({ type: "record-all-tabs" });
   await worker.message({ type: "flush-queue" });
   await worker.message({ type: "policy-status" });
-  assert.ok(!types.has("policy_get") && !types.has("policy_migrate"), [...types].join());
-  // Only the Privacy settings page (#23), opened explicitly, reads the document; the worker never
-  // loads its module.
+  const MANAGEMENT = ["policy_get", "policy_validate", "policy_test_rule", "policy_test_url", "policy_apply", "policy_preset", "policy_start", "policy_migrate"];
+  assert.ok(MANAGEMENT.every((type) => !types.has(type)), [...types].join());
+  // Only the Privacy settings page (#23), opened explicitly, reads, checks, tests and applies the
+  // document; the worker never loads its modules.
   const READS_DOCUMENT = "options-state.js";
+  const PAGE_ONLY = ["policy_get", "policy_validate", "policy_test_rule", "policy_test_url", "policy_apply"];
   for (const name of readdirSync(extensionDir).filter((file) => file.endsWith(".js"))) {
     const source = readFileSync(path.join(extensionDir, name), "utf8");
-    assert.ok(!source.includes("policy_migrate"), name);
-    if (name !== READS_DOCUMENT) assert.ok(!source.includes("policy_get"), name);
+    for (const type of ["policy_migrate", "policy_start", "policy_preset"]) assert.ok(!source.includes(type), `${name}: ${type}`);
+    if (name !== READS_DOCUMENT) for (const type of PAGE_ONLY) assert.ok(!source.includes(type), `${name}: ${type}`);
     const importers = name === "options-page.js" ? [] : [READS_DOCUMENT];
     for (const imported of importers) assert.ok(!source.includes(`./${imported}`), `${name} imports ${imported}`);
   }
@@ -610,10 +612,11 @@ test("the extension never asks for the policy document or a migration", async ()
   const walkImports = (name) => {
     if (workerGraph.has(name)) return;
     workerGraph.add(name);
-    for (const [, next] of readFileSync(path.join(extensionDir, name), "utf8").matchAll(/from "\.\/([\w.-]+\.js)"/g)) walkImports(next);
+    for (const [, next] of readFileSync(path.join(extensionDir, name), "utf8").matchAll(/(?:^|[\s;}])(?:from|import)\s*["']\.\/([\w.-]+\.js)["']/gm)) walkImports(next);
   };
   walkImports("service-worker.js");
-  assert.ok(workerGraph.has("policy-gate.js") && !workerGraph.has(READS_DOCUMENT), [...workerGraph].join());
+  assert.ok(workerGraph.has("policy-gate.js"), [...workerGraph].join());
+  for (const module of [READS_DOCUMENT, "options-page.js", "options.js"]) assert.ok(!workerGraph.has(module), [...workerGraph].join());
 });
 
 // --- The host is the only judge -------------------------------------------------------------------

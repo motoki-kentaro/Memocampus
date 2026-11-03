@@ -88,7 +88,12 @@ function toggle($, key, checked) {
   input.dispatch("change");
 }
 
-const ruleCells = ($, layer) => $(`${layer}-rules`).children.map((row) => row.children.map((cell) => (cell.children[0] ?? cell).textContent));
+// Each cell as text: an editable row gives its select and input values, and its buttons' labels.
+const cellText = (cell) => {
+  const node = cell.children[0] ?? cell;
+  return node.tagName === "SELECT" || node.tagName === "INPUT" ? node.value : node.textContent;
+};
+const ruleCells = ($, layer) => $(`${layer}-rules`).children.map((row) => row.children.map(cellText));
 
 function* walk(node) {
   yield node;
@@ -124,11 +129,20 @@ test("the page names the groups and buttons as decided", () => {
     "適用",
     "一致したURLはMemocampusに保存されません。",
     "一致したURLはVaultに保存されますが、MCPサーバ向けの公開対象から除外されます。",
-    "ルール編集と適用機能は次の開発段階で利用可能になります。",
+    "ルール追加",
+    "このグループを有効にする",
+    "URLテスト",
+    "このURLを判定",
+    "検証",
+    "これは編集中の設定によるテスト結果です。現在適用されている設定とは異なる場合があります。",
+    "この変更により、これまで保存されなかったURLが保存されるようになる可能性があります。また、MCPサーバ向けに非公開だったURLが公開対象になる可能性があります。変更を適用しますか？",
   ]) {
     assert.ok(html.includes(text), text);
   }
   assert.match(html, /<button id="apply" type="button" class="primary" disabled/);
+  assert.doesNotMatch(html, /次の開発段階/, "nothing claims that applying comes later");
+  assert.equal(html.split('<th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th><th scope="col">テスト</th>').length, 3, "two tables, four columns");
+  for (const layer of ["never-save", "save-but-no-mcp"]) assert.match(html, new RegExp(`<label for="${layer}-enabled">`));
   for (const key of CATEGORY_KEYS) assert.match(html, new RegExp(`<label for="category-${key}">`), key);
 });
 
@@ -149,8 +163,8 @@ test("a ready version 2 policy is read, shown and becomes an editable draft", as
     assert.equal($(`category-${key}`).disabled, false);
   }
   assert.equal($("categories").hidden, false);
-  assert.deepEqual(ruleCells($, "never-save"), [["Pattern", "*.bank.example", "編集不可"], ["Regex", "^https://a\\.example/", "編集不可"]]);
-  assert.deepEqual(ruleCells($, "save-but-no-mcp"), [["Pattern", "wiki.example/private/*", "編集不可"]]);
+  assert.deepEqual(ruleCells($, "never-save"), [["pattern", "*.bank.example", "削除", "テスト"], ["regex", "^https://a\\.example/", "削除", "テスト"]]);
+  assert.deepEqual(ruleCells($, "save-but-no-mcp"), [["pattern", "wiki.example/private/*", "削除", "テスト"]]);
   assert.equal($("never-save-empty").hidden, true);
   assert.match($("never-save-state").textContent, /有効です。ルール 2件/);
   assert.equal($("apply").disabled, true);
@@ -161,7 +175,14 @@ test("a version 1 policy is shown but not editable and asks for an explicit migr
   const { page, host, $ } = await openPage({ policy: v1({ neverSave: ["old.example", "*.old.example/x/*"] }) });
   assert.equal($("policy-version").textContent, "Schema 1 / Engine 1");
   assert.match($("policy-explanation").textContent, /旧形式（v1）.*明示的な移行（Migration）.*自動では移行しません/);
-  assert.deepEqual(ruleCells($, "never-save"), [["Pattern（v1）", "old.example", "編集不可"], ["Pattern（v1）", "*.old.example/x/*", "編集不可"]]);
+  assert.deepEqual(ruleCells($, "never-save"), [["Pattern（v1）", "old.example", "編集不可", "—"], ["Pattern（v1）", "*.old.example/x/*", "編集不可", "—"]]);
+  for (const layer of ["never-save", "save-but-no-mcp"]) {
+    assert.equal($(`${layer}-enabled`).disabled, true);
+    assert.equal($(`${layer}-add`).hidden, true);
+  }
+  assert.equal($("validate").disabled, true);
+  assert.equal($("apply").disabled, true);
+  assert.match($("apply-reason").textContent, /旧形式（v1）/);
   for (const key of CATEGORY_KEYS) {
     assert.equal($(`category-${key}`).checked, true, "the active values are shown");
     assert.equal($(`category-${key}`).disabled, true);
@@ -175,8 +196,8 @@ test("a version 1 policy is shown but not editable and asks for an explicit migr
 
 for (const [state, label, text] of [
   ["uninitialized", "Not Initialized（未初期化）", /まだ初期化されていません.*自動記録は行われません.*この画面から初期化することはありません/],
-  ["invalid", "Invalid（読み取れません）", /自動記録を停止しています.*変更していません/],
-  ["unsupported", "Invalid（このバージョンでは使えません）", /自動記録を停止しています/],
+  ["invalid", "Invalid（設定ファイルが無効です）", /自動記録を停止しています.*変更していません/],
+  ["unsupported", "Unsupported（現在のバージョンでは対応していません）", /自動記録を停止しています[^]*Native Hostを更新/],
   ["busy", "Unavailable（使用中）", /使用中です/],
   ["unavailable", "Unavailable（アクセスできません）", /アクセスできません/],
 ]) {
@@ -317,7 +338,7 @@ test("dirty follows the difference from the active policy, and undoing an edit c
   assert.equal(page.draft.dirty(), true);
   assert.equal($("dirty-status").textContent, "未適用の変更があります");
   assert.equal($("discard").disabled, false);
-  assert.equal($("apply").disabled, true, "a dirty draft still cannot be applied");
+  assert.equal($("apply").disabled, false, "a dirty draft can be applied");
   toggle($, "government", false);
   toggle($, "aiChats", true);
   assert.equal(page.draft.dirty(), true, "one change remains");
@@ -425,21 +446,23 @@ test("rule text is shown as text, whatever it holds, and logged nowhere", async 
     for (const node of walk($(`${layer}-rules`))) {
       assert.equal(Object.hasOwn(node, "innerHTML"), false);
       assert.equal(Object.hasOwn(node, "outerHTML"), false);
-      assert.equal(node.attributes.size, 0, "no rule is copied into an attribute");
+      for (const value of node.attributes.values()) {
+        assert.ok(![...hostile, "<b>x</b>"].some((rule) => value.includes(rule)), "no rule is copied into an attribute");
+      }
     }
   }
   assert.deepEqual(logged, []);
   for (const name of SOURCES) assert.doesNotMatch(read(name), /innerHTML|outerHTML|insertAdjacentHTML|document\.write|console\./, name);
 });
 
-test("empty groups say so, and no rule can be edited", async () => {
+test("empty groups say so, and a version 1 rule cannot be edited", async () => {
   const { $, document } = await openPage();
   for (const layer of ["never-save", "save-but-no-mcp"]) {
     assert.equal($(`${layer}-table`).hidden, true);
     assert.equal($(`${layer}-empty`).hidden, false);
     assert.equal($(`${layer}-empty`).textContent, "ルールはありません。");
   }
-  const { $: $2 } = await openPage({ policy: v2({ neverSave: [{ kind: "pattern", pattern: "a.example" }] }) });
+  const { $: $2 } = await openPage({ policy: v1({ neverSave: ["a.example"] }) });
   const cells = [...walk($2("never-save-rules"))];
   assert.ok(cells.every((node) => !["BUTTON", "INPUT", "SELECT", "TEXTAREA"].includes(node.tagName)), "no control in a rule table");
   assert.ok(document);
@@ -495,9 +518,9 @@ test("a clean page reloads at once", async () => {
 
 // --- Host messages ------------------------------------------------------------------------------
 
-test("the page sends only reading messages, and never initializes, starts, applies or migrates", async () => {
+test("the page never initializes, starts or migrates, and only reads while nothing is asked of it", async () => {
   for (const name of SOURCES) {
-    assert.doesNotMatch(read(name), /policy_(apply|start|initialize|migrate|validate|test_url|test_rule|preset)|policy-initialize|sendMessage/, name);
+    assert.doesNotMatch(read(name), /policy_(start|initialize|migrate|preset|evaluate)|policy-initialize|sendMessage/, name);
   }
   const host = fakeHost({ state: "uninitialized" });
   const { $ } = await openPage({ send: host.send });
