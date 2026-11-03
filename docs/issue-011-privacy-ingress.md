@@ -28,8 +28,9 @@ hands out `decide()` only for a valid one.
 - Ready: `{ok: true, state: "ready", etag, revision, schemaVersion, engineVersion}`. Since #25 Slice 3 no rule
   or policy document; `policy_get` returns the document on an explicit request. The management messages of #25
   Slice 6 (`issue-025-policy-engine.md`) change no part of this ingress: the extension does not send them. The
-  Privacy settings page (#23, `issue-023-privacy-policy-options.md`) reads `policy_status` and `policy_get` only,
-  outside the service worker, and decides nothing.
+  Privacy settings page (#23, `issue-023-privacy-policy-options.md`) reads `policy_status` and `policy_get`, and on
+  request validates, tests and applies a draft, outside the service worker; it decides nothing, and an applied policy reaches recording only through
+  the host's own check of each event.
 - `policy_status` otherwise: `{ok: true, state: "uninitialized" | "invalid" | "unsupported" | "busy" | "unavailable"}`
 - `policy_initialize` otherwise: `{ok: false, error}`, including `policy_already_initialized`
 

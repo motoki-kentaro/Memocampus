@@ -85,9 +85,47 @@ table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 th { color: var(--muted); font-size: 13px; font-weight: 600; }
 th:nth-child(1) { width: 8.5em; }
-th:nth-child(3) { width: 6.5em; }
+th:nth-child(3) { width: 5.5em; }
+th:nth-child(4) { width: 10em; }
 td code { font: 13px ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
-.empty { margin: 8px 0 0; color: var(--muted); }
+.empty { margin: 8px 0; color: var(--muted); }
+
+/* Rule editing: the inputs take the cell's width, so a long rule scrolls inside its field. */
+td select, td input[type="text"], .test-url-controls input {
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+td input[type="text"] { font: 13px ui-monospace, Consolas, monospace; }
+td input[aria-invalid="true"] { border: 2px solid var(--error-fg); }
+td select:disabled, td input:disabled, .test-url-controls input:disabled { color: var(--muted); background: var(--surface); }
+td button { padding: 4px 10px; }
+.rule-error, .error-text { margin: 4px 0 0; color: var(--error-fg); font-size: 13px; font-weight: 600; white-space: pre-wrap; }
+.rule-error::before, .error-text::before { content: "✕ "; }
+.rule-test-result { display: block; margin-top: 4px; font-size: 12px; }
+.rule-test-result[data-result="match"] { color: var(--ok-fg); font-weight: 600; }
+.rule-test-result[data-result="error"] { color: var(--error-fg); }
+
+.layer-toggle { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; }
+.layer-toggle input { flex: none; width: 18px; height: 18px; margin: 0; }
+.layer-toggle label { font-weight: 600; cursor: pointer; }
+
+.field-label { display: block; margin: 8px 0 4px; font-weight: 600; }
+.test-url-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.test-url-controls input { flex: 1 1 280px; width: auto; min-width: 0; }
+.test-result { margin: 10px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.test-result p { margin: 0; }
+.test-result .note { margin-top: 4px; }
+/* The decision is in the words; the mark only repeats it. */
+.decision { font-weight: 600; }
+.decision[data-decision="never_save"]::before { content: "■ "; }
+.decision[data-decision="save_but_no_mcp"]::before { content: "◆ "; }
+.decision[data-decision="allow"]::before { content: "● "; }
 
 .planned { background: var(--surface); }
 .planned-list { margin: 4px 0; padding-left: 20px; color: var(--muted); font-size: 13px; }
@@ -95,6 +133,10 @@ td code { font: 13px ui-monospace, Consolas, monospace; white-space: pre-wrap; w
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .confirm { margin: 10px 0 0; padding: 10px; border: 1px solid var(--warning-fg); border-radius: 6px; }
 .confirm p { margin: 0 0 8px; }
+.confirm-title { font-weight: 600; color: var(--warning-fg); }
+.confirm-title::before { content: "⚠ "; }
+.relax-list { margin: 0 0 8px; padding-left: 20px; }
+.apply-bar .confirm { flex-basis: 100%; background: var(--bg); }
 
 button {
   min-height: 32px;
@@ -125,7 +167,11 @@ button:disabled { color: var(--muted); background: transparent; border-color: va
   background: var(--bg);
   border-top: 1px solid var(--border);
 }
-.apply-bar .note { flex-basis: 100%; margin: 0; }
+.apply-bar { max-height: 70vh; overflow-y: auto; }
+.apply-bar .note, .apply-bar .status { flex-basis: 100%; margin: 0; }
+.status { white-space: pre-wrap; font-size: 13px; }
+#validation-status[data-result="ok"] { color: var(--ok-fg); }
+#validation-status[data-result="error"] { color: var(--error-fg); }
 .dirty-status { flex: 1 1 auto; margin: 0; font-weight: 600; color: var(--warning-fg); }
 
 .visually-hidden {
@@ -143,8 +189,11 @@ button:disabled { color: var(--muted); background: transparent; border-color: va
 
 @media (max-width: 520px) {
   .facts dt { min-width: 0; }
-  th:nth-child(1) { width: 6em; }
-  th:nth-child(3) { width: 5em; }
+  th:nth-child(1) { width: 6.5em; }
+  th:nth-child(3) { width: 4.5em; }
+  th:nth-child(4) { width: 6em; }
+  th, td { padding: 6px 4px; }
+  td button { padding: 4px 6px; }
 }
 
 [hidden] { display: none !important; }
