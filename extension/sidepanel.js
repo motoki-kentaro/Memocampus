@@ -332,6 +332,10 @@ results.addEventListener("auxclick", openResult);
 retryButton.addEventListener("click", () => void (state.lastFailedAppend ? loadMore() : runSearch()));
 loadMoreButton.addEventListener("click", () => void loadMore());
 openVaultSettings.addEventListener("click", () => tabs.select("settings", { focus: true }));
+// The options page opens in a tab of its own (or the open one is focused).
+document.querySelector("#open-privacy-settings").addEventListener("click", () => {
+  chrome.runtime.openOptionsPage().catch(() => {});
+});
 
 // Load the next page automatically as the list end scrolls into view. The URL tab scrolls on its
 // own, so it is the observer root; while the tab is hidden nothing intersects.

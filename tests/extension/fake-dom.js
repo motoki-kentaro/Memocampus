@@ -281,6 +281,9 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
 function createChrome(host) {
   const runtime = {
     lastError: undefined,
+    async openOptionsPage() {
+      host.optionsOpened = (host.optionsOpened ?? 0) + 1;
+    },
     onMessage: { addListener: (listener) => host.runtimeListeners.push(listener) },
     sendNativeMessage(_name, message, callback) {
       Promise.resolve(host.handle(structuredClone(message))).then((response) => {
