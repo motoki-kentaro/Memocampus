@@ -142,7 +142,7 @@ export const flush = () => settle(0);
 
 /** Chooses the checker's kind as a browser does: one radio of the group checked, then "change". */
 export function chooseKind($, kind) {
-  for (const other of ["pattern", "regex"]) $(`checker-kind-${other}`).checked = other === kind;
+  for (const other of ["pattern", "regex", "domainWildcard"]) $(`checker-kind-${other}`).checked = other === kind;
   $(`checker-kind-${kind}`).dispatch("change");
 }
 /** Fills the checker and asks the host; the reply has arrived when this resolves. */

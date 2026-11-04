@@ -1,7 +1,8 @@
 # Issue #23: Privacy settings page (options page)
 
 Status: Slice 1 (page, basic protection, draft) and Slice 2 (rule editing, validation, tests, apply) merged. Slice 3 (URL checker: adding and
-changing rules only after a host match) implemented, for review. Migration and recovery are open (see Handoff). CSV import and export is postponed.
+changing rules only after a host match) merged. The Domain Wildcard kind in the checker implemented, for review. Migration and recovery are open (see
+Handoff). CSV import and export is postponed.
 
 ## Slice 1: the page and the draft
 
@@ -394,6 +395,34 @@ without a match; the help; nothing logged, stored or put in an attribute; no mat
 through the checker (`addRule`, `editRule`); their checks are unchanged, except that the per-row テスト (now the checker) is gone, an invalid draft is a
 matched rule the whole-draft check refuses (the empty rule cannot be added any more), and the lists of messages sent leave out the checker's
 `policy_test_rule`. The Slice 1 tests stay, adapted to three columns, read-only rows and the new labels.
+
+## Domain Wildcard in the URL checker
+
+The host's third kind of rule (`domainWildcard`, `issue-025-policy-engine.md`, Domain Wildcard) is the checker's third kind. Nothing else about
+adding or changing a rule is new: it goes through the same match gate.
+
+- **Choosing it.** 「ルールの種類」 has three radios of one group: Pattern, Regex, Domain Wildcard (`value="domainWildcard"`). The rule stays one line
+  of text. With Domain Wildcard chosen, the rule field shows the example `*.example.com` and a note under the help: no scheme or path, the form
+  `*.example.com`, and that the domain itself also matches; the rule field names that note as its description only while it is shown, since a
+  screen reader reads a hidden description too. The other kinds show neither. The `?` help adds the kind: the domain and all subdomains,
+  by host name alone, and no public suffix such as `*.com` or `*.co.jp`.
+- **Judged by the host only.** The page sends `{ kind: "domainWildcard", pattern }` exactly as typed and shows what `policy_test_rule` answers. It has
+  no domain, suffix or host logic of its own. `invalid_domain_wildcard` is a rule error (「ルールを確認してください」) with a reason that names the form
+  and that public suffixes, subdomains, schemes, paths, ports and spaces cannot be used; it never repeats the rule.
+- **Gate, staleness, adding, editing.** As for the other kinds: only a boolean `matched: true` for the current kind, text and URL enables the buttons
+  and is checked again on the click; a change of the kind (also to or from Domain Wildcard), the text or the URL drops the answer; adding writes the
+  draft only; 「チェッカーで編集」 loads the kind and text, and 「変更を反映」 needs a new match. A changed or removed domain wildcard, and a rule changed
+  into one, ask before applying (the rule's kind and text identify it).
+- **Duplicates.** The same kind and the very same text, in the same group. `*.Example.com` and `*.example.com` are two rules, and so are the pattern
+  `*.example.com` and the domain wildcard `*.example.com`, though the host matches them alike. Nothing is normalized or merged.
+- **Rows.** A domain wildcard is shown as 「Domain Wildcard」 with its text as stored (`*.例え.jp` is not shown as Punycode).
+- **No migration.** Existing policies are not converted; a version 1 policy stays read-only as before.
+
+Tests: `tests/extension/options-domain.test.js` (the radios and their order, the example and note, the text sent as typed, match, no match, invalid
+rule, invalid URL and host failures, the host's answer shown whatever the rule looks like, staleness by rule, URL and kind, duplicates, editing with
+the confirmation, atomic apply and conflict, display, a draft error named by the host, and the extension's evaluator refusing the kind), with the
+checker, edit and page tests above. Real host [verified]: the page against the release host in a temporary app directory matched and refused the
+order's examples, added and applied rules (revision 2, stored as written), and the batch judged them.
 
 ## Handoff
 

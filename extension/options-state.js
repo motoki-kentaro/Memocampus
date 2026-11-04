@@ -15,7 +15,7 @@ export const LAYER_OF_CATEGORY = {
   webmail: "saveButNoMcp",
   aiChats: "saveButNoMcp",
 };
-export const RULE_KINDS = ["pattern", "regex"];
+export const RULE_KINDS = ["pattern", "regex", "domainWildcard"];
 export const DECISIONS = ["never_save", "save_but_no_mcp", "allow"];
 
 // The host's `policy_status` states; any other value is not an answer.
@@ -269,7 +269,7 @@ export async function validateDraft({ send, policy }) {
 }
 
 // What `policy_test_rule` may refuse, by what the person should look at.
-const RULE_CODES = new Set(["invalid_rule", "invalid_pattern", "invalid_regex", "unsupported_regex", "regex_limit"]);
+const RULE_CODES = new Set(["invalid_rule", "invalid_pattern", "invalid_regex", "unsupported_regex", "regex_limit", "invalid_domain_wildcard"]);
 const URL_CODES = new Set(["invalid_url"]);
 
 /**

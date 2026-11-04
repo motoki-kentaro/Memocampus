@@ -241,16 +241,8 @@ impl PolicyGate {
                 .and_then(|rule| serde_json::from_value(rule.clone()).ok())
                 .ok_or(Refusal::Code(INVALID_RULE))?;
             let url = url_of(message)?;
-            let pattern = matches!(rule, RuleSpec::Typed(policy::TypedRule::Pattern { .. }));
-            let matched = policy::rule_matches(&rule, url).map_err(|error| {
-                Refusal::Code(match error {
-                    policy::Error::InvalidUrl => INVALID_URL,
-                    policy::Error::UnsupportedRule => "unsupported_regex",
-                    policy::Error::RegexLimit => "regex_limit",
-                    _ if pattern => "invalid_pattern",
-                    _ => "invalid_regex",
-                })
-            })?;
+            let matched = policy::rule_matches(&rule, url)
+                .map_err(|error| Refusal::Code(rule.error_code(error)))?;
             Ok(json!({ "matched": matched }))
         })
     }

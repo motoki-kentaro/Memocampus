@@ -13,6 +13,8 @@ uuid = { version = "1", features = ["v4"] }
 url = "2"
 regex = "1"
 regex-syntax = "0.8"
+# Pinned: with `data/public_suffix_list.dat`, the registrable domains of `domainWildcard` rules.
+publicsuffix = "=2.3.0"
 rfd = "0.17"
 sha2 = "0.10"
 base64 = "0.22"

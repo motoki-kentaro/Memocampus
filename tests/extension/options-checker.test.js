@@ -59,7 +59,7 @@ test("the checker is its own section between the basic protection and the groups
   assert.equal(htmlText("checker-add-never-save"), "保存しないグループに追加");
   assert.equal(htmlText("checker-add-save-but-no-mcp"), "MCPサーバに見せないグループに追加");
   assert.equal(htmlText("checker-caveat"), "この結果はルール単体の一致確認です。実際の保存判定は、適用中のPolicy全体で決まります。");
-  assert.equal(htmlText("checker-help"), "PatternはMemocampusのパターン照合です。RegexはRust Regex構文で判定します。先読み・後読みには対応していません。");
+  assert.match(htmlText("checker-help"), /^PatternはMemocampusのパターン照合です。RegexはRust Regex構文で判定します。先読み・後読みには対応していません。Domain Wildcardは/);
   assert.match(html, /<p id="checker-result" class="checker-result" data-result="none" role="status" aria-live="polite"/);
   assert.match(html, /<button id="checker-help-toggle" type="button" class="help-toggle" aria-label="[^"]+" aria-expanded="false" aria-controls="checker-help">\?<\/button>/);
   assert.doesNotMatch(html, /ルール追加/);
@@ -182,7 +182,7 @@ test("the matching state of an answer: only a boolean true is a match", () => {
   for (const answer of [{ ok: true, matched: "true" }, { ok: true }, { ok: false, code: "invalid_response" }, { ok: false, code: "timeout" }, null, undefined, { matched: true }]) {
     assert.notEqual(matchState(answer), "match", JSON.stringify(answer));
   }
-  for (const code of ["invalid_rule", "invalid_pattern", "invalid_regex", "unsupported_regex", "regex_limit"]) assert.equal(matchState({ ok: false, code }), "rule_error");
+  for (const code of ["invalid_rule", "invalid_pattern", "invalid_regex", "unsupported_regex", "regex_limit", "invalid_domain_wildcard"]) assert.equal(matchState({ ok: false, code }), "rule_error");
   assert.equal(matchState({ ok: false, code: "invalid_url" }), "url_error");
 });
 

@@ -3436,3 +3436,183 @@ fn a_failed_write_applies_nothing() {
         "the same ETag still applies once"
     );
 }
+
+fn domain_json(pattern: &str) -> Value {
+    json!({ "kind": "domainWildcard", "pattern": pattern })
+}
+
+#[test]
+fn a_domain_wildcard_is_tested_alone_by_the_production_matcher() {
+    let tmp = TempDir::new();
+    let test = |rule: Value, url: &str| {
+        call(
+            &tmp,
+            json!({ "type": "policy_test_rule", "requestId": "r", "rule": rule, "url": url }),
+        )
+    };
+    for (url, expected) in [
+        ("https://amazon.co.jp/", true),
+        ("https://www.amazon.co.jp/", true),
+        ("https://seller.amazon.co.jp/", true),
+        ("https://a.b.amazon.co.jp/", true),
+        ("https://WWW.AMAZON.CO.JP:8443/x?y#z", true),
+        ("https://u:p@www.amazon.co.jp./", true),
+        ("https://fake-amazon.co.jp/", false),
+        ("https://amazon.co.jp.evil.com/", false),
+        ("https://notamazon.co.jp/", false),
+        ("https://evil.com/www.amazon.co.jp", false),
+    ] {
+        let reply = test(domain_json("*.amazon.co.jp"), url);
+        assert_eq!(
+            reply,
+            json!({ "ok": true, "type": "policy_test_rule_result", "requestId": "r", "matched": expected }),
+            "{url}"
+        );
+    }
+    for (rule, url, code) in [
+        (
+            "*.co.jp",
+            "https://amazon.co.jp/",
+            "invalid_domain_wildcard",
+        ),
+        ("*.com", "https://a.com/", "invalid_domain_wildcard"),
+        (
+            "*.github.io",
+            "https://a.github.io/",
+            "invalid_domain_wildcard",
+        ),
+        (
+            "*.CANARY.test",
+            "https://a.CANARY.test/",
+            "invalid_domain_wildcard",
+        ),
+        (
+            "*.CANARY.com/*",
+            "https://a.CANARY.com/",
+            "invalid_domain_wildcard",
+        ),
+        (
+            " *.CANARY.com",
+            "https://a.CANARY.com/",
+            "invalid_domain_wildcard",
+        ),
+        ("*.amazon.co.jp", "not a url CANARY", "invalid_url"),
+        (
+            "*.amazon.co.jp",
+            "https://amazon.co.jp/%FFCANARY",
+            "invalid_url",
+        ),
+    ] {
+        let reply = test(domain_json(rule), url);
+        assert_eq!(
+            reply,
+            refusal("policy_test_rule_result", "r", code),
+            "{rule}"
+        );
+    }
+    assert!(
+        store_of(&tmp).never_initialized(),
+        "testing a rule needs and writes no policy"
+    );
+}
+
+#[test]
+fn domain_wildcards_decide_alike_in_validation_tests_apply_the_batch_and_recording() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let (policy, etag) = active(&tmp);
+    let before = policy_bytes(&tmp);
+
+    // Validation names the rule a public suffix makes invalid, and echoes nothing of it.
+    let mut invalid = with_never(policy.clone(), json!([domain_json("*.blind-zone.com")]));
+    invalid["layers"]["saveButNoMcp"]["enabled"] = false.into();
+    invalid["layers"]["saveButNoMcp"]["rules"] = json!([
+        domain_json("*.private-zone.com"),
+        domain_json("*.CANARY.github.io.")
+    ]);
+    let reply = call(
+        &tmp,
+        json!({ "type": "policy_validate", "requestId": "v", "policy": invalid }),
+    );
+    assert_eq!(reply["error"], "policy_invalid", "{reply}");
+    assert_eq!(
+        reply["errors"],
+        json!([{ "layer": "saveButNoMcp", "ruleIndex": 1, "code": "invalid_domain_wildcard" }])
+    );
+    assert!(!reply.to_string().contains("CANARY"));
+
+    let mut draft = with_never(
+        policy.clone(),
+        json!([
+            domain_json("*.blind-zone.com"),
+            pattern_json("both-zone.com")
+        ]),
+    );
+    draft["layers"]["saveButNoMcp"]["rules"] = json!([
+        domain_json("*.private-zone.com"),
+        domain_json("*.both-zone.com")
+    ]);
+    let urls = [
+        ("1", "https://blind-zone.com/", "never_save"),
+        ("2", "https://www.blind-zone.com/a", "never_save"),
+        ("3", "https://a.b.BLIND-ZONE.com:444/", "never_save"),
+        ("4", "https://fake-blind-zone.com/", "allow"),
+        ("5", "https://blind-zone.com.evil.com/", "allow"),
+        ("6", "https://a.private-zone.com/notes", "save_but_no_mcp"),
+        ("7", "https://both-zone.com/", "never_save"),
+        ("8", "https://x.both-zone.com/", "save_but_no_mcp"),
+        ("9", "https://public-zone.com/", "allow"),
+    ];
+    for (_, url, decision) in urls {
+        let reply = call(
+            &tmp,
+            json!({ "type": "policy_test_url", "requestId": "u", "policy": draft, "url": url }),
+        );
+        assert_eq!(reply["decision"], decision, "{url} {reply}");
+    }
+    let validated = call(
+        &tmp,
+        json!({ "type": "policy_validate", "requestId": "v", "policy": draft }),
+    );
+    assert_eq!(validated["ok"], true, "{validated}");
+    assert_eq!(policy_bytes(&tmp), before, "checking writes nothing");
+
+    let applied = call(
+        &tmp,
+        json!({ "type": "policy_apply", "requestId": "a", "policy": draft, "expectedEtag": etag }),
+    );
+    assert_eq!(applied["ok"], true, "{applied}");
+    let (written, _) = active(&tmp);
+    assert_eq!(
+        written["layers"], draft["layers"],
+        "stored as written: kind and text"
+    );
+    // A new process reads the applied policy: the batch and the store judge with it.
+    let items: Vec<Value> = urls
+        .iter()
+        .map(|(id, url, _)| json!({ "id": id, "url": url }))
+        .collect();
+    let reply = exchange(&tmp, &[batch(json!(items))]).remove(0);
+    assert_eq!(
+        decisions(&reply),
+        urls.iter()
+            .map(|(id, _, decision)| (id.to_string(), decision.to_string()))
+            .collect::<Vec<_>>()
+    );
+    let events: Vec<Value> = urls.iter().map(|(id, url, _)| visit(id, url, AT)).collect();
+    let acks = exchange(&tmp, &events);
+    for ((id, _, decision), ack) in urls.iter().zip(&acks) {
+        let want = if *decision == "never_save" {
+            dropped(id)
+        } else {
+            stored(id)
+        };
+        assert_eq!(ack, &want, "{id}");
+    }
+    let rows = row_dump(&tmp.default_vault()).join("\n");
+    for refused in ["//blind-zone.com/", ".blind-zone.com/", "BLIND-ZONE"] {
+        assert!(!rows.contains(refused), "{rows}");
+    }
+    assert!(!rows.contains("//both-zone.com"), "{rows}");
+    assert_eq!(rows.lines().count(), 5, "{rows}");
+}

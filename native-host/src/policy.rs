@@ -1,6 +1,6 @@
 //! URL/rule contract; see docs/issue-010-privacy-policy.md. Version 1 stores each rule as a string,
 //! version 2 as a typed rule (docs/issue-025-policy-engine.md). A pattern means the same in both;
-//! a regex, version 2 only, meets the whole URL.
+//! a regex, version 2 only, meets the whole URL; a domain wildcard, version 2 only, meets the host.
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -66,6 +66,11 @@ pub enum TypedRule {
     Regex {
         pattern: String,
     },
+    /// `*.` and a registrable domain (`public_suffix::wildcard_domain`): that domain and every
+    /// subdomain, by host alone.
+    DomainWildcard {
+        pattern: String,
+    },
 }
 /// A pattern in the current form (version 2). A version 1 rule is written `RuleSpec::Text`.
 impl From<&str> for RuleSpec {
@@ -78,10 +83,11 @@ impl From<String> for RuleSpec {
         Self::Typed(TypedRule::Pattern { pattern })
     }
 }
-/// What a stored rule is: a pattern with the grammar of its version, or a regex.
+/// What a stored rule is: a pattern with the grammar of its version, a regex, or a domain wildcard.
 enum Form<'a> {
     Pattern(&'a str, Syntax),
     Regex(&'a str),
+    Domain(&'a str),
 }
 impl RuleSpec {
     fn form(&self) -> Form<'_> {
@@ -89,6 +95,18 @@ impl RuleSpec {
             Self::Text(pattern) => Form::Pattern(pattern, Syntax::Version1),
             Self::Typed(TypedRule::Pattern { pattern }) => Form::Pattern(pattern, Syntax::Version2),
             Self::Typed(TypedRule::Regex { pattern }) => Form::Regex(pattern),
+            Self::Typed(TypedRule::DomainWildcard { pattern }) => Form::Domain(pattern),
+        }
+    }
+    /// The code of `error` for this rule: what `problems` and the rule test say of it.
+    pub fn error_code(&self, error: Error) -> &'static str {
+        match (self.form(), error) {
+            (_, Error::InvalidUrl) => "invalid_url",
+            (Form::Pattern(..), _) => "invalid_pattern",
+            (Form::Domain(_), _) => "invalid_domain_wildcard",
+            (Form::Regex(_), Error::UnsupportedRule) => "unsupported_regex",
+            (Form::Regex(_), Error::RegexLimit) => "regex_limit",
+            (Form::Regex(_), _) => "invalid_regex",
         }
     }
 }
@@ -236,21 +254,12 @@ impl Policy {
                     found.push(at("invalid_rule_form"));
                     continue;
                 }
-                let code = match rule.form() {
-                    Form::Pattern(pattern, syntax) => Rule::parse_in(pattern, syntax)
-                        .err()
-                        .map(|_| "invalid_pattern"),
-                    Form::Regex(pattern) => {
-                        compile_regex(pattern, budget)
-                            .err()
-                            .map(|error| match error {
-                                Error::UnsupportedRule => "unsupported_regex",
-                                Error::RegexLimit => "regex_limit",
-                                _ => "invalid_regex",
-                            })
-                    }
+                let error = match rule.form() {
+                    Form::Pattern(pattern, syntax) => Rule::parse_in(pattern, syntax).err(),
+                    Form::Regex(pattern) => compile_regex(pattern, budget).err(),
+                    Form::Domain(pattern) => domain_of(pattern).err(),
                 };
-                found.extend(code.map(at));
+                found.extend(error.map(|error| at(rule.error_code(error))));
             }
         }
         if found.is_empty() {
@@ -302,7 +311,8 @@ impl Policy {
 }
 
 /// Patterns of one zone by host, so a URL meets only the patterns of its own host and parent
-/// domains. A `None` path covers the whole host. Regexes have no host and meet every URL.
+/// domains. A `None` path covers the whole host. Regexes have no host and meet every URL. A domain
+/// wildcard is a wildcard host with no path: it is judged exactly as the pattern `*.domain` is.
 #[derive(Debug, Default)]
 struct Zone {
     exact: HashMap<String, Vec<Option<PathRule>>>,
@@ -330,6 +340,13 @@ impl Zone {
             Form::Pattern(pattern, syntax) => self.add(pattern, syntax),
             Form::Regex(pattern) => {
                 self.regexes.push(compile_regex(pattern, budget)?);
+                Ok(())
+            }
+            Form::Domain(pattern) => {
+                self.wildcard
+                    .entry(domain_of(pattern)?)
+                    .or_default()
+                    .push(None);
                 Ok(())
             }
         })
@@ -682,6 +699,13 @@ impl Rule {
             path,
         })
     }
+}
+/// The domain a domain wildcard covers; see `public_suffix::wildcard_domain`.
+fn domain_of(pattern: &str) -> Result<String, Error> {
+    if pattern.encode_utf16().count() > 2048 {
+        return Err(Error::InvalidPolicy);
+    }
+    crate::public_suffix::wildcard_domain(pattern).ok_or(Error::InvalidPolicy)
 }
 /// What one regex of a policy may use: an equal share of the policy's budget, at most the limit
 /// of one rule. So all regexes of a policy together stay within the totals.

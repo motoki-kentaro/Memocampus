@@ -28,7 +28,9 @@ import {
 const LAYER_ID = { neverSave: "never-save", saveButNoMcp: "save-but-no-mcp" };
 const LAYER_NAME = { neverSave: "保存しないグループ", saveButNoMcp: "MCPサーバに見せないグループ" };
 const CATEGORY_NAME = { authentication: "認証関連", credentials: "認証情報", government: "行政サイト", webmail: "Webメール", aiChats: "AIチャット" };
-const KIND_LABEL = { pattern: "Pattern", regex: "Regex" };
+const KIND_LABEL = { pattern: "Pattern", regex: "Regex", domainWildcard: "Domain Wildcard" };
+/** What the rule field shows for each kind. The domain wildcard is the only kind with an example in it. */
+const RULE_PLACEHOLDER = { pattern: "", regex: "", domainWildcard: "*.example.com" };
 
 // The label names the state in words, so it never depends on colour alone.
 const STATE_LABEL = {
@@ -64,6 +66,8 @@ const PROBLEM_TEXT = {
   invalid_regex: "正規表現の書き方が正しくありません。",
   unsupported_regex: "このバージョンでは使えない正規表現です（先読み・後読み・後方参照）。",
   regex_limit: "正規表現が長すぎるか複雑すぎます。上限は正規表現ルールの数によって変わります。",
+  invalid_domain_wildcard:
+    "Domain Wildcardの書き方が正しくありません。「*.」に続けて登録可能なドメインを書いてください（例: *.example.com）。*.com・*.co.jp・*.github.io のような公開サフィックス、サブドメイン、スキーム・パス・ポート・空白は使えません。",
   invalid_rule_form: "ルールの形式が正しくありません。",
   invalid_rule: "ルールの形式が正しくありません。",
   too_many_rules: "このグループのルールが多すぎます（上限1,000件）。",
@@ -486,6 +490,11 @@ export function startOptionsPage({ document, window, send }) {
     const enabled = canCheck();
     for (const kind of RULE_KINDS) $(`checker-kind-${kind}`).disabled = !enabled;
     for (const id of ["checker-rule", "checker-url", "checker-run"]) $(id).disabled = !enabled;
+    const kind = checkerKind();
+    $("checker-rule").placeholder = RULE_PLACEHOLDER[kind] ?? "";
+    // A screen reader reads a description even when it is hidden, so the note is named only while shown.
+    $("checker-kind-note").hidden = kind !== "domainWildcard";
+    $("checker-rule").setAttribute("aria-describedby", kind === "domainWildcard" ? "checker-kind-note checker-gate" : "checker-gate");
 
     const current = currentCheck();
     const result = $("checker-result");

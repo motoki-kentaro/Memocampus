@@ -604,6 +604,7 @@ const relaxingEdits = {
   "a Blind rule removed": ({ controls }) => click(controls("never-save", 0).remove),
   "a Blind rule's text changed": (opened) => editRule(opened, "never-save", 0, pattern("bank.example/only")),
   "a Blind rule's kind changed": (opened) => editRule(opened, "never-save", 0, regex("bank.example")),
+  "a Blind rule changed into a Domain Wildcard": (opened) => editRule(opened, "never-save", 0, { kind: "domainWildcard", pattern: "*.bank.example" }),
   "a Private rule's text changed": (opened) => editRule(opened, "save-but-no-mcp", 0, pattern("wiki.example")),
   "the Blind group disabled": ({ $ }) => check($("never-save-enabled"), false),
   "a category turned off": ({ $ }) => check($("category-credentials"), false),
