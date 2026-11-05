@@ -3,6 +3,7 @@ import { QueueError, createEventQueue } from "./event-queue.js";
 import { createPolicyGate } from "./policy-gate.js";
 import { chromeNativeTransport } from "./search-client.js";
 import { bytesToBase64 } from "./image-format.js";
+import { capturePageMetadata } from "./page-metadata.js";
 import { SAVE_IMAGE_MENU_ID, describeImageSaveResult, registerImageMenu, saveImageFromClick } from "./image-save.js";
 
 const HOST_NAME = "com.memocampus.vault";
@@ -60,10 +61,21 @@ async function flushQueue() {
 async function enqueueVisit(event) {
   try {
     await queue.enqueue(event);
-  } catch {
+  } catch (error) {
+    // The visit comes first: if storage could not take it with its metadata, it is kept without.
+    let kept = false;
+    if (event.page !== undefined && error?.code === "storage_write_failed") {
+      const { page: _page, ...visit } = event;
+      kept = await queue.enqueue(visit).then(
+        () => true,
+        () => false,
+      );
+    }
     // Full queue or storage failure: nowhere durable to keep it, so count it visibly.
-    await queue.recordDropped().catch(() => {});
-    return;
+    if (!kept) {
+      await queue.recordDropped().catch(() => {});
+      return;
+    }
   }
   await flushQueue();
 }
@@ -128,6 +140,15 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     incognito: tab.incognito,
     visitedAt: new Date().toISOString(),
   };
+  // Only now, for an allowed URL in a normal tab, is the page read: once, in this very document.
+  // Without an answer the visit is recorded as before, and a stored row is left as it is.
+  const page = await capturePageMetadata({
+    executeScript: (options) => chrome.scripting.executeScript(options),
+    tabId: details.tabId,
+    documentId: details.documentId,
+    url: details.url,
+  });
+  if (page) event.page = page;
   void enqueueVisit(event);
 });
 

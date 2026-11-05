@@ -757,6 +757,54 @@ fn a_schema_3_vault_relabelled_as_4_is_refused_and_its_rows_stay_hidden() {
 }
 
 #[test]
+fn page_metadata_never_reaches_a_reader_and_a_vault_without_it_is_refused() {
+    // Issue #22: VisibleStore reads no metadata, for public URLs or private ones.
+    let f = Fixture::new();
+    f.seed();
+    let before = f.store.search_visits(&ALL).unwrap();
+    let db = writer(&f.vault);
+    let rows = db
+        .prepare("SELECT event_id, url FROM visits")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    for (event_id, url) in rows {
+        db.execute(
+            "INSERT INTO page_metadata (url, event_id, title, description, og_title, og_site_name, og_image_url, favicon_url, captured_at) VALUES (?1, ?2, 'CANARY meta', 'CANARY desc', 'CANARY og', 'CANARY site', 'https://a-layer.test/CANARY.png', 'https://b-layer.test/CANARY.ico', '2026-11-05T00:00:00.000Z')",
+            params![url, event_id],
+        )
+        .unwrap();
+    }
+    let after = f.store.search_visits(&ALL).unwrap();
+    assert_clean(&after);
+    assert_eq!(format!("{after:?}"), format!("{before:?}"));
+    let found = f
+        .store
+        .search_visits(&SearchVisits {
+            query: "CANARY",
+            ..ALL
+        })
+        .unwrap();
+    assert!(found.items.is_empty());
+
+    // A vault shaped like schema 4 (no page_metadata) is not the current schema.
+    let sql = schema::create_sql();
+    let start = sql.find(" CREATE TABLE page_metadata").unwrap();
+    let end = start + sql[start..].find(");").unwrap() + 2;
+    let path = f.dir.join("schema-4-shape.sqlite3");
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch(&format!("{}{}", &sql[..start], &sql[end..]))
+        .unwrap();
+    let store = VisibleStore::new(path, f.app.clone()).unwrap();
+    assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
+}
+
+#[test]
 fn a_vault_with_a_public_flag_set_still_answers_visits_only_from_the_visits_gate() {
     let f = Fixture::new();
     f.seed();

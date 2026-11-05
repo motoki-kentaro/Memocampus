@@ -509,7 +509,7 @@ fn image_tables(path: &Path) -> i64 {
 fn vaults_created_by_the_host_start_at_schema_4_with_image_tables() {
     let tmp = TempDir::new();
     create_default_vault(&tmp);
-    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 4);
+    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 5);
     assert_eq!(image_tables(&tmp.default_vault()), 3);
     // Existing operations work on it.
     assert_eq!(
@@ -561,7 +561,7 @@ fn backups_of_a_vault_with_images_are_complete_and_verified() {
     };
     assert_eq!(dump(&copy), dump(&tmp.default_vault()));
     assert_eq!(dump(&copy).len(), 4);
-    assert_eq!(pragma(&copy, "user_version"), 4);
+    assert_eq!(pragma(&copy, "user_version"), 5);
 }
 
 const SAVE_ID: &str = "4f1d2c3b-5a6e-4d7f-8091-a2b3c4d5e6f7";
@@ -1100,8 +1100,18 @@ fn make_active_vault_from(tmp: &TempDir, sql: &str) -> PathBuf {
 
 const VISIT_AT: &str = "2026-10-30T10:00:00.000Z";
 
+/// Schema 4 as it was created before Issue #22: schema 5 without `page_metadata`.
+fn schema_4() -> String {
+    let sql = memocampus_native_host::schema::create_sql();
+    let start = sql.find(" CREATE TABLE page_metadata").unwrap();
+    let end = start + sql[start..].find(");").unwrap() + 2;
+    let sql = format!("{}{}", &sql[..start], &sql[end..]);
+    assert!(!sql.contains("page_metadata"));
+    sql.replace("PRAGMA user_version = 5;", "PRAGMA user_version = 4;")
+}
+
 #[test]
-fn every_vault_other_than_schema_4_is_refused_for_every_operation_and_left_untouched() {
+fn every_vault_other_than_schema_5_is_refused_for_every_operation_and_left_untouched() {
     use memocampus_native_host::schema::create_sql;
     let v3 = |app_id: i64, version: i64| {
         format!("{SCHEMA_3} PRAGMA application_id = {app_id}; PRAGMA user_version = {version};")
@@ -1113,8 +1123,14 @@ fn every_vault_other_than_schema_4_is_refused_for_every_operation_and_left_untou
         ("schema 3", v3(1296256336, 3)),
         ("schema 3 relabelled 4", v3(1296256336, 4)),
         ("schema 3 untagged, relabelled 4", v3(0, 4)),
-        ("future version", format!("{} PRAGMA user_version = 5;", create_sql())),
-        ("untagged schema 4", format!("{} PRAGMA application_id = 0;", create_sql())),
+        ("schema 4 (Issue #22: no page_metadata)", schema_4()),
+        ("schema 4 relabelled 5", schema_4().replace("PRAGMA user_version = 4;", "PRAGMA user_version = 5;")),
+        ("future version", format!("{} PRAGMA user_version = 6;", create_sql())),
+        ("untagged schema 5", format!("{} PRAGMA application_id = 0;", create_sql())),
+        ("metadata without its limits", create_sql().replace(
+            "title          TEXT CHECK (title IS NULL OR length(title) BETWEEN 1 AND 500),",
+            "title          TEXT,",
+        )),
         (
             "flag with a default",
             create_sql().replace(
@@ -1216,7 +1232,7 @@ fn from_a_refused_vault_the_user_can_still_create_a_new_one_which_inherits_nothi
     assert_eq!(replies[1]["ok"], true, "{}", replies[1]);
     assert_eq!(replies[2]["items"].as_array().unwrap().len(), 1);
     assert!(!replies[2].to_string().contains("CANARY"));
-    assert_eq!(pragma(&new, "user_version"), 4);
+    assert_eq!(pragma(&new, "user_version"), 5);
     assert_eq!(std::fs::read(&old).unwrap(), before);
     // And the old file stays refused if it is opened again.
     let reopened = &exchange(
@@ -4031,4 +4047,331 @@ fn approvals_that_cannot_be_read_approve_nothing_and_recording_stops() {
         exchange(&tmp, &[visit("c", "https://public.test/c", AT)]),
         [stored("c")]
     );
+}
+
+// --- Page metadata (Issue #22) -------------------------------------------------------------------
+
+const PAGE_AT: &str = "2026-11-05T01:00:00.000Z";
+
+fn page_visit(id: &str, url: &str, page: Value) -> Value {
+    let mut event = visit(id, url, AT);
+    event["page"] = page;
+    event
+}
+
+fn full_page(at: &str, title: &str) -> Value {
+    json!({
+        "capturedAt": at, "title": title, "description": "Description CANARY",
+        "ogTitle": "OG title", "ogDescription": "OG description", "ogSiteName": "Site",
+        "ogImageUrl": "https://cdn.test/og.png?size=large&token=keep", "faviconUrl": "https://site.test/favicon.ico",
+    })
+}
+
+/// Every row of `page_metadata` with its rowid, in URL order.
+fn metadata_rows(tmp: &TempDir) -> Vec<Vec<Value>> {
+    let db = Connection::open_with_flags(
+        tmp.default_vault(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let mut statement = db
+        .prepare("SELECT rowid, url, event_id, title, description, og_title, og_description, og_site_name, og_image_url, favicon_url, captured_at FROM page_metadata ORDER BY url")
+        .unwrap();
+    let rows = statement
+        .query_map([], |row| {
+            (0..11)
+                .map(|index| {
+                    Ok(match row.get_ref(index)? {
+                        rusqlite::types::ValueRef::Null => Value::Null,
+                        rusqlite::types::ValueRef::Integer(n) => json!(n),
+                        other => json!(other.as_str().unwrap()),
+                    })
+                })
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    rows
+}
+
+fn vault_contains(tmp: &TempDir, needle: &[u8]) -> bool {
+    std::fs::read(tmp.default_vault())
+        .unwrap()
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+#[test]
+fn page_metadata_is_stored_with_its_visit_and_kept_apart_from_the_title() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let url = "https://public.test/article?id=7&utm=keep";
+    let replies = exchange(
+        &tmp,
+        &[page_visit("v1", url, full_page(PAGE_AT, "Document title"))],
+    );
+    assert_eq!(replies, [stored("v1")], "the acknowledgement is unchanged");
+    let rows = metadata_rows(&tmp);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0][1..],
+        [
+            json!(url),
+            json!("v1"),
+            json!("Document title"),
+            json!("Description CANARY"),
+            json!("OG title"),
+            json!("OG description"),
+            json!("Site"),
+            json!("https://cdn.test/og.png?size=large&token=keep"),
+            json!("https://site.test/favicon.ico"),
+            json!(PAGE_AT)
+        ]
+    );
+    // The visit keeps the tab title it always had.
+    assert!(row_dump(&tmp.default_vault())
+        .join("\n")
+        .contains("v|v1|https://public.test/article?id=7&utm=keep|Rust Book|"));
+}
+
+#[test]
+fn a_new_capture_of_a_url_updates_its_row_in_place_and_null_means_absent() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let url = "https://public.test/a";
+    exchange(&tmp, &[page_visit("v1", url, full_page(PAGE_AT, "First"))]);
+    let first = metadata_rows(&tmp);
+    // The page lost its OGP: only the title is left.
+    let later = json!({ "capturedAt": "2026-11-05T02:00:00.000Z", "title": "Second" });
+    assert_eq!(
+        exchange(&tmp, &[page_visit("v2", url, later)]),
+        [stored("v2")]
+    );
+    let rows = metadata_rows(&tmp);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0][0], first[0][0],
+        "updated in place, not deleted and inserted"
+    );
+    assert_eq!(
+        rows[0][1..],
+        [
+            json!(url),
+            json!("v2"),
+            json!("Second"),
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            json!("2026-11-05T02:00:00.000Z")
+        ]
+    );
+    // A visit whose page could not be read leaves the row alone.
+    assert_eq!(exchange(&tmp, &[visit("v3", url, AT)]), [stored("v3")]);
+    assert_eq!(metadata_rows(&tmp), rows);
+}
+
+#[test]
+fn a_late_or_resent_capture_never_replaces_a_newer_one() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let url = "https://public.test/a";
+    let newer = page_visit("new", url, full_page("2026-11-05T03:00:00.000Z", "Newer"));
+    let older = page_visit("old", url, full_page("2026-11-05T02:59:59.999Z", "Older"));
+    assert_eq!(
+        exchange(&tmp, &[newer.clone(), older]),
+        [stored("new"), stored("old")]
+    );
+    let rows = metadata_rows(&tmp);
+    assert_eq!(
+        (rows[0][2].clone(), rows[0][3].clone()),
+        (json!("new"), json!("Newer"))
+    );
+    // A resend after a lost acknowledgement: same visit, same row, nothing duplicated.
+    assert_eq!(
+        exchange(&tmp, &[newer.clone(), newer]),
+        [stored("new"), stored("new")]
+    );
+    assert_eq!(metadata_rows(&tmp), rows);
+    let visits = row_dump(&tmp.default_vault());
+    assert_eq!(
+        visits
+            .iter()
+            .filter(|row| row.starts_with("v|new|"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn metadata_follows_only_the_visit_stored_with_exactly_that_url() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    exchange(&tmp, &[visit("v1", "https://public.test/a", AT)]);
+    // The same event id again, now claiming another URL: the visit is not stored again, and the
+    // metadata joins neither URL.
+    assert_eq!(
+        exchange(
+            &tmp,
+            &[page_visit(
+                "v1",
+                "https://public.test/b",
+                full_page(PAGE_AT, "Other")
+            )]
+        ),
+        [stored("v1")]
+    );
+    assert_eq!(metadata_rows(&tmp), Vec::<Vec<Value>>::new());
+    exchange(
+        &tmp,
+        &[page_visit(
+            "v2",
+            "https://public.test/b",
+            full_page(PAGE_AT, "B"),
+        )],
+    );
+    let db = Connection::open(tmp.default_vault()).unwrap();
+    let broken: i64 = db
+        .query_row(
+            "SELECT count(*) FROM pragma_foreign_key_check('page_metadata')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(broken, 0);
+    let joined: i64 = db
+        .query_row(
+            "SELECT count(*) FROM page_metadata m JOIN visits v ON v.event_id = m.event_id AND v.url = m.url",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(joined, 1);
+    // The vault itself refuses a row without its visit, and values outside the limits.
+    db.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+    assert!(db
+        .execute(
+            "INSERT INTO page_metadata (url, event_id, captured_at) VALUES ('https://x.test/', 'none', ?1)",
+            [PAGE_AT]
+        )
+        .is_err());
+    assert!(db
+        .execute("UPDATE page_metadata SET title = ?1", ["x".repeat(501)])
+        .is_err());
+    assert!(db
+        .execute("UPDATE page_metadata SET title = ''", [])
+        .is_err());
+    assert!(db
+        .execute("UPDATE page_metadata SET captured_at = 'soon'", [])
+        .is_err());
+}
+
+#[test]
+fn bad_metadata_is_ignored_and_the_visit_is_still_stored() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let bad = [
+        json!("CANARY"),
+        json!([1]),
+        json!({ "title": "CANARY no time" }),
+        json!({ "capturedAt": "yesterday", "title": "CANARY" }),
+        json!({ "capturedAt": PAGE_AT, "title": ["CANARY"] }),
+        json!({ "capturedAt": PAGE_AT, "faviconUrl": 1, "title": "CANARY" }),
+    ];
+    let events: Vec<Value> = bad
+        .iter()
+        .enumerate()
+        .map(|(index, page)| {
+            page_visit(
+                &format!("v{index}"),
+                &format!("https://public.test/{index}"),
+                page.clone(),
+            )
+        })
+        .collect();
+    let replies = exchange(&tmp, &events);
+    assert_eq!(replies.len(), bad.len());
+    for (index, reply) in replies.iter().enumerate() {
+        assert_eq!(reply, &stored(&format!("v{index}")));
+    }
+    assert_eq!(metadata_rows(&tmp), Vec::<Vec<Value>>::new());
+    assert!(!vault_contains(&tmp, b"CANARY"));
+}
+
+#[test]
+fn the_host_cleans_page_text_and_keeps_only_web_urls() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let page = json!({
+        "capturedAt": PAGE_AT,
+        "title": "  A\u{0}\tB \n\n C\u{7}  ",
+        "description": "長".repeat(5000),
+        "ogTitle": "   ",
+        "ogSiteName": "",
+        "ogDescription": null,
+        "ogImageUrl": "javascript:alert(1)",
+        "faviconUrl": "/relative.ico",
+    });
+    assert_eq!(
+        exchange(&tmp, &[page_visit("v", "https://public.test/", page)]),
+        [stored("v")]
+    );
+    let row = &metadata_rows(&tmp)[0];
+    assert_eq!(row[3], json!("A B C"));
+    assert_eq!(row[4].as_str().unwrap().chars().count(), 1000);
+    for index in [5, 6, 7, 8, 9] {
+        assert_eq!(row[index], Value::Null, "column {index}");
+    }
+}
+
+#[test]
+fn metadata_is_judged_with_its_visit_by_the_policy() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    add_never_save_rule(&tmp, "blind.test");
+    {
+        let store = store_of(&tmp);
+        let current = store.load().unwrap();
+        let mut edited = current.policy.clone();
+        edited
+            .layers
+            .save_but_no_mcp
+            .rules
+            .push("private.test".into());
+        store.update(&current, edited).unwrap();
+    }
+    let replies = exchange(
+        &tmp,
+        &[
+            page_visit(
+                "b",
+                "https://blind.test/x",
+                full_page(PAGE_AT, "Blind CANARY"),
+            ),
+            page_visit("p", "https://private.test/x", full_page(PAGE_AT, "Private")),
+        ],
+    );
+    assert_eq!(replies, [dropped("b"), stored("p")]);
+    let rows = metadata_rows(&tmp);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][1], json!("https://private.test/x"));
+    assert!(!vault_contains(&tmp, b"Blind CANARY"));
+    assert!(!vault_contains(&tmp, b"blind.test"));
+
+    // Without a usable policy nothing is stored, metadata included.
+    std::fs::write(store_of(&tmp).policy_path(), b"{").unwrap();
+    let reply = &exchange(
+        &tmp,
+        &[page_visit(
+            "n",
+            "https://public.test/n",
+            full_page(PAGE_AT, "No policy"),
+        )],
+    )[0];
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert_eq!(metadata_rows(&tmp).len(), 1);
+    assert!(!vault_contains(&tmp, b"No policy"));
 }

@@ -137,10 +137,10 @@ fn scalar(db: &Connection, sql: &str) -> i64 {
 }
 
 #[test]
-fn new_vaults_are_created_at_schema_4_with_image_tables() {
+fn new_vaults_are_created_at_schema_5_with_image_tables() {
     let f = fixture();
     let db = open_vault(&f.vault).unwrap();
-    assert_eq!(scalar(&db, "PRAGMA user_version"), 4);
+    assert_eq!(scalar(&db, "PRAGMA user_version"), 5);
     assert_eq!(table_counts(&db).unwrap(), (0, 0, 0));
 }
 

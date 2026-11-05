@@ -379,6 +379,8 @@ hardening, rule compilation and independent review; then #8.
 
 ## 12. Slice 2: schema 4 and the publication flag
 
+> Issue #22 added `page_metadata` as schema 5, creation-only in the same way; schema 4 vaults are now refused like older ones. See `docs/issue-022-page-metadata.md`.
+
 ### DDL
 
 The definition lives in one place, `native-host/src/schema.rs`, in the library that the host and VisibleStore share. Tables as created:
