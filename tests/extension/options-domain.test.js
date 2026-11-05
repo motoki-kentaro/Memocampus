@@ -85,7 +85,7 @@ test("no match, an invalid rule, a bad URL and a host failure each leave both gr
   const { page, host, $ } = await openPage();
   const cases = [
     [() => ({ ok: true, matched: false }), "一致しませんでした", "no_match"],
-    [() => ({ ok: false, error: "invalid_domain_wildcard" }), /^ルールを確認してください。Domain Wildcardの書き方が正しくありません。.*公開サフィックス/, "rule_error"],
+    [() => ({ ok: false, error: "invalid_domain_wildcard" }), /^ルールを確認してください。Domain Wildcardの書き方が正しくありません。ドメインのみを指定してください.*承認によっても使えるようにはなりません/, "rule_error"],
     [() => ({ ok: false, error: "invalid_url" }), /^URLを確認してください。/, "url_error"],
     [() => { throw new SearchError("host_unavailable"); }, /^判定できませんでした。/, "failed"],
     [() => ({ ok: true, matched: "true" }), /^判定できませんでした。/, "failed"],

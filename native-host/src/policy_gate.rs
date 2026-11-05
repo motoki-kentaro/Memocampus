@@ -24,8 +24,11 @@
 //! policy of a given ETag; `policy_start` stores the first policy of a new install, which is what
 //! starts recording. Only the last two write, and only through `PolicyStore`.
 
-use memocampus_native_host::policy::{self, CompiledPolicy, Decision, Policy, Problem, RuleSpec};
+use memocampus_native_host::policy::{
+    self, CompiledPolicy, Decision, DomainApprovals, Policy, Problem, RuleSpec, TypedRule,
+};
 use memocampus_native_host::policy_store::{self as store, PolicyStore, Snapshot, StoreError};
+use memocampus_native_host::public_suffix::{self as psl, Diagnosis};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::time::Duration;
@@ -53,6 +56,13 @@ const VERSION_MISMATCH: &str = "policy_version_mismatch";
 const INVALID_RULE: &str = "invalid_rule";
 const INVALID_URL: &str = "invalid_url";
 const UNKNOWN_PRESET: &str = "unknown_preset";
+const INVALID_DOMAIN: &str = "invalid_domain";
+const INVALID_DOMAIN_WILDCARD: &str = "invalid_domain_wildcard";
+const NOT_RESTRICTED: &str = "domain_not_restricted";
+const DOMAIN_MISMATCH: &str = "domain_mismatch";
+const DOMAIN_IN_USE: &str = "domain_in_use";
+const PSL_UNAVAILABLE: &str = "psl_unavailable";
+const APPROVALS_UNAVAILABLE: &str = "approvals_unavailable";
 /// A draft is the policy document; the file holds at most 1 MiB of it written out.
 const MAX_DRAFT_BYTES: usize = 1_048_576;
 /// As the evaluator's limit on URLs, which are never recorded beyond it.
@@ -222,10 +232,104 @@ impl PolicyGate {
         }
     }
 
+    /// The approved domains, as every judgement of this request uses them: none if the store or
+    /// its approvals cannot be read, so a rule that needs one is refused.
+    fn approvals(&self) -> DomainApprovals {
+        self.store
+            .as_ref()
+            .map_or_else(|_| DomainApprovals::none(), PolicyStore::approvals)
+    }
+
+    /// What the Public Suffix List says of a domain wildcard, and whether its domain is approved.
+    /// Changes nothing. A syntax error is `invalid`, never approvable; the domain is sent back only
+    /// for a rule that is valid syntax, and only in its canonical form.
+    pub fn domain_check(&self, message: &Value) -> Value {
+        answer(message, "policy_domain_check_result", || {
+            let pattern = domain_rule_of(message)?;
+            let mut reply = match psl::diagnose(pattern) {
+                Diagnosis::Valid(domain) => json!({ "status": "valid", "domain": domain }),
+                Diagnosis::Restricted {
+                    domain,
+                    restriction,
+                } => json!({
+                    "status": "restricted",
+                    "reason": restriction.code(),
+                    "approved": self.approvals().contains(&domain),
+                    "domain": domain,
+                }),
+                Diagnosis::InvalidSyntax => json!({ "status": "invalid" }),
+                Diagnosis::ListUnavailable => return Err(Refusal::Code(PSL_UNAVAILABLE)),
+            };
+            reply["psl"] = psl_snapshot();
+            Ok(reply)
+        })
+    }
+
+    /// Every approved domain, and whether the stored policy uses it. For the settings page only;
+    /// nothing in recording asks for it.
+    pub fn domain_approvals(&self, message: &Value) -> Value {
+        answer(message, "policy_domain_approvals_result", || {
+            let store = self.writable_store()?;
+            let (approvals, used) = retry(|| store.list_approvals()).map_err(approval_code)?;
+            let items: Vec<Value> = approvals
+                .into_iter()
+                .map(|approval| {
+                    let in_use = used.as_ref().map(|used| used.contains(&approval.domain));
+                    json!({ "domain": approval.domain, "approvedAt": approval.approved_at, "inUse": in_use })
+                })
+                .collect();
+            Ok(json!({ "approvals": items, "psl": psl_snapshot() }))
+        })
+    }
+
+    /// Approves the domain of a restricted domain wildcard. The host judges the rule again and
+    /// stores its canonical domain only if it is the one the request names, so a person approves
+    /// exactly the domain shown. A syntax error, a registrable domain or an unreadable list is
+    /// refused. Approving adds no rule and changes no policy.
+    pub fn domain_approve(&self, message: &Value) -> Value {
+        answer(message, "policy_domain_approve_result", || {
+            let pattern = domain_rule_of(message)?;
+            let named = message
+                .get("domain")
+                .and_then(Value::as_str)
+                .ok_or(Refusal::Code(INVALID_DOMAIN))?;
+            let domain = match psl::diagnose(pattern) {
+                Diagnosis::Restricted { domain, .. } => domain,
+                Diagnosis::Valid(_) => return Err(Refusal::Code(NOT_RESTRICTED)),
+                Diagnosis::InvalidSyntax => return Err(Refusal::Code(INVALID_DOMAIN_WILDCARD)),
+                Diagnosis::ListUnavailable => return Err(Refusal::Code(PSL_UNAVAILABLE)),
+            };
+            if domain != named {
+                return Err(Refusal::Code(DOMAIN_MISMATCH));
+            }
+            let store = self.writable_store()?;
+            let approval = retry(|| store.approve_domain(&domain)).map_err(approval_code)?;
+            Ok(json!({ "domain": approval.domain, "approvedAt": approval.approved_at }))
+        })
+    }
+
+    /// Revokes the approval of a canonical domain, refused while the stored policy uses it.
+    pub fn domain_revoke(&self, message: &Value) -> Value {
+        answer(message, "policy_domain_revoke_result", || {
+            let domain = message
+                .get("domain")
+                .and_then(Value::as_str)
+                .filter(|domain| memocampus_native_host::domain_approvals::is_canonical(domain))
+                .ok_or(Refusal::Code(INVALID_DOMAIN))?;
+            let store = self.writable_store()?;
+            let removed = retry(|| store.revoke_domain(domain)).map_err(approval_code)?;
+            Ok(json!({ "domain": domain, "revoked": removed }))
+        })
+    }
+
+    fn writable_store(&self) -> Result<&PolicyStore, Refusal> {
+        self.store.as_ref().map_err(|_| Refusal::Code(UNAVAILABLE))
+    }
+
     /// Whether a draft could be applied as it is. Changes nothing.
     pub fn validate(&self, message: &Value) -> Value {
         answer(message, "policy_validate_result", || {
-            let (draft, _) = draft_of(message)?;
+            let (draft, _) = draft_of(message, &self.approvals())?;
             Ok(
                 json!({ "schemaVersion": draft.schema_version, "engineVersion": draft.engine_version }),
             )
@@ -241,7 +345,7 @@ impl PolicyGate {
                 .and_then(|rule| serde_json::from_value(rule.clone()).ok())
                 .ok_or(Refusal::Code(INVALID_RULE))?;
             let url = url_of(message)?;
-            let matched = policy::rule_matches(&rule, url)
+            let matched = policy::rule_matches_with(&rule, url, &self.approvals())
                 .map_err(|error| Refusal::Code(rule.error_code(error)))?;
             Ok(json!({ "matched": matched }))
         })
@@ -252,7 +356,7 @@ impl PolicyGate {
     pub fn test_url(&self, message: &Value) -> Value {
         answer(message, "policy_test_url_result", || {
             let url = url_of(message)?;
-            let (_, compiled) = draft_of(message)?;
+            let (_, compiled) = draft_of(message, &self.approvals())?;
             Ok(json!({ "decision": decision_code(compiled.evaluate(url)) }))
         })
     }
@@ -285,7 +389,7 @@ impl PolicyGate {
             if current.etag != expected {
                 return Err(Refusal::Code(CONFLICT));
             }
-            let (draft, _) = draft_of(message)?;
+            let (draft, _) = draft_of(message, &self.approvals())?;
             if (draft.schema_version, draft.engine_version)
                 != (current.policy.schema_version, current.policy.engine_version)
             {
@@ -315,7 +419,7 @@ impl PolicyGate {
                 return Err(Refusal::Code(ALREADY_INITIALIZED));
             }
             vault.map_err(Refusal::Code)?;
-            let (draft, _) = draft_of(message)?;
+            let (draft, _) = draft_of(message, &self.approvals())?;
             let current = Policy::default();
             if (draft.schema_version, draft.engine_version)
                 != (current.schema_version, current.engine_version)
@@ -381,7 +485,10 @@ fn answer(
 
 /// The draft of a request, if it is a policy that compiles, of a size the store can write, and its
 /// compiled form. Compiled once; only a draft that fails is gone through again for its problems.
-fn draft_of(message: &Value) -> Result<(Policy, CompiledPolicy), Refusal> {
+fn draft_of(
+    message: &Value,
+    approvals: &DomainApprovals,
+) -> Result<(Policy, CompiledPolicy), Refusal> {
     let value = message
         .get("policy")
         .filter(|value| value.is_object())
@@ -391,8 +498,8 @@ fn draft_of(message: &Value) -> Result<(Policy, CompiledPolicy), Refusal> {
     }
     let draft: Policy = serde_json::from_value(value.clone())
         .map_err(|_| Refusal::Draft(INVALID, document_problems(value)))?;
-    let Ok(compiled) = CompiledPolicy::compile(&draft) else {
-        let problems = draft.problems();
+    let Ok(compiled) = CompiledPolicy::compile_with(&draft, approvals) else {
+        let problems = draft.problems_with(approvals);
         let unsupported = problems
             .iter()
             .all(|problem| problem.code == "unsupported_regex");
@@ -431,6 +538,55 @@ fn document_problems(value: &Value) -> Vec<Problem> {
         found.push(Problem::of("invalid_policy_document"));
     }
     found
+}
+
+/// The text of a `domainWildcard` rule of a request, or `invalid_rule`.
+fn domain_rule_of(message: &Value) -> Result<&str, Refusal> {
+    let rule: RuleSpec = message
+        .get("rule")
+        .filter(|rule| rule.is_object())
+        .and_then(|rule| serde_json::from_value(rule.clone()).ok())
+        .ok_or(Refusal::Code(INVALID_RULE))?;
+    let Some(pattern) = message.pointer("/rule/pattern").and_then(Value::as_str) else {
+        return Err(Refusal::Code(INVALID_RULE));
+    };
+    match rule {
+        RuleSpec::Typed(TypedRule::DomainWildcard { .. }) => Ok(pattern),
+        _ => Err(Refusal::Code(INVALID_RULE)),
+    }
+}
+
+/// Which list the host judges with, as bundled.
+fn psl_snapshot() -> Value {
+    json!({
+        "source": psl::SOURCE,
+        "sourceCommit": psl::SOURCE_COMMIT,
+        "snapshotDate": psl::SNAPSHOT_DATE,
+    })
+}
+
+/// A store operation, tried again a few times while another process holds the policy lock.
+fn retry<T>(operation: impl Fn() -> Result<T, StoreError>) -> Result<T, StoreError> {
+    let mut attempt = 0;
+    loop {
+        match operation() {
+            Err(StoreError::Busy) if attempt < BUSY_RETRIES => {
+                attempt += 1;
+                std::thread::sleep(BUSY_WAIT);
+            }
+            other => return other,
+        }
+    }
+}
+
+fn approval_code(error: StoreError) -> Refusal {
+    Refusal::Code(match error {
+        StoreError::InUse => DOMAIN_IN_USE,
+        StoreError::Busy => BUSY,
+        StoreError::Approvals => APPROVALS_UNAVAILABLE,
+        StoreError::Invalid | StoreError::Missing => INVALID,
+        _ => UNAVAILABLE,
+    })
 }
 
 fn url_of(message: &Value) -> Result<&str, Refusal> {

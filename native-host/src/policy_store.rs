@@ -1,10 +1,19 @@
 //! Native Host is the sole writer. Construction and reads never initialize policy implicitly.
-use crate::policy::{CompiledPolicy, Decision, Error, Policy, MAX_REVISION};
+//!
+//! The domains approved for restricted domain wildcards (`domain_approvals`) live beside the
+//! policy, and every policy is compiled with the approvals read under the same lock. Approving and
+//! revoking take the policy's write lock, so an apply and a revocation never interleave: a domain
+//! the stored policy needs is never revoked, and a policy is never stored needing a domain that is
+//! not approved.
+use crate::domain_approvals::{self, Approval, ApprovalError};
+use crate::policy::{CompiledPolicy, Decision, DomainApprovals, Error, Policy, MAX_REVISION};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 const MAX_BYTES: u64 = 1_048_576;
 const MARKER: &[u8] = b"Memocampus policy initialization v1\n";
@@ -21,6 +30,10 @@ pub enum StoreError {
     Busy,
     Conflict,
     Io,
+    /// The stored policy needs the approval that was to be revoked.
+    InUse,
+    /// The approvals could not be read or written.
+    Approvals,
 }
 #[derive(Debug, Clone)]
 pub struct Snapshot {
@@ -58,6 +71,51 @@ impl PolicyStore {
     }
     pub fn policy_path(&self) -> PathBuf {
         self.dir.join("policy.json")
+    }
+    fn approvals_path(&self) -> PathBuf {
+        self.dir.join(domain_approvals::FILE_NAME)
+    }
+    /// The approved domains as a policy is judged with them: none if they cannot be read.
+    pub fn approvals(&self) -> DomainApprovals {
+        domain_approvals::read(&self.approvals_path()).map_or_else(
+            |_| DomainApprovals::none(),
+            |approvals| DomainApprovals::of(approvals.into_iter().map(|a| a.domain)),
+        )
+    }
+    /// Every approval, for the settings page, and the domains the stored policy needs (None if the
+    /// stored policy cannot be read as a policy document).
+    pub fn list_approvals(&self) -> Result<(Vec<Approval>, Option<HashSet<String>>), StoreError> {
+        let approvals =
+            domain_approvals::read(&self.approvals_path()).map_err(|_| StoreError::Approvals)?;
+        Ok((approvals, self.dependencies().ok()))
+    }
+    /// Approves a canonical domain. Under the write lock, committed before it returns.
+    pub fn approve_domain(&self, domain: &str) -> Result<Approval, StoreError> {
+        let _lock = self.lock()?;
+        domain_approvals::write(&self.approvals_path(), domain, SystemTime::now())
+            .map_err(|_| StoreError::Approvals)
+    }
+    /// Revokes an approval, unless the stored policy needs it: under the write lock, so no apply
+    /// comes between the check and the removal. False if the domain was not approved.
+    pub fn revoke_domain(&self, domain: &str) -> Result<bool, StoreError> {
+        let _lock = self.lock()?;
+        if self.dependencies()?.contains(domain) {
+            return Err(StoreError::InUse);
+        }
+        domain_approvals::remove(&self.approvals_path(), domain).map_err(|error| match error {
+            ApprovalError::Unreadable | ApprovalError::WriteFailed => StoreError::Approvals,
+        })
+    }
+    /// The domains the stored policy needs approved, read as a document, not compiled: a policy
+    /// that does not compile may still need them. None stored: none needed.
+    fn dependencies(&self) -> Result<HashSet<String>, StoreError> {
+        match read_regular(&self.policy_path()) {
+            Err(StoreError::Missing) => Ok(HashSet::new()),
+            Err(error) => Err(error),
+            Ok(bytes) => serde_json::from_slice::<Policy>(&bytes)
+                .map(|policy| policy.approval_dependencies())
+                .map_err(|_| StoreError::Invalid),
+        }
     }
     fn marker_path(&self) -> PathBuf {
         self.dir.join("policy.initialized")
@@ -105,7 +163,7 @@ impl PolicyStore {
             return Err(StoreError::Invalid);
         }
         let bytes = read_regular(&self.policy_path())?;
-        snapshot(&bytes)
+        snapshot(&bytes, || self.approvals())
     }
     /// True only before any initialization attempt. A lost policy or marker is not first use, and
     /// a lone `policy.lock` proves nothing either way.
@@ -138,14 +196,16 @@ impl PolicyStore {
     pub fn initialize_with(&self, policy: &Policy) -> Result<Snapshot, StoreError> {
         let mut first = policy.clone();
         first.revision = 1;
-        first.validate().map_err(|error| match error {
-            Error::UnsupportedRule => StoreError::Unsupported,
-            _ => StoreError::Invalid,
-        })?;
         if !fits(&first) {
             return Err(StoreError::Invalid);
         }
         let _lock = self.lock()?;
+        first
+            .validate_with(&self.approvals())
+            .map_err(|error| match error {
+                Error::UnsupportedRule => StoreError::Unsupported,
+                _ => StoreError::Invalid,
+            })?;
         for path in [self.marker_path(), self.policy_path()] {
             match fs::symlink_metadata(path) {
                 Ok(_) => return Err(StoreError::AlreadyInitialized),
@@ -176,8 +236,11 @@ impl PolicyStore {
         mut candidate: Policy,
         change: Change,
     ) -> Result<Snapshot, StoreError> {
-        candidate.validate().map_err(|_| StoreError::Invalid)?;
         let _lock = self.lock()?;
+        // Judged with the approvals as they are now, under the lock a revocation also takes.
+        candidate
+            .validate_with(&self.approvals())
+            .map_err(|_| StoreError::Invalid)?;
         let current = self.load_unlocked()?;
         if current.policy.revision != expected.policy.revision
             || current.etag != expected.etag
@@ -211,7 +274,8 @@ impl PolicyStore {
             Error::NotMigratable => StoreError::NotMigratable,
             _ => StoreError::Invalid,
         })?;
-        crate::policy::CompiledPolicy::compile(&candidate).map_err(|_| StoreError::Invalid)?;
+        CompiledPolicy::compile_with(&candidate, &self.approvals())
+            .map_err(|_| StoreError::Invalid)?;
         self.replace(expected, candidate, Change::Migration)
     }
     fn persist(&self, policy: &Policy) -> Result<(), StoreError> {
@@ -262,11 +326,23 @@ fn read_regular(path: &Path) -> Result<Vec<u8>, StoreError> {
     }
     Ok(bytes)
 }
-fn snapshot(bytes: &[u8]) -> Result<Snapshot, StoreError> {
-    let (policy, compiled) = Policy::parse_compiled(bytes).map_err(|error| match error {
+/// The approvals are read only for a policy that needs one, so a policy without a restricted
+/// domain wildcard never opens the approvals file.
+fn snapshot(
+    bytes: &[u8],
+    approvals: impl FnOnce() -> DomainApprovals,
+) -> Result<Snapshot, StoreError> {
+    let refused = |error| match error {
         Error::UnsupportedRule => StoreError::Unsupported,
         _ => StoreError::Invalid,
-    })?;
+    };
+    let policy: Policy = serde_json::from_slice(bytes).map_err(|_| StoreError::Invalid)?;
+    let approvals = if policy.approval_dependencies().is_empty() {
+        DomainApprovals::none()
+    } else {
+        approvals()
+    };
+    let compiled = CompiledPolicy::compile_with(&policy, &approvals).map_err(refused)?;
     Ok(Snapshot {
         policy,
         etag: etag_of(bytes),
@@ -764,5 +840,178 @@ mod tests {
             .unwrap();
         _held.try_lock().unwrap();
         assert_eq!(store.current_etag().unwrap_err(), StoreError::Busy);
+    }
+
+    fn with_domain(policy: &Policy, pattern: &str, enabled: bool) -> Policy {
+        use crate::policy::{RuleSpec, TypedRule};
+        let mut next = policy.clone();
+        next.layers.save_but_no_mcp.enabled = enabled;
+        next.layers
+            .save_but_no_mcp
+            .rules
+            .push(RuleSpec::Typed(TypedRule::DomainWildcard {
+                pattern: pattern.into(),
+            }));
+        next
+    }
+
+    #[test]
+    fn a_policy_needing_an_approval_is_stored_and_loaded_only_while_it_is_approved() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        let first = store.initialize().unwrap();
+        let needing = with_domain(&first.policy, "*.co.jp", true);
+        assert_eq!(
+            store.update(&first, needing.clone()).unwrap_err(),
+            StoreError::Invalid,
+            "not approved: refused, nothing written"
+        );
+        assert_eq!(store.load().unwrap().etag, first.etag);
+
+        let before = fs::read(store.policy_path()).unwrap();
+        let approval = store.approve_domain("co.jp").unwrap();
+        assert_eq!(approval.domain, "co.jp");
+        assert_eq!(
+            fs::read(store.policy_path()).unwrap(),
+            before,
+            "approving changes no policy"
+        );
+        assert_eq!(store.load().unwrap().etag, first.etag);
+        let applied = store.update(&first, needing).unwrap();
+        assert_eq!(
+            applied.compiled.evaluate("https://x.co.jp/"),
+            Decision::SaveButNoMcp
+        );
+        assert_eq!(
+            applied.compiled.evaluate("https://x.ne.jp/"),
+            Decision::None
+        );
+
+        // The approvals are lost: the stored policy no longer loads, and every URL is refused.
+        fs::remove_file(store.approvals_path()).unwrap();
+        assert_eq!(store.load().unwrap_err(), StoreError::Invalid);
+        assert_eq!(store.evaluate("https://public.test/"), Decision::NeverSave);
+        // An unreadable store is the same as none.
+        fs::write(store.approvals_path(), b"garbage").unwrap();
+        assert_eq!(store.load().unwrap_err(), StoreError::Invalid);
+        assert_eq!(store.evaluate("https://public.test/"), Decision::NeverSave);
+        assert_eq!(
+            store.approve_domain("co.jp").unwrap_err(),
+            StoreError::Approvals
+        );
+        assert_eq!(
+            fs::read(store.approvals_path()).unwrap(),
+            b"garbage",
+            "never written over"
+        );
+        fs::remove_file(store.approvals_path()).unwrap();
+        // Approved again, the same policy loads again, unchanged.
+        store.approve_domain("co.jp").unwrap();
+        assert_eq!(store.load().unwrap().etag, applied.etag);
+    }
+
+    #[test]
+    fn an_approval_the_stored_policy_needs_is_never_revoked() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        let first = store.initialize().unwrap();
+        store.approve_domain("co.jp").unwrap();
+        store.approve_domain("example.newtld").unwrap();
+        // Needed even in a disabled layer, and even when written in another case.
+        let applied = store
+            .update(&first, with_domain(&first.policy, "*.CO.JP", false))
+            .unwrap();
+        assert_eq!(store.revoke_domain("co.jp").unwrap_err(), StoreError::InUse);
+        assert!(store.approvals().contains("co.jp"));
+        assert_eq!(store.load().unwrap().etag, applied.etag);
+        assert_eq!(
+            store.revoke_domain("example.newtld"),
+            Ok(true),
+            "not used: revoked"
+        );
+        assert_eq!(store.revoke_domain("example.newtld"), Ok(false));
+        assert!(!store.approvals().contains("example.newtld"));
+        let (listed, used) = store.list_approvals().unwrap();
+        assert_eq!(
+            listed.iter().map(|a| a.domain.as_str()).collect::<Vec<_>>(),
+            ["co.jp"]
+        );
+        assert_eq!(used, Some(HashSet::from(["co.jp".to_owned()])));
+
+        // Once a policy without the rule is applied, the approval may go.
+        let removed = store
+            .update(
+                &applied,
+                Policy {
+                    revision: 2,
+                    ..first.policy.clone()
+                },
+            )
+            .unwrap();
+        assert_eq!(store.revoke_domain("co.jp"), Ok(true));
+        assert_eq!(store.load().unwrap().etag, removed.etag);
+        // And a policy needing it is refused again.
+        assert_eq!(
+            store
+                .update(&removed, with_domain(&removed.policy, "*.co.jp", true))
+                .unwrap_err(),
+            StoreError::Invalid
+        );
+    }
+
+    #[test]
+    fn a_revocation_waits_for_the_lock_an_apply_holds() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        store.initialize().unwrap();
+        store.approve_domain("co.jp").unwrap();
+        let held = store.lock().unwrap();
+        assert_eq!(store.revoke_domain("co.jp").unwrap_err(), StoreError::Busy);
+        assert_eq!(store.approve_domain("ne.jp").unwrap_err(), StoreError::Busy);
+        drop(held);
+        assert!(
+            store.approvals().contains("co.jp"),
+            "nothing changed while held"
+        );
+        assert!(!store.approvals().contains("ne.jp"));
+    }
+
+    #[test]
+    fn a_first_policy_needing_an_approval_is_checked_with_the_approvals() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        let draft = with_domain(&Policy::default(), "*.github.io", true);
+        assert_eq!(
+            store.initialize_with(&draft).unwrap_err(),
+            StoreError::Invalid
+        );
+        assert!(store.never_initialized());
+        assert_eq!(
+            store.revoke_domain("github.io"),
+            Ok(false),
+            "no policy: nothing depends"
+        );
+        store.approve_domain("github.io").unwrap();
+        let started = store.initialize_with(&draft).unwrap();
+        assert_eq!(
+            started.compiled.evaluate("https://a.github.io/"),
+            Decision::SaveButNoMcp
+        );
+    }
+
+    #[test]
+    fn an_unreadable_policy_document_blocks_a_revocation() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        store.initialize().unwrap();
+        store.approve_domain("co.jp").unwrap();
+        fs::write(store.policy_path(), b"{ not json").unwrap();
+        assert_eq!(
+            store.revoke_domain("co.jp").unwrap_err(),
+            StoreError::Invalid
+        );
+        assert!(store.approvals().contains("co.jp"));
+        let (_, used) = store.list_approvals().unwrap();
+        assert_eq!(used, None, "what the policy uses is unknown");
     }
 }

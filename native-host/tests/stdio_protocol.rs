@@ -3470,21 +3470,22 @@ fn a_domain_wildcard_is_tested_alone_by_the_production_matcher() {
         );
     }
     for (rule, url, code) in [
+        // Restricted by the list and not approved: refused, but approvable (see below).
         (
             "*.co.jp",
             "https://amazon.co.jp/",
-            "invalid_domain_wildcard",
+            "domain_wildcard_not_approved",
         ),
-        ("*.com", "https://a.com/", "invalid_domain_wildcard"),
+        ("*.com", "https://a.com/", "domain_wildcard_not_approved"),
         (
             "*.github.io",
             "https://a.github.io/",
-            "invalid_domain_wildcard",
+            "domain_wildcard_not_approved",
         ),
         (
             "*.CANARY.test",
             "https://a.CANARY.test/",
-            "invalid_domain_wildcard",
+            "domain_wildcard_not_approved",
         ),
         (
             "*.CANARY.com/*",
@@ -3615,4 +3616,419 @@ fn domain_wildcards_decide_alike_in_validation_tests_apply_the_batch_and_recordi
     }
     assert!(!rows.contains("//both-zone.com"), "{rows}");
     assert_eq!(rows.lines().count(), 5, "{rows}");
+}
+
+// --- PSL override: approved domains (docs/issue-025-policy-engine.md, PSL override) ---
+
+fn psl_json() -> Value {
+    json!({ "source": "publicsuffix/list", "sourceCommit": "8437e5262f13305f94087abe699b4fe2be1d1de8", "snapshotDate": "2026-10-22" })
+}
+
+fn domain_call(tmp: &TempDir, kind: &str, fields: Value) -> Value {
+    let mut message = json!({ "type": kind, "requestId": "d" });
+    for (key, value) in fields.as_object().unwrap() {
+        message[key] = value.clone();
+    }
+    call(tmp, message)
+}
+
+fn approve(tmp: &TempDir, pattern: &str, domain: &str) -> Value {
+    domain_call(
+        tmp,
+        "policy_domain_approve",
+        json!({ "rule": domain_json(pattern), "domain": domain }),
+    )
+}
+
+fn approved_domains(tmp: &TempDir) -> Vec<(String, Value)> {
+    let reply = domain_call(tmp, "policy_domain_approvals", json!({}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["psl"], psl_json());
+    reply["approvals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| {
+            (
+                item["domain"].as_str().unwrap().to_owned(),
+                item["inUse"].clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_check_tells_syntax_from_the_list_and_names_the_snapshot() {
+    let tmp = TempDir::new();
+    let check = |pattern: &str| {
+        domain_call(
+            &tmp,
+            "policy_domain_check",
+            json!({ "rule": domain_json(pattern) }),
+        )
+    };
+    let result = |fields: Value| {
+        let mut reply = json!({ "ok": true, "type": "policy_domain_check_result", "requestId": "d", "psl": psl_json() });
+        for (key, value) in fields.as_object().unwrap() {
+            reply[key] = value.clone();
+        }
+        reply
+    };
+    assert_eq!(
+        check("*.Amazon.co.jp"),
+        result(json!({ "status": "valid", "domain": "amazon.co.jp" }))
+    );
+    for (pattern, domain, reason) in [
+        ("*.CO.JP", "co.jp", "public_suffix"),
+        ("*.github.io", "github.io", "public_suffix"),
+        ("*.example.newtld", "example.newtld", "unknown_suffix"),
+        ("*.corp.internal", "corp.internal", "unknown_suffix"),
+        ("*.kawasaki.jp", "kawasaki.jp", "delegated_boundary"),
+        ("*.amazonaws.com", "amazonaws.com", "delegated_boundary"),
+        ("*.www.example.com", "www.example.com", "not_registrable"),
+    ] {
+        assert_eq!(
+            check(pattern),
+            result(
+                json!({ "status": "restricted", "reason": reason, "domain": domain, "approved": false })
+            ),
+            "{pattern}"
+        );
+    }
+    for hard in [
+        "*.CANARY.co.jp/*",
+        "https://*.CANARY.jp",
+        "*.CANARY.jp:443",
+        "www.*.CANARY.jp",
+        "*",
+    ] {
+        assert_eq!(
+            check(hard),
+            result(json!({ "status": "invalid" })),
+            "{hard}"
+        );
+    }
+    for rule in [
+        json!({ "kind": "pattern", "pattern": "*.co.jp" }),
+        json!({ "kind": "regex", "pattern": "co" }),
+        json!("*.co.jp"),
+        json!({ "kind": "domainWildcard" }),
+    ] {
+        assert_eq!(
+            domain_call(&tmp, "policy_domain_check", json!({ "rule": rule })),
+            refusal("policy_domain_check_result", "d", "invalid_rule")
+        );
+    }
+    assert!(
+        store_of(&tmp).never_initialized(),
+        "checking writes nothing"
+    );
+    assert!(!tmp.app_dir().join("settings.sqlite3").exists());
+}
+
+#[test]
+fn an_approval_is_explicit_per_domain_judged_again_and_kept_across_processes() {
+    let tmp = TempDir::new();
+    // Bad syntax, a registrable domain and a domain other than the one shown are refused.
+    for (pattern, domain, code) in [
+        ("*.co.jp/*", "co.jp", "invalid_domain_wildcard"),
+        ("https://*.co.jp", "co.jp", "invalid_domain_wildcard"),
+        ("*.amazon.co.jp", "amazon.co.jp", "domain_not_restricted"),
+        ("*.co.jp", "ne.jp", "domain_mismatch"),
+        ("*.co.jp", "CO.JP", "domain_mismatch"),
+        ("*.co.jp", "*.co.jp", "domain_mismatch"),
+    ] {
+        assert_eq!(
+            approve(&tmp, pattern, domain),
+            refusal("policy_domain_approve_result", "d", code),
+            "{pattern} {domain}"
+        );
+    }
+    assert_eq!(
+        domain_call(
+            &tmp,
+            "policy_domain_approve",
+            json!({ "rule": domain_json("*.co.jp") })
+        ),
+        refusal("policy_domain_approve_result", "d", "invalid_domain")
+    );
+    assert_eq!(
+        domain_call(
+            &tmp,
+            "policy_domain_approve",
+            json!({ "rule": pattern_json("*.co.jp"), "domain": "co.jp" })
+        ),
+        refusal("policy_domain_approve_result", "d", "invalid_rule")
+    );
+    assert!(approved_domains(&tmp).is_empty());
+
+    let first = approve(&tmp, "*.CO.JP", "co.jp");
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["domain"], "co.jp");
+    let again = approve(&tmp, "*.co.jp", "co.jp");
+    assert_eq!(
+        again["approvedAt"], first["approvedAt"],
+        "one approval per domain"
+    );
+    let unicode = approve(&tmp, "*.個人.香港", "xn--gmqw5a.xn--j6w193g");
+    assert_eq!(unicode["ok"], true, "{unicode}");
+    // Each request is its own host process: the approvals are what was stored.
+    assert_eq!(
+        approved_domains(&tmp),
+        [
+            ("co.jp".to_owned(), json!(false)),
+            ("xn--gmqw5a.xn--j6w193g".to_owned(), json!(false))
+        ],
+        "no policy stored: nothing uses them"
+    );
+    let check = domain_call(
+        &tmp,
+        "policy_domain_check",
+        json!({ "rule": domain_json("*.xn--gmqw5a.xn--j6w193g") }),
+    );
+    assert_eq!(
+        check["approved"], true,
+        "Unicode and Punycode are one domain"
+    );
+    let other = domain_call(
+        &tmp,
+        "policy_domain_check",
+        json!({ "rule": domain_json("*.ne.jp") }),
+    );
+    assert_eq!(
+        other["approved"], false,
+        "an approval of co.jp is none of ne.jp"
+    );
+
+    // The rule test now matches with the approval, and only for that domain.
+    let test = |pattern: &str, url: &str| {
+        call(
+            &tmp,
+            json!({ "type": "policy_test_rule", "requestId": "r", "rule": domain_json(pattern), "url": url }),
+        )
+    };
+    assert_eq!(test("*.co.jp", "https://shop.co.jp/")["matched"], true);
+    assert_eq!(test("*.co.jp", "https://shop.ne.jp/")["matched"], false);
+    assert_eq!(
+        test("*.ne.jp", "https://shop.ne.jp/"),
+        refusal(
+            "policy_test_rule_result",
+            "r",
+            "domain_wildcard_not_approved"
+        )
+    );
+    assert!(
+        store_of(&tmp).never_initialized(),
+        "approving starts nothing"
+    );
+}
+
+#[test]
+fn an_approved_domain_is_judged_alike_by_drafts_apply_the_batch_and_recording() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let (policy, etag) = active(&tmp);
+    let before = policy_bytes(&tmp);
+    let mut draft = policy.clone();
+    draft["layers"]["neverSave"]["rules"] = json!([domain_json("*.blind.newtld")]);
+    draft["layers"]["saveButNoMcp"]["rules"] = json!([domain_json("*.co.jp")]);
+    let validate = || {
+        call(
+            &tmp,
+            json!({ "type": "policy_validate", "requestId": "v", "policy": draft }),
+        )
+    };
+    let reply = validate();
+    assert_eq!(reply["error"], "policy_invalid");
+    assert_eq!(
+        reply["errors"],
+        json!([
+            { "layer": "neverSave", "ruleIndex": 0, "code": "domain_wildcard_not_approved" },
+            { "layer": "saveButNoMcp", "ruleIndex": 0, "code": "domain_wildcard_not_approved" }
+        ])
+    );
+    let applied = call(
+        &tmp,
+        json!({ "type": "policy_apply", "requestId": "a", "policy": draft, "expectedEtag": etag }),
+    );
+    assert_eq!(applied["ok"], false, "not approved: not applied");
+    assert_eq!(policy_bytes(&tmp), before);
+
+    assert_eq!(approve(&tmp, "*.blind.newtld", "blind.newtld")["ok"], true);
+    assert_eq!(approve(&tmp, "*.co.jp", "co.jp")["ok"], true);
+    assert_eq!(policy_bytes(&tmp), before, "approving changes no policy");
+    assert_eq!(validate()["ok"], true);
+    let urls = [
+        ("1", "https://blind.newtld/", "never_save"),
+        ("2", "https://a.b.blind.newtld/x", "never_save"),
+        ("3", "https://shop.co.jp/", "save_but_no_mcp"),
+        ("4", "https://blind.newtld.co.jp/", "save_but_no_mcp"),
+        ("5", "https://shop.ne.jp/", "allow"),
+        ("6", "https://notblind.newtld/", "allow"),
+    ];
+    for (_, url, decision) in urls {
+        let reply = call(
+            &tmp,
+            json!({ "type": "policy_test_url", "requestId": "u", "policy": draft, "url": url }),
+        );
+        assert_eq!(reply["decision"], decision, "{url}");
+    }
+    let applied = call(
+        &tmp,
+        json!({ "type": "policy_apply", "requestId": "a", "policy": draft, "expectedEtag": etag }),
+    );
+    assert_eq!(applied["ok"], true, "{applied}");
+    let items: Vec<Value> = urls
+        .iter()
+        .map(|(id, url, _)| json!({ "id": id, "url": url }))
+        .collect();
+    let reply = exchange(&tmp, &[batch(json!(items))]).remove(0);
+    assert_eq!(
+        decisions(&reply),
+        urls.iter()
+            .map(|(id, _, d)| (id.to_string(), d.to_string()))
+            .collect::<Vec<_>>()
+    );
+    let events: Vec<Value> = urls.iter().map(|(id, url, _)| visit(id, url, AT)).collect();
+    for ((id, _, decision), ack) in urls.iter().zip(exchange(&tmp, &events)) {
+        assert_eq!(
+            ack,
+            if *decision == "never_save" {
+                dropped(id)
+            } else {
+                stored(id)
+            },
+            "{id}"
+        );
+    }
+    let rows = row_dump(&tmp.default_vault()).join("\n");
+    assert!(
+        !rows.contains("//blind.newtld/") && !rows.contains(".blind.newtld/"),
+        "{rows}"
+    );
+
+    // The active policy needs both approvals: neither can be revoked.
+    assert_eq!(
+        approved_domains(&tmp),
+        [
+            ("blind.newtld".to_owned(), json!(true)),
+            ("co.jp".to_owned(), json!(true))
+        ]
+    );
+    for domain in ["co.jp", "blind.newtld"] {
+        assert_eq!(
+            domain_call(&tmp, "policy_domain_revoke", json!({ "domain": domain })),
+            refusal("policy_domain_revoke_result", "d", "domain_in_use"),
+            "{domain}"
+        );
+    }
+    let (active_now, etag_now) = active(&tmp);
+    assert_eq!(status(&tmp)["state"], "ready");
+
+    // Without the rule, the approval goes, and the rule is refused again.
+    let mut without = active_now.clone();
+    without["layers"]["saveButNoMcp"]["rules"] = json!([]);
+    let applied = call(
+        &tmp,
+        json!({ "type": "policy_apply", "requestId": "a", "policy": without, "expectedEtag": etag_now }),
+    );
+    assert_eq!(applied["ok"], true, "{applied}");
+    assert_eq!(
+        domain_call(&tmp, "policy_domain_revoke", json!({ "domain": "co.jp" })),
+        json!({ "ok": true, "type": "policy_domain_revoke_result", "requestId": "d", "domain": "co.jp", "revoked": true })
+    );
+    assert_eq!(
+        approved_domains(&tmp),
+        [("blind.newtld".to_owned(), json!(true))]
+    );
+    let reply = call(
+        &tmp,
+        json!({ "type": "policy_test_rule", "requestId": "r", "rule": domain_json("*.co.jp"), "url": "https://shop.co.jp/" }),
+    );
+    assert_eq!(reply["error"], "domain_wildcard_not_approved");
+    for bad in [
+        json!("CO.JP"),
+        json!("*.co.jp"),
+        json!(""),
+        json!(1),
+        json!(null),
+    ] {
+        assert_eq!(
+            domain_call(&tmp, "policy_domain_revoke", json!({ "domain": bad })),
+            refusal("policy_domain_revoke_result", "d", "invalid_domain")
+        );
+    }
+}
+
+#[test]
+fn approvals_that_cannot_be_read_approve_nothing_and_recording_stops() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let (policy, etag) = active(&tmp);
+    assert_eq!(approve(&tmp, "*.co.jp", "co.jp")["ok"], true);
+    let mut draft = policy.clone();
+    draft["layers"]["saveButNoMcp"]["rules"] = json!([domain_json("*.co.jp")]);
+    let applied = call(
+        &tmp,
+        json!({ "type": "policy_apply", "requestId": "a", "policy": draft, "expectedEtag": etag }),
+    );
+    assert_eq!(applied["ok"], true, "{applied}");
+    assert_eq!(
+        exchange(&tmp, &[visit("a", "https://public.test/", AT)]),
+        [stored("a")]
+    );
+
+    let settings = tmp.app_dir().join("settings.sqlite3");
+    let kept = std::fs::read(&settings).unwrap();
+    std::fs::write(&settings, b"CANARY damaged").unwrap();
+    assert_eq!(
+        status(&tmp)["state"],
+        "invalid",
+        "the active policy needs an approval it cannot read"
+    );
+    let reply = exchange(&tmp, &[visit("b", "https://public.test/b", AT)]).remove(0);
+    assert_eq!(
+        reply["ok"], false,
+        "no decision: not stored, not acknowledged as dropped: {reply}"
+    );
+    assert_eq!(
+        call(
+            &tmp,
+            batch(json!([{ "id": "1", "url": "https://public.test/" }]))
+        ),
+        batch_error("policy_invalid")
+    );
+    let test = call(
+        &tmp,
+        json!({ "type": "policy_test_rule", "requestId": "r", "rule": domain_json("*.co.jp"), "url": "https://shop.co.jp/" }),
+    );
+    assert_eq!(test["error"], "domain_wildcard_not_approved");
+    assert_eq!(
+        domain_call(&tmp, "policy_domain_approvals", json!({})),
+        refusal(
+            "policy_domain_approvals_result",
+            "d",
+            "approvals_unavailable"
+        )
+    );
+    assert_eq!(
+        approve(&tmp, "*.ne.jp", "ne.jp"),
+        refusal("policy_domain_approve_result", "d", "approvals_unavailable")
+    );
+    assert_eq!(
+        std::fs::read(&settings).unwrap(),
+        b"CANARY damaged",
+        "never written over"
+    );
+    assert!(!row_dump(&tmp.default_vault())
+        .join("\n")
+        .contains("public.test/b"));
+
+    // Restored, everything works again with the same policy.
+    std::fs::write(&settings, kept).unwrap();
+    assert_eq!(status(&tmp)["state"], "ready");
+    assert_eq!(
+        exchange(&tmp, &[visit("c", "https://public.test/c", AT)]),
+        [stored("c")]
+    );
 }

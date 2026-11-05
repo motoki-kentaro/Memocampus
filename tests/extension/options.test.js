@@ -32,10 +32,17 @@ function v1(rules = {}) {
   return { ...v2(rules), schemaVersion: 1, engineVersion: 1 };
 }
 
-/** A host answering `policy_status` with `state` and `policy_get` with `policy`; it records requests. */
+/**
+ * A host answering `policy_status` with `state` and `policy_get` with `policy`; it records requests.
+ * The read-only listing of approved domains the page asks for on every reading is kept apart.
+ */
 function fakeHost({ state = "ready", policy = v2(), etag = "etag-1", status = null, get = null, delay = 0 } = {}) {
-  const host = { requests: [], policy, state, etag };
+  const host = { requests: [], listings: [], policy, state, etag };
   host.send = async (message) => {
+    if (message.type === "policy_domain_approvals") {
+      host.listings.push(message);
+      return { ok: true, type: "policy_domain_approvals_result", requestId: message.requestId, approvals: [], psl: { source: "publicsuffix/list", sourceCommit: "x", snapshotDate: "2026-10-22" } };
+    }
     host.requests.push(message);
     if (delay) await settle(delay);
     const base = { requestId: message.requestId };
@@ -299,14 +306,17 @@ test("a policy that fails when it is read is shown by its state, without content
 test("only the latest load is shown", async () => {
   const ready = fakeHost();
   const invalid = fakeHost({ state: "invalid" });
-  let call = 0;
+  let statuses = 0;
   // The first load's host is ready but answers after the second load, whose host is invalid, has finished.
+  // Counted by status question: the page also lists approved domains on each reading.
   const send = async (message) => {
-    if (call++ === 0) {
+    if (message.type !== "policy_status") return ready.send(message);
+    statuses += 1;
+    if (statuses === 1) {
       await settle(40);
       return ready.send(message);
     }
-    return message.type === "policy_status" && call === 2 ? invalid.send(message) : ready.send(message);
+    return statuses === 2 ? invalid.send(message) : ready.send(message);
   };
   const document = createDocument();
   const page = startOptionsPage({ document, window: fakeWindow(), send });

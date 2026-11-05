@@ -242,6 +242,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some("policy_validate") => write_message(&gate.validate(&value))?,
             Some("policy_test_rule") => write_message(&gate.test_rule(&value))?,
             Some("policy_test_url") => write_message(&gate.test_url(&value))?,
+            Some("policy_domain_check") => write_message(&gate.domain_check(&value))?,
+            Some("policy_domain_approvals") => write_message(&gate.domain_approvals(&value))?,
+            Some("policy_domain_approve") => write_message(&gate.domain_approve(&value))?,
+            Some("policy_domain_revoke") => write_message(&gate.domain_revoke(&value))?,
             Some("policy_preset") => write_message(&gate.preset(&value))?,
             Some("policy_apply") => write_message(&gate.apply(&value))?,
             Some("policy_start") => {

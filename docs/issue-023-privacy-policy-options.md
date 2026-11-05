@@ -1,7 +1,7 @@
 # Issue #23: Privacy settings page (options page)
 
 Status: Slice 1 (page, basic protection, draft) and Slice 2 (rule editing, validation, tests, apply) merged. Slice 3 (URL checker: adding and
-changing rules only after a host match) merged. The Domain Wildcard kind in the checker implemented, for review. Migration and recovery are open (see
+changing rules only after a host match) merged. The Domain Wildcard kind in the checker, and approving domains the Public Suffix List restricts, implemented, for review. Migration and recovery are open (see
 Handoff). CSV import and export is postponed.
 
 ## Slice 1: the page and the draft
@@ -423,6 +423,34 @@ rule, invalid URL and host failures, the host's answer shown whatever the rule l
 the confirmation, atomic apply and conflict, display, a draft error named by the host, and the extension's evaluator refusing the kind), with the
 checker, edit and page tests above. Real host [verified]: the page against the release host in a temporary app directory matched and refused the
 order's examples, added and applied rules (revision 2, stored as written), and the batch judged them.
+
+## Approving a domain the Public Suffix List restricts
+
+The host may restrict a domain wildcard by the Public Suffix List (`issue-025-policy-engine.md`, PSL override). The person can approve that
+restriction for one domain; the rule still has to be matched and applied like any other.
+
+- **Flow.** 「マッチングを確認」 sends `policy_test_rule`. If the host answers `domain_wildcard_not_approved`, the page asks `policy_domain_check`
+  (same check, same stale protection) for the reason, the canonical domain and the list's date, and shows 「承認が必要です（Public Suffix Listによる
+  制限）」 with an offer: the reason, 「承認するドメイン: …」, what an approval does, and 「このドメインを承認する」. Nothing can be added meanwhile.
+- **Reasons.** A public suffix and a domain with suffixes below it: 「この指定は、複数の登録者が利用する可能性がある広いドメイン範囲に一致します。」 and
+  what the list (with its date) says of the domain. An unknown suffix: 「2026-10-22時点のPublic Suffix Listでは、このドメイン（…）の登録境界を
+  確認できません。」. A subdomain of a registrable domain says so. Every offer says 「制限を理解したうえで、このドメインを承認できます。」, that the
+  approval is for this domain only and for later rules of it too, and that it adds no rule and changes no recording.
+- **Syntax.** `invalid_domain_wildcard` is a rule error with 「ドメインのみを指定してください」 and no offer: no approval makes it usable.
+- **Approving.** The click is checked again (the current check, a restricted answer for exactly the input, not applying) and sends
+  `policy_domain_approve` with the rule and the domain the host named; one request at a time. Only the host's answer counts. Then the check is
+  dropped (「未チェック」), the page says the domain was approved and that no rule was added, and the person checks again: only `matched: true`
+  enables the groups. A failure says why and changes nothing.
+- **Stale.** A change of the input hides the offer; an approval answer arriving after a change enables nothing.
+- **承認したドメイン.** A section of its own, after Policy全体テスト: the approved domains with their time, the list's date, and 「承認を取り消す」. A
+  domain the active policy uses cannot be revoked here (the button is off and says to remove or change the rule and apply first); the host refuses
+  it anyway (`domain_in_use`). Approvals are not rules and do not touch the draft. The list is read on every reading of the policy and after an
+  approval, an apply and a revocation; a list that cannot be read says so.
+- **Draft errors.** `domain_wildcard_not_approved` in a draft's problems names the rule and says to approve or change it.
+- **Isolation.** Only the settings page modules send `policy_domain_*`; a test checks every other extension module, the service worker included.
+
+Tests: `tests/extension/options-approval.test.js`, and the existing page tests, which now leave the read-only approvals listing out of the
+messages they compare.
 
 ## Handoff
 

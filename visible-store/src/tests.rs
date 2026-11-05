@@ -3191,3 +3191,26 @@ fn domain_wildcards_keep_rows_recorded_before_them_out_of_the_public_read() {
     }
     assert_eq!(visible.len(), 3, "{visible:?}");
 }
+
+#[test]
+fn an_approved_domain_hides_rows_and_lost_approvals_close_the_read() {
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    for (id, url) in [
+        ("shop", "https://shop.co.jp/a"),
+        ("apex", "https://co.jp/"),
+        ("other", "https://shop.ne.jp/"),
+    ] {
+        visit(&db, id, url, "Title", &day(3));
+    }
+    drop(db);
+    let store = f.policy_store();
+    store.approve_domain("co.jp").unwrap();
+    add_domain(&f, false, "*.co.jp");
+    assert_eq!(f.urls(), ["https://shop.ne.jp/"]);
+
+    // The approvals cannot be read: the policy that needs one is unusable, and nothing is public.
+    let settings = f.app.join("settings.sqlite3");
+    std::fs::write(&settings, b"damaged").unwrap();
+    assert_failed(f.store.search_visits(&ALL), VisibleError::PolicyUnavailable);
+}

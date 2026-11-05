@@ -1744,9 +1744,13 @@ fn a_domain_wildcard_matches_the_domain_and_its_subdomains_on_label_boundaries()
     }
     let huge = format!("https://www.amazon.co.jp/{}", "x".repeat(40_000));
     assert_eq!(rule_matches(&rule, &huge), Err(Error::InvalidUrl));
-    // A refused rule matches nothing.
+    // A refused rule matches nothing: a restricted domain without an approval, or bad syntax.
     assert_eq!(
         rule_matches(&domain("*.co.jp"), "https://amazon.co.jp/"),
+        Err(Error::UnapprovedDomain)
+    );
+    assert_eq!(
+        rule_matches(&domain("*.co.jp/*"), "https://amazon.co.jp/"),
         Err(Error::InvalidPolicy)
     );
 }
@@ -1851,7 +1855,7 @@ fn a_domain_wildcard_is_kind_and_pattern_in_version_2_only() {
 
 #[test]
 fn an_invalid_domain_wildcard_refuses_the_policy_even_in_a_disabled_layer_and_is_named() {
-    let mut policy = with_domains(&["*.example.com"], &["*.co.jp", "*.amazon.co.jp"]);
+    let mut policy = with_domains(&["*.example.com"], &["*.co.jp/x", "*.amazon.co.jp"]);
     policy.layers.save_but_no_mcp.enabled = false;
     assert_eq!(
         CompiledPolicy::compile(&policy).unwrap_err(),
@@ -1916,4 +1920,235 @@ fn domain_wildcards_keep_the_order_of_the_zones() {
         compiled.evaluate("https://a.example.com/?token=x"),
         Decision::NeverSave
     );
+}
+
+// --- PSL override (docs/issue-025-policy-engine.md, PSL override) ---
+
+#[test]
+fn the_list_snapshot_is_named_as_bundled() {
+    use crate::public_suffix::{SNAPSHOT_DATE, SOURCE, SOURCE_COMMIT};
+    // Bound to the digest checked in `the_bundled_public_suffix_list_is_the_pinned_one_and_is_read`.
+    assert_eq!(SOURCE, "publicsuffix/list");
+    assert_eq!(SOURCE_COMMIT, "8437e5262f13305f94087abe699b4fe2be1d1de8");
+    assert_eq!(SNAPSHOT_DATE, "2026-10-22");
+    let doc = include_str!("../../../docs/issue-025-policy-engine.md");
+    assert!(doc.contains(SOURCE_COMMIT) && doc.contains(SNAPSHOT_DATE));
+}
+
+#[test]
+fn syntax_and_the_list_are_judged_apart() {
+    use crate::public_suffix::{diagnose, Diagnosis, Restriction::*};
+    let restricted = |domain: &str, restriction| Diagnosis::Restricted {
+        domain: domain.into(),
+        restriction,
+    };
+    for (rule, expected) in [
+        ("*.amazon.co.jp", Diagnosis::Valid("amazon.co.jp".into())),
+        ("*.Amazon.CO.jp", Diagnosis::Valid("amazon.co.jp".into())),
+        ("*.co.jp", restricted("co.jp", PublicSuffix)),
+        ("*.CO.JP", restricted("co.jp", PublicSuffix)),
+        ("*.com", restricted("com", PublicSuffix)),
+        ("*.github.io", restricted("github.io", PublicSuffix)),
+        (
+            "*.foo.kawasaki.jp",
+            restricted("foo.kawasaki.jp", PublicSuffix),
+        ),
+        (
+            "*.個人.香港",
+            restricted("xn--gmqw5a.xn--j6w193g", PublicSuffix),
+        ),
+        (
+            "*.xn--55qx5d.xn--j6w193g",
+            restricted("xn--55qx5d.xn--j6w193g", PublicSuffix),
+        ),
+        (
+            "*.example.newtld",
+            restricted("example.newtld", UnknownSuffix),
+        ),
+        (
+            "*.corp.internal",
+            restricted("corp.internal", UnknownSuffix),
+        ),
+        ("*.newtld", restricted("newtld", UnknownSuffix)),
+        (
+            "*.kawasaki.jp",
+            restricted("kawasaki.jp", DelegatedBoundary),
+        ),
+        (
+            "*.amazonaws.com",
+            restricted("amazonaws.com", DelegatedBoundary),
+        ),
+        (
+            "*.www.example.com",
+            restricted("www.example.com", NotRegistrable),
+        ),
+        (
+            "*.mail.amazon.co.jp",
+            restricted("mail.amazon.co.jp", NotRegistrable),
+        ),
+    ] {
+        assert_eq!(diagnose(rule), expected, "{rule}");
+    }
+    for hard in [
+        "*.amazon.co.jp/*",
+        "https://*.amazon.co.jp",
+        "*.amazon.co.jp:443",
+        "www.*.amazon.co.jp",
+        "*.*.example.com",
+        "www?.example.com",
+        "?.example.com",
+        "example.*",
+        "*.example.*",
+        "*",
+        "*.",
+        " *.co.jp",
+        "*.co.jp.",
+        "*..co.jp",
+        "*.-a.com",
+        "*.a_b.com",
+        "*.1.2.3.4",
+        "*.xn--.com",
+        "amazon.co.jp",
+    ] {
+        assert_eq!(diagnose(hard), Diagnosis::InvalidSyntax, "{hard:?}");
+    }
+    assert_eq!(
+        diagnose(&format!("*.{}.com", "a".repeat(64))),
+        Diagnosis::InvalidSyntax
+    );
+    assert_eq!(
+        diagnose(&format!("*.{}.com", "a".repeat(5000))),
+        Diagnosis::InvalidSyntax
+    );
+}
+
+fn approved(domains: &[&str]) -> DomainApprovals {
+    DomainApprovals::of(domains.iter().map(|d| d.to_string()))
+}
+
+#[test]
+fn an_approval_makes_exactly_its_domain_usable_and_nothing_else() {
+    let co = approved(&["co.jp"]);
+    let rule = domain("*.co.jp");
+    for (url, expected) in [
+        ("https://co.jp/", true),
+        ("https://amazon.co.jp/", true),
+        ("https://a.b.example.co.jp/", true),
+        ("https://amazon.ne.jp/", false),
+        ("https://co.jp.evil.com/", false),
+    ] {
+        assert_eq!(rule_matches_with(&rule, url, &co), Ok(expected), "{url}");
+    }
+    assert_eq!(
+        rule_matches_with(&domain("*.CO.JP"), "https://x.co.jp/", &co),
+        Ok(true),
+        "the canonical domain is the identity"
+    );
+    for other in [
+        "*.ne.jp",
+        "*.x.co.jp.newtld",
+        "*.github.io",
+        "*.kawasaki.jp",
+    ] {
+        assert_eq!(
+            rule_matches_with(&domain(other), "https://a.ne.jp/", &co),
+            Err(Error::UnapprovedDomain),
+            "{other}"
+        );
+    }
+    // No approval makes bad syntax usable, whatever is approved.
+    let everything = approved(&["co.jp", "amazon.co.jp", "com", "example.com"]);
+    for hard in [
+        "*.co.jp/*",
+        "https://*.co.jp",
+        "*.co.jp:443",
+        "*.*.co.jp",
+        "co.jp",
+    ] {
+        assert_eq!(
+            rule_matches_with(&domain(hard), "https://a.co.jp/", &everything),
+            Err(Error::InvalidPolicy),
+            "{hard}"
+        );
+    }
+    // An approval is no match: a URL elsewhere is not refused by it.
+    let mut policy = with_domains(&[], &["*.co.jp"]);
+    let compiled = CompiledPolicy::compile_with(&policy, &co).unwrap();
+    assert_eq!(compiled.evaluate("https://public.test/"), Decision::None);
+    assert_eq!(
+        compiled.evaluate("https://shop.co.jp/"),
+        Decision::SaveButNoMcp
+    );
+    // A valid domain needs none, and gains nothing from one.
+    policy.layers.save_but_no_mcp.rules = vec![domain("*.example.com")];
+    let plain = CompiledPolicy::compile(&policy).unwrap();
+    let with = CompiledPolicy::compile_with(&policy, &everything).unwrap();
+    for url in urls() {
+        assert_eq!(plain.evaluate(&url), with.evaluate(&url), "{url}");
+    }
+}
+
+#[test]
+fn an_unapproved_domain_refuses_the_whole_policy_and_is_named() {
+    let mut policy = with_domains(&["*.example.com"], &["*.github.io", "*.co.jp/x"]);
+    policy.layers.save_but_no_mcp.enabled = false;
+    assert_eq!(
+        CompiledPolicy::compile_with(&policy, &approved(&["co.jp"])).unwrap_err(),
+        Error::UnapprovedDomain
+    );
+    assert_eq!(
+        policy.problems_with(&approved(&["co.jp"])),
+        [
+            Problem {
+                layer: Some("saveButNoMcp"),
+                rule_index: Some(0),
+                code: "domain_wildcard_not_approved",
+            },
+            Problem {
+                layer: Some("saveButNoMcp"),
+                rule_index: Some(1),
+                code: "invalid_domain_wildcard",
+            }
+        ]
+    );
+    policy.layers.save_but_no_mcp.rules.pop();
+    assert!(policy.problems_with(&approved(&["github.io"])).is_empty());
+    assert!(policy.validate_with(&approved(&["github.io"])).is_ok());
+    assert_eq!(policy.validate().unwrap_err(), Error::UnapprovedDomain);
+    assert_eq!(
+        domain("*.a").error_code(Error::UnapprovedDomain),
+        "domain_wildcard_not_approved"
+    );
+    assert_eq!(
+        domain("*.a").error_code(Error::SuffixListUnavailable),
+        "psl_unavailable"
+    );
+}
+
+#[test]
+fn a_policy_depends_on_the_approvals_of_its_restricted_domains_only() {
+    let mut policy = with_domains(&["*.co.jp", "*.example.com"], &["*.CO.JP", "*.newtld"]);
+    policy.layers.never_save.enabled = false;
+    policy
+        .layers
+        .save_but_no_mcp
+        .rules
+        .push(domain("*.co.jp/*"));
+    policy.layers.save_but_no_mcp.rules.push("*.com".into());
+    assert_eq!(
+        policy.approval_dependencies(),
+        HashSet::from(["co.jp".to_owned(), "newtld".to_owned()]),
+        "patterns, valid domains and bad syntax need none"
+    );
+}
+
+#[test]
+fn the_engine_reads_no_store() {
+    let engine = include_str!("../policy.rs");
+    let list = include_str!("../public_suffix.rs");
+    for source in [engine, list] {
+        for forbidden in ["rusqlite", "domain_approvals", "std::fs", "File::"] {
+            assert!(!source.contains(forbidden), "{forbidden}");
+        }
+    }
 }
