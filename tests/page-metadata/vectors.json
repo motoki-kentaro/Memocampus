@@ -1,0 +1,32 @@
+{
+  "comment": "Issue #22: the extension (page-metadata.js) and the host (page_metadata.rs) shape page text and URLs alike. text: [raw, limit, expected]; url: [value, expected], where a URL is already absolute as the extension sends it.",
+  "text": [
+    ["Plain title", 500, "Plain title"],
+    ["  a \t\n b  ", 100, "a b"],
+    ["a\u0000b\u007fc\u009f", 100, "abc"],
+    ["a \u001b b", 100, "a b"],
+    ["a\u00a0\u3000\u2028\u0085b", 100, "a b"],
+    ["\ufeffBOM stays", 100, "\ufeffBOM stays"],
+    ["", 100, null],
+    [" \t\r\n\u3000 ", 100, null],
+    ["\u0000\u0001", 100, null],
+    ["日本語のタイトル", 3, "日本語"],
+    ["😀😀😀", 2, "😀😀"],
+    ["ab cd", 3, "ab"],
+    ["ab cd", 4, "ab c"],
+    ["ab  \n  cd", 5, "ab cd"],
+    ["x", 1, "x"]
+  ],
+  "url": [
+    ["https://cdn.test/a.png", "https://cdn.test/a.png"],
+    ["https://site.test/a%20b.png?token=keep&x=%2F#frag", "https://site.test/a%20b.png?token=keep&x=%2F#frag"],
+    ["http://site.test/favicon.ico", "http://site.test/favicon.ico"],
+    ["data:image/png;base64,AAAA", null],
+    ["javascript:alert(1)", null],
+    ["blob:https://site.test/uuid", null],
+    ["file:///C:/x.png", null],
+    ["ftp://site.test/x.png", null],
+    ["https://user:pass@site.test/x.png", null],
+    ["https://user@site.test/x.png", null]
+  ]
+}

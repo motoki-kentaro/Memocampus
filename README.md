@@ -12,7 +12,7 @@ Clicking the Memocampus toolbar action opens a side panel with three tabs: **URL
 
 ## Vault
 
-The vault (SQLite file) is independent of the host executable. Its path is stored in `%LOCALAPPDATA%\Memocampus\config.json`; the default vault is `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`. On first use, open the side panel's **Vault** section and create a vault explicitly (or open an existing one). Automatic recording also needs the privacy policy to be initialized (see [Privacy policy](#privacy-policy)). Only vaults created by this version (schema 4) can be used. An older vault is refused with an explanation and left unchanged: there is no conversion, and it cannot be backed up from the app, so copy the file if you want to keep it. Manual backups use the SQLite Backup API and copy the whole vault, including saved images, their save history and thumbnails. Switching or opening another vault switches the images too; nothing is copied between vaults. See `docs/issue-003-vault-location.md`.
+The vault (SQLite file) is independent of the host executable. Its path is stored in `%LOCALAPPDATA%\Memocampus\config.json`; the default vault is `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`. On first use, open the side panel's **Vault** section and create a vault explicitly (or open an existing one). Automatic recording also needs the privacy policy to be initialized (see [Privacy policy](#privacy-policy)). Only vaults created by this version (schema 5, which added page metadata in #22) can be used; a schema 4 vault is refused like any older one, so create a new vault after updating. An older vault is refused with an explanation and left unchanged: there is no conversion, and it cannot be backed up from the app, so copy the file if you want to keep it. Manual backups use the SQLite Backup API and copy the whole vault, including saved images, their save history and thumbnails. Switching or opening another vault switches the images too; nothing is copied between vaults. See `docs/issue-003-vault-location.md`.
 
 The database previously stored next to the executable (`native-host/target/release/memocampus.sqlite3`) is no longer used and is left untouched.
 
@@ -95,7 +95,8 @@ Design and protocol: `docs/image-vault-design.md`. Manual test checklist: `docs/
 
 ### Permissions
 
-`contextMenus` (the save menu item), `scripting` (fetching an image inside its page when a direct fetch is refused),
+`contextMenus` (the save menu item), `scripting` (fetching an image inside its page when a direct fetch is refused, and
+reading the light metadata of an allowed page once it has loaded, see `docs/issue-022-page-metadata.md`),
 `notifications` (save results), `nativeMessaging`, `storage`, `tabs`, `webNavigation`, `sidePanel`, and host access to
 all sites (to fetch the right-clicked image with its site's cookies, and to record visits).
 

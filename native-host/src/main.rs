@@ -1,3 +1,4 @@
+use memocampus_native_host::page_metadata::{self, PageMetadata};
 use memocampus_native_host::policy::Decision;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -108,6 +109,8 @@ fn record_event(
     }
     match kind {
         Some("visit") => {
+            // Best effort and judged on its own: a page that cannot be used never refuses the visit.
+            let page = value.get("page").and_then(page_metadata::parse);
             let event: VisitEvent = serde_json::from_value(value).map_err(|_| INVALID_EVENT)?;
             if event.id.is_empty() {
                 return Err(INVALID_EVENT);
@@ -116,7 +119,13 @@ fn record_event(
                 return Err(INVALID_URL);
             }
             session
-                .write(|db| db.execute("INSERT OR IGNORE INTO visits (event_id, url, title, visited_at) VALUES (?1, ?2, ?3, ?4)", params![event.id, event.url, event.title, event.visited_at]))
+                .write(|db| {
+                    let stored = db.execute("INSERT OR IGNORE INTO visits (event_id, url, title, visited_at) VALUES (?1, ?2, ?3, ?4)", params![event.id, event.url, event.title, event.visited_at])?;
+                    match &page {
+                        Some(page) => store_page(db, &event.id, &event.url, page),
+                        None => Ok(stored),
+                    }
+                })
                 .map(|()| Recorded::Stored)
                 .map_err(vault::VaultError::code)
         }
@@ -135,6 +144,40 @@ fn record_event(
         }
         _ => Err(UNKNOWN_TYPE),
     }
+}
+
+/// Upserts the metadata of the visit `event_id`, in the visit's transaction. The row's URL is the
+/// stored visit's, and only a visit stored with exactly this URL gives one. A capture older than the
+/// stored one changes nothing, so a late or resent event cannot replace newer metadata; resending
+/// the same event writes the same values. Never `INSERT OR REPLACE`, which deletes the row first.
+fn store_page(
+    db: &rusqlite::Connection,
+    event_id: &str,
+    url: &str,
+    page: &PageMetadata,
+) -> rusqlite::Result<usize> {
+    db.execute(
+        "INSERT INTO page_metadata (url, event_id, title, description, og_title, og_description, og_site_name, og_image_url, favicon_url, captured_at)
+         SELECT url, event_id, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10 FROM visits WHERE event_id = ?1 AND url = ?2
+         ON CONFLICT (url) DO UPDATE SET
+           event_id = excluded.event_id, title = excluded.title, description = excluded.description,
+           og_title = excluded.og_title, og_description = excluded.og_description,
+           og_site_name = excluded.og_site_name, og_image_url = excluded.og_image_url,
+           favicon_url = excluded.favicon_url, captured_at = excluded.captured_at
+         WHERE excluded.captured_at >= page_metadata.captured_at",
+        params![
+            event_id,
+            url,
+            page.title,
+            page.description,
+            page.og_title,
+            page.og_description,
+            page.og_site_name,
+            page.og_image_url,
+            page.favicon_url,
+            page.captured_at
+        ],
+    )
 }
 
 fn is_recordable_url(raw: &str) -> bool {

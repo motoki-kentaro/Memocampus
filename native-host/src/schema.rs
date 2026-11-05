@@ -1,6 +1,6 @@
-//! Vault schema 4: the one format this version reads and writes.
+//! Vault schema 5: the one format this version reads and writes.
 //!
-//! Schema 4 exists only by creation. Nothing upgrades an older vault, because `visits` has no column
+//! Schema 5 is schema 4 with `page_metadata` (Issue #22). Like schema 4 it exists only by creation. Nothing upgrades an older vault, because `visits` has no column
 //! that tells whether a row predates the incognito fix (#9), so an upgraded vault could carry such rows
 //! under a number that later code trusts. `check` compares the stored definition of every object
 //! byte for byte with the ones below, which covers types, NOT NULL, keys, UNIQUE, CHECK, DEFAULT and
@@ -12,7 +12,7 @@ use rusqlite::Connection;
 
 /// `PRAGMA application_id` of vaults created by Memocampus ("MCMP").
 pub const APP_ID: i64 = 0x4D43_4D50;
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// Keep each `sql` as SQLite stores it: it keeps the text from `CREATE` on, without the final `;`.
 struct Object {
@@ -23,7 +23,7 @@ struct Object {
     sql: Option<&'static str>,
 }
 
-const OBJECTS: [Object; 11] = [
+const OBJECTS: [Object; 13] = [
     Object {
         kind: "table",
         name: "visits",
@@ -132,9 +132,37 @@ const OBJECTS: [Object; 11] = [
         table: "saved_images",
         sql: None,
     },
+    // One row per URL: the metadata of the latest visit of it whose page could be read. `event_id`
+    // is that visit, so a row cannot exist without a stored visit; the host copies `url` from it.
+    // The limits are those of `page_metadata.rs`; an empty text is NULL.
+    Object {
+        kind: "table",
+        name: "page_metadata",
+        table: "page_metadata",
+        sql: Some(
+            "CREATE TABLE page_metadata (
+  url            TEXT NOT NULL PRIMARY KEY,
+  event_id       TEXT NOT NULL REFERENCES visits (event_id) ON DELETE CASCADE,
+  title          TEXT CHECK (title IS NULL OR length(title) BETWEEN 1 AND 500),
+  description    TEXT CHECK (description IS NULL OR length(description) BETWEEN 1 AND 1000),
+  og_title       TEXT CHECK (og_title IS NULL OR length(og_title) BETWEEN 1 AND 500),
+  og_description TEXT CHECK (og_description IS NULL OR length(og_description) BETWEEN 1 AND 1000),
+  og_site_name   TEXT CHECK (og_site_name IS NULL OR length(og_site_name) BETWEEN 1 AND 200),
+  og_image_url   TEXT CHECK (og_image_url IS NULL OR length(og_image_url) BETWEEN 1 AND 2048),
+  favicon_url    TEXT CHECK (favicon_url IS NULL OR length(favicon_url) BETWEEN 1 AND 2048),
+  captured_at    TEXT NOT NULL CHECK (length(captured_at) = 24)
+)",
+        ),
+    },
+    Object {
+        kind: "index",
+        name: "sqlite_autoindex_page_metadata_1",
+        table: "page_metadata",
+        sql: None,
+    },
 ];
 
-/// Everything that makes an empty database a schema 4 vault, for one transaction. There is no form
+/// Everything that makes an empty database a schema 5 vault, for one transaction. There is no form
 /// of this that can run against an existing vault: `CREATE TABLE` fails if the table exists.
 pub fn create_sql() -> String {
     let mut sql =
@@ -343,8 +371,9 @@ mod tests {
     fn versions_and_tags_are_checked_first() {
         for (extra, expected) in [
             ("PRAGMA user_version = 3;", 3),
-            ("PRAGMA user_version = 5;", 5),
-            ("PRAGMA application_id = 0;", 4),
+            ("PRAGMA user_version = 4;", 4),
+            ("PRAGMA user_version = 6;", 6),
+            ("PRAGMA application_id = 0;", 5),
         ] {
             assert!(
                 matches!(check(&vault(extra)).unwrap_err(), SchemaError::UnsupportedVersion(v) if v == expected),
