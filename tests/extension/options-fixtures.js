@@ -28,6 +28,7 @@ export function v2(rules = {}, extra = {}) {
     ...extra,
   };
 }
+export const PSL = { source: "publicsuffix/list", sourceCommit: "8437e5262f13305f94087abe699b4fe2be1d1de8", snapshotDate: "2026-10-22" };
 export const RULES = { neverSave: [pattern("bank.example"), regex("^https://a\\.example/")], saveButNoMcp: [pattern("wiki.example/private")] };
 
 /**
@@ -37,6 +38,12 @@ export const RULES = { neverSave: [pattern("bank.example"), regex("^https://a\\.
  */
 export function fakeHost({ policy = v2(RULES), etag = "etag-7" } = {}) {
   const host = { requests: [], policy: structuredClone(policy), etag, answers: {}, holds: {}, writes: 0 };
+  // Scripted PSL answers: `restricted[pattern] = { domain, reason }`; `approved[domain] = approvedAt`;
+  // `inUse` the domains the active policy needs. A pattern not listed is valid syntax and registrable.
+  host.restricted = {};
+  host.approved = {};
+  host.inUse = new Set();
+  host.approvalWrites = 0;
   host.hold = (type) => {
     let release;
     const held = new Promise((resolve) => { release = resolve; });
@@ -44,7 +51,9 @@ export function fakeHost({ policy = v2(RULES), etag = "etag-7" } = {}) {
     return () => release();
   };
   host.ofType = (type) => host.requests.filter((message) => message.type === type);
-  host.types = () => host.requests.map((message) => message.type);
+  /** The types sent, but the read-only listing of approved domains the page asks for on every reading. */
+  host.types = () => host.allTypes().filter((type) => type !== "policy_domain_approvals");
+  host.allTypes = () => host.requests.map((message) => message.type);
   host.send = async (message) => {
     host.requests.push(structuredClone(message));
     const held = host.holds[message.type]?.shift();
@@ -63,8 +72,42 @@ export function fakeHost({ policy = v2(RULES), etag = "etag-7" } = {}) {
         return { ok: true, ...base, state: "ready", ...version, policy: structuredClone(p) };
       case "policy_validate":
         return { ...base, ...validateAnswer(message.policy) };
-      case "policy_test_rule":
+      case "policy_test_rule": {
+        const restriction = host.restricted[message.rule?.pattern];
+        if (message.rule?.kind === "domainWildcard" && restriction && !(restriction.domain in host.approved)) {
+          return { ok: false, ...base, error: "domain_wildcard_not_approved" };
+        }
         return { ok: true, ...base, matched: true };
+      }
+      case "policy_domain_check": {
+        const restriction = host.restricted[message.rule?.pattern];
+        const fields = restriction
+          ? { status: "restricted", domain: restriction.domain, reason: restriction.reason, approved: restriction.domain in host.approved }
+          : { status: "valid", domain: String(message.rule?.pattern).slice(2).toLowerCase() };
+        return { ok: true, ...base, ...fields, psl: PSL };
+      }
+      case "policy_domain_approve": {
+        const restriction = host.restricted[message.rule?.pattern];
+        if (!restriction) return { ok: false, ...base, error: "domain_not_restricted" };
+        if (restriction.domain !== message.domain) return { ok: false, ...base, error: "domain_mismatch" };
+        host.approved[message.domain] ??= "2026-11-04T00:00:00.000Z";
+        host.approvalWrites += 1;
+        return { ok: true, ...base, domain: message.domain, approvedAt: host.approved[message.domain] };
+      }
+      case "policy_domain_approvals":
+        return {
+          ok: true,
+          ...base,
+          approvals: Object.entries(host.approved).map(([domain, approvedAt]) => ({ domain, approvedAt, inUse: host.inUse.has(domain) })),
+          psl: PSL,
+        };
+      case "policy_domain_revoke": {
+        if (host.inUse.has(message.domain)) return { ok: false, ...base, error: "domain_in_use" };
+        const revoked = message.domain in host.approved;
+        delete host.approved[message.domain];
+        host.approvalWrites += 1;
+        return { ok: true, ...base, domain: message.domain, revoked };
+      }
       case "policy_test_url":
         return { ok: true, ...base, decision: "allow" };
       case "policy_apply": {
@@ -142,7 +185,7 @@ export const flush = () => settle(0);
 
 /** Chooses the checker's kind as a browser does: one radio of the group checked, then "change". */
 export function chooseKind($, kind) {
-  for (const other of ["pattern", "regex"]) $(`checker-kind-${other}`).checked = other === kind;
+  for (const other of ["pattern", "regex", "domainWildcard"]) $(`checker-kind-${other}`).checked = other === kind;
   $(`checker-kind-${kind}`).dispatch("change");
 }
 /** Fills the checker and asks the host; the reply has arrived when this resolves. */

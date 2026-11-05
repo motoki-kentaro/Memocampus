@@ -28,3 +28,5 @@
 *.db    binary
 
 LICENSES/Apache-2.0.txt text eol=lf
+# Bundled as published: its bytes are checked by a test
+native-host/data/public_suffix_list.dat -text

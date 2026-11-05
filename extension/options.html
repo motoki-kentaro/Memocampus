@@ -94,12 +94,14 @@
           <legend>ルールの種類</legend>
           <span class="radio"><input id="checker-kind-pattern" type="radio" name="checker-kind" value="pattern" checked disabled><label for="checker-kind-pattern">Pattern</label></span>
           <span class="radio"><input id="checker-kind-regex" type="radio" name="checker-kind" value="regex" disabled><label for="checker-kind-regex">Regex</label></span>
+          <span class="radio"><input id="checker-kind-domainWildcard" type="radio" name="checker-kind" value="domainWildcard" disabled><label for="checker-kind-domainWildcard">Domain Wildcard</label></span>
         </fieldset>
         <div class="field-head">
           <label for="checker-rule" class="field-label">ルール</label>
           <button id="checker-help-toggle" type="button" class="help-toggle" aria-label="ルールの書き方について" aria-expanded="false" aria-controls="checker-help">?</button>
         </div>
-        <p id="checker-help" class="help-text" role="note" hidden>PatternはMemocampusのパターン照合です。RegexはRust Regex構文で判定します。先読み・後読みには対応していません。</p>
+        <p id="checker-help" class="help-text" role="note" hidden>PatternはMemocampusのパターン照合です。RegexはRust Regex構文で判定します。先読み・後読みには対応していません。Domain Wildcardは「*.example.com」の形で、example.com 自身とそのすべてのサブドメインに一致します（ホスト名だけで判定し、パス・クエリ・ポートは見ません）。*.com や *.co.jp のような公開サフィックスは指定できません。</p>
+        <p id="checker-kind-note" class="note" hidden>スキーム（httpsなど）やパスは含めず、「*.example.com」の形で書きます。example.com 自身にも一致します。</p>
         <input id="checker-rule" type="text" class="checker-input" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="checker-gate" disabled>
         <label for="checker-url" class="field-label">チェック対象URL</label>
         <input id="checker-url" type="text" class="checker-input" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="checker-url-note" disabled>
@@ -111,6 +113,13 @@
           <p class="field-label" id="checker-result-label">判定結果</p>
           <p id="checker-result" class="checker-result" data-result="none" role="status" aria-live="polite" aria-labelledby="checker-result-label">未チェック</p>
           <p id="checker-caveat" class="note">この結果はルール単体の一致確認です。実際の保存判定は、適用中のPolicy全体で決まります。</p>
+        </div>
+        <div id="checker-approval" class="checker-approval" role="group" aria-labelledby="checker-approval-title" hidden>
+          <p id="checker-approval-title" class="confirm-title">Public Suffix Listによる制限</p>
+          <p id="checker-approval-reason" class="note"></p>
+          <p id="checker-approval-domain" class="approval-domain"></p>
+          <p id="checker-approval-effect" class="note">制限を理解したうえで、このドメインを承認できます。承認はこのドメインだけに有効で、このドメインを指定する今後のDomain Wildcardルールにも使われます。承認だけではルールは追加されず、URLを保存するかどうかも変わりません。承認したあと、もう一度一致を確認してから追加します。</p>
+          <button id="checker-approve" type="button" disabled aria-describedby="checker-approval-reason checker-approval-domain checker-approval-effect">このドメインを承認する</button>
         </div>
         <p id="checker-gate" class="note"></p>
         <div id="checker-add" class="checker-targets">
@@ -185,6 +194,15 @@
           <p id="test-url-decision" class="decision" role="status" aria-live="polite"></p>
           <p id="test-url-caveat" class="note" hidden>これは編集中の設定によるテスト結果です。現在適用されている設定とは異なる場合があります。</p>
         </div>
+      </section>
+
+      <section id="approvals" class="card" aria-labelledby="approvals-heading" aria-describedby="approvals-description">
+        <h2 id="approvals-heading">承認したドメイン</h2>
+        <p id="approvals-description" class="explanation">Public Suffix Listで登録境界を確認できない、または広い範囲に及ぶドメインのうち、Domain Wildcardで使うことを承認したドメインです。承認はルールではなく、ルールの一覧とは別に管理します。取り消すと、そのドメインのDomain Wildcardは再び承認するまで使えません。</p>
+        <p id="approvals-psl" class="note"></p>
+        <p id="approvals-state" class="note" role="status" aria-live="polite"></p>
+        <ul id="approvals-list" class="approvals-list"></ul>
+        <p id="approvals-status" class="status" role="status" aria-live="polite" hidden></p>
       </section>
 
       <section class="card planned" aria-labelledby="manage-heading">

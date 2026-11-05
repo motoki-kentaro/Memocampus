@@ -1549,3 +1549,606 @@ fn a_rule_that_matches_alone_refuses_in_any_policy_that_holds_it() {
         Err(Error::InvalidPolicy)
     );
 }
+
+// --- Domain wildcard (docs/issue-025-policy-engine.md, Domain Wildcard) ---
+
+fn domain(pattern: &str) -> RuleSpec {
+    RuleSpec::Typed(TypedRule::DomainWildcard {
+        pattern: pattern.into(),
+    })
+}
+
+fn with_domains(never: &[&str], private: &[&str]) -> Policy {
+    let mut policy = Policy::default();
+    policy.layers.never_save.rules = never.iter().map(|p| domain(p)).collect();
+    policy.layers.save_but_no_mcp.rules = private.iter().map(|p| domain(p)).collect();
+    policy
+}
+
+/// Whether the policy's own compiler takes the rule; the domain function must agree.
+fn accepted(pattern: &str) -> bool {
+    let compiled = CompiledPolicy::compile(&with_domains(&[pattern], &[])).is_ok();
+    assert_eq!(
+        compiled,
+        crate::public_suffix::wildcard_domain(pattern).is_some(),
+        "{pattern:?}"
+    );
+    compiled
+}
+
+#[test]
+fn the_bundled_public_suffix_list_is_the_pinned_one_and_is_read() {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(crate::public_suffix::LIST_TEXT.as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(
+        hex, "d3e6243b51695327984abb3e2a5aa7077096867f75121e031e6a5a3840ca8bcd",
+        "updating the list is a reviewed change: replace the file and this digest together"
+    );
+    assert!(crate::public_suffix::loaded());
+}
+
+#[test]
+fn a_domain_wildcard_is_star_dot_and_a_registrable_domain() {
+    for valid in [
+        "*.amazon.co.jp",
+        "*.example.com",
+        "*.example.co.jp",
+        "*.foo.github.io",
+        "*.city.kawasaki.jp",
+        "*.www.ck",
+        "*.mybucket.s3.amazonaws.com",
+        "*.Amazon.CO.jp",
+        "*.xn--r8jz45g.jp",
+        "*.例え.jp",
+    ] {
+        assert!(accepted(valid), "{valid}");
+    }
+    for invalid in [
+        // The examples of the order.
+        "*.amazon.co.jp/*",
+        "https://*.amazon.co.jp",
+        "*.amazon.co.jp:443",
+        "*.amazon.co.jp?q=test",
+        "*.amazon.co.jp#fragment",
+        "www.*.amazon.co.jp",
+        "*.*.example.com",
+        "*amazon.co.jp",
+        "www?.example.com",
+        "?.example.com",
+        "example.*",
+        "*.example.*",
+        "*.com",
+        "*.co.jp",
+        "*.github.io",
+        "amazon.co.jp",
+        "*",
+        // Spaces are not trimmed, and nothing else is written for the person.
+        " *.example.com",
+        "*.example.com ",
+        "*. example.com",
+        "*.exa mple.com",
+        "*.example.com\t",
+        "*.example.com\u{3000}",
+        "*.example.com.",
+        "*..example.com",
+        "*.example..com",
+        "*.",
+        "",
+        "**.example.com",
+        "*.*",
+        ".example.com",
+        "*example.com",
+        // Below a registrable domain, or a domain with public suffixes below it.
+        "*.www.example.com",
+        "*.mail.amazon.co.jp",
+        "*.kawasaki.jp",
+        "*.foo.kawasaki.jp",
+        "*.amazonaws.com",
+        "*.s3.amazonaws.com",
+        "*.blogspot.com",
+        "*.foo.ck",
+        "*.jp",
+        // A suffix the list does not know.
+        "*.example.test",
+        "*.corp.internal",
+        "*.localhost",
+        // Not a DNS name.
+        "*.1.2.3.4",
+        "*.192.168.0.1",
+        "*.[::1]",
+        "*.example_x.com",
+        "*.-example.com",
+        "*.example-.com",
+        "*.ex%61mple.com",
+        "*.user@example.com",
+        "*.example.com/",
+        "*.example.com\\x",
+    ] {
+        assert!(!accepted(invalid), "{invalid:?}");
+    }
+    let label = "a".repeat(63);
+    assert!(accepted(&format!("*.{label}.com")));
+    assert!(!accepted(&format!("*.a{label}.com")), "a label of 64");
+    assert!(!accepted(&format!("*.{}.com", "a".repeat(5000))));
+}
+
+#[test]
+fn every_public_suffix_of_the_list_is_refused() {
+    let mut checked = 0;
+    for line in crate::public_suffix::LIST_TEXT.lines() {
+        let rule = line.split_whitespace().next().unwrap_or("");
+        if rule.is_empty() || rule.starts_with("//") || rule.starts_with('!') {
+            continue;
+        }
+        let suffix = rule.trim_start_matches("*.");
+        assert!(!accepted(&format!("*.{suffix}")), "{rule}");
+        if rule.starts_with("*.") {
+            assert!(!accepted(&format!("*.x.{suffix}")), "{rule}");
+        }
+        checked += 1;
+    }
+    assert!(checked > 9000, "{checked}");
+}
+
+#[test]
+fn a_domain_wildcard_matches_the_domain_and_its_subdomains_on_label_boundaries() {
+    let rule = domain("*.amazon.co.jp");
+    for (url, expected) in [
+        ("https://amazon.co.jp/", true),
+        ("https://www.amazon.co.jp/", true),
+        ("https://seller.amazon.co.jp/", true),
+        ("https://a.b.amazon.co.jp/", true),
+        ("https://fake-amazon.co.jp/", false),
+        ("https://amazon.co.jp.evil.com/", false),
+        ("https://notamazon.co.jp/", false),
+        ("https://co.jp/", false),
+        ("https://amazon.co/", false),
+        // Case, trailing dots, ports, userinfo, path, query and fragment.
+        ("https://WWW.Amazon.CO.JP/", true),
+        ("https://www.amazon.co.jp./", true),
+        ("https://www.amazon.co.jp../", true),
+        ("https://www.amazon.co.jp:8443/", true),
+        ("http://amazon.co.jp:80/", true),
+        ("https://user:pw@www.amazon.co.jp/", true),
+        ("https://amazon.co.jp@evil.com/", false),
+        ("https://evil.com/amazon.co.jp", false),
+        ("https://evil.com/?u=https://www.amazon.co.jp/", false),
+        ("https://evil.com/#amazon.co.jp", false),
+        ("https://www.amazon.co.jp/any/path?q=1#f", true),
+        ("blob:https://www.amazon.co.jp/uuid", true),
+        // Not a host of it.
+        ("https://1.2.3.4/", false),
+        ("https://[::1]/", false),
+    ] {
+        assert_eq!(rule_matches(&rule, url), Ok(expected), "{url}");
+    }
+    let deep = format!("https://{}amazon.co.jp/", "a.".repeat(60));
+    assert_eq!(rule_matches(&rule, &deep), Ok(true));
+    let unrelated = format!("https://{}.example.com/", "a".repeat(60));
+    assert_eq!(rule_matches(&rule, &unrelated), Ok(false));
+    for invalid in [
+        "not a url",
+        "amazon.co.jp",
+        "ftp://amazon.co.jp/",
+        "https://www.amazon.co.jp/%zz",
+        "https://www.amazon.co.jp/%FF",
+        "https://www.amazon.co.jp/?q=%",
+        "https:// amazon.co.jp/",
+    ] {
+        assert_eq!(
+            rule_matches(&rule, invalid),
+            Err(Error::InvalidUrl),
+            "{invalid}"
+        );
+    }
+    let huge = format!("https://www.amazon.co.jp/{}", "x".repeat(40_000));
+    assert_eq!(rule_matches(&rule, &huge), Err(Error::InvalidUrl));
+    // A refused rule matches nothing: a restricted domain without an approval, or bad syntax.
+    assert_eq!(
+        rule_matches(&domain("*.co.jp"), "https://amazon.co.jp/"),
+        Err(Error::UnapprovedDomain)
+    );
+    assert_eq!(
+        rule_matches(&domain("*.co.jp/*"), "https://amazon.co.jp/"),
+        Err(Error::InvalidPolicy)
+    );
+}
+
+#[test]
+fn unicode_and_punycode_name_the_same_domain_as_a_url_host_does() {
+    let unicode = domain("*.例え.jp");
+    let ascii = domain("*.xn--r8jz45g.jp");
+    for url in [
+        "https://例え.jp/",
+        "https://www.例え.jp/",
+        "https://xn--r8jz45g.jp/",
+        "https://a.xn--r8jz45g.jp/x",
+        "https://WWW.XN--R8JZ45G.JP/",
+    ] {
+        assert_eq!(rule_matches(&unicode, url), Ok(true), "{url}");
+        assert_eq!(rule_matches(&ascii, url), Ok(true), "{url}");
+    }
+    assert_eq!(rule_matches(&unicode, "https://例え.com/"), Ok(false));
+    // An IDN public suffix (個人.香港) is refused in either form.
+    assert!(!accepted("*.個人.香港"));
+    assert!(!accepted("*.xn--55qx5d.xn--j6w193g"));
+    assert!(accepted("*.foo.個人.香港"));
+    // Labels the URL parser refuses are refused as well.
+    for invalid in ["*.xn--zz-.com", "*.xn--.com"] {
+        assert!(!accepted(invalid), "{invalid:?}");
+    }
+}
+
+#[test]
+fn a_domain_wildcard_decides_as_the_pattern_of_the_same_domain() {
+    let urls = urls();
+    for name in ["example.com", "amazon.co.jp"] {
+        let pattern = format!("*.{name}");
+        for never in [true, false] {
+            let place = |rule: RuleSpec| {
+                let mut policy = Policy::default();
+                if never {
+                    policy.layers.never_save.rules = vec![rule];
+                } else {
+                    policy.layers.save_but_no_mcp.rules = vec![rule];
+                }
+                CompiledPolicy::compile(&policy).unwrap()
+            };
+            let by_domain = place(domain(&pattern));
+            let by_pattern = place(RuleSpec::from(pattern.as_str()));
+            for url in &urls {
+                assert_eq!(by_domain.evaluate(url), by_pattern.evaluate(url), "{url}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_domain_wildcard_is_no_regex() {
+    let rule = domain("*.example.com");
+    for url in [
+        "https://xexample.com/",
+        "https://wwwxexample.com/",
+        "https://example.com.evil.com/",
+        "https://evil.com/.example.com",
+    ] {
+        assert_eq!(rule_matches(&rule, url), Ok(false), "{url}");
+    }
+    // Not counted as a regex: 128 regexes and domain wildcards compile together.
+    let mut policy = with_regexes(&vec!["a"; MAX_REGEX_RULES], &[]);
+    policy
+        .layers
+        .save_but_no_mcp
+        .rules
+        .extend(["*.example.com", "*.example.org", "*.amazon.co.jp"].map(domain));
+    assert!(CompiledPolicy::compile(&policy).is_ok());
+}
+
+#[test]
+fn a_domain_wildcard_is_kind_and_pattern_in_version_2_only() {
+    let json = serde_json::json!([{ "kind": "domainWildcard", "pattern": "*.amazon.co.jp" }]);
+    let policy = parse_json(with_rules(2, json.clone())).unwrap();
+    assert_eq!(policy.layers.never_save.rules, [domain("*.amazon.co.jp")]);
+    assert_eq!(
+        serde_json::to_value(&policy).unwrap()["layers"]["neverSave"]["rules"],
+        json
+    );
+    assert_eq!(
+        parse_json(with_rules(1, json)).unwrap_err(),
+        Error::InvalidPolicy,
+        "version 1 has strings only"
+    );
+    for rules in [
+        serde_json::json!([{ "kind": "DomainWildcard", "pattern": "*.amazon.co.jp" }]),
+        serde_json::json!([{ "kind": "domain_wildcard", "pattern": "*.amazon.co.jp" }]),
+        serde_json::json!([{ "kind": "domainwildcard", "pattern": "*.amazon.co.jp" }]),
+        serde_json::json!([{ "kind": "domain", "pattern": "*.amazon.co.jp" }]),
+        serde_json::json!([{ "kind": "domainWildcard" }]),
+        serde_json::json!([{ "kind": "domainWildcard", "pattern": 1 }]),
+        serde_json::json!([{ "kind": "domainWildcard", "pattern": "*.amazon.co.jp", "x": 1 }]),
+        serde_json::json!([{ "kind": "domainWildcard", "pattern": "*.co.jp" }]),
+    ] {
+        assert!(parse_json(with_rules(2, rules.clone())).is_err(), "{rules}");
+    }
+}
+
+#[test]
+fn an_invalid_domain_wildcard_refuses_the_policy_even_in_a_disabled_layer_and_is_named() {
+    let mut policy = with_domains(&["*.example.com"], &["*.co.jp/x", "*.amazon.co.jp"]);
+    policy.layers.save_but_no_mcp.enabled = false;
+    assert_eq!(
+        CompiledPolicy::compile(&policy).unwrap_err(),
+        Error::InvalidPolicy
+    );
+    assert_eq!(
+        policy.evaluate("https://public.test/"),
+        Decision::NeverSave,
+        "an unusable policy refuses every URL"
+    );
+    assert_eq!(
+        policy.problems(),
+        [Problem {
+            layer: Some("saveButNoMcp"),
+            rule_index: Some(0),
+            code: "invalid_domain_wildcard",
+        }]
+    );
+    let rule = domain("*.co.jp");
+    assert_eq!(
+        rule.error_code(Error::InvalidPolicy),
+        "invalid_domain_wildcard"
+    );
+    assert_eq!(rule.error_code(Error::InvalidUrl), "invalid_url");
+    assert_eq!(regex("a").error_code(Error::RegexLimit), "regex_limit");
+    assert_eq!(
+        regex("a").error_code(Error::UnsupportedRule),
+        "unsupported_regex"
+    );
+    assert_eq!(regex("a").error_code(Error::InvalidPolicy), "invalid_regex");
+    assert_eq!(
+        RuleSpec::from("a").error_code(Error::InvalidPolicy),
+        "invalid_pattern"
+    );
+}
+
+#[test]
+fn domain_wildcards_keep_the_order_of_the_zones() {
+    let mut policy = with_domains(&["*.example.com"], &["*.example.com", "*.example.org"]);
+    let compiled = CompiledPolicy::compile(&policy).unwrap();
+    assert_eq!(
+        compiled.evaluate("https://a.example.com/"),
+        Decision::NeverSave
+    );
+    assert_eq!(
+        compiled.evaluate("https://a.example.org/"),
+        Decision::SaveButNoMcp
+    );
+    assert_eq!(compiled.evaluate("https://example.net/"), Decision::None);
+    policy.layers.never_save.enabled = false;
+    let compiled = CompiledPolicy::compile(&policy).unwrap();
+    assert_eq!(
+        compiled.evaluate("https://a.example.com/"),
+        Decision::SaveButNoMcp
+    );
+    policy.layers.save_but_no_mcp.enabled = false;
+    let compiled = CompiledPolicy::compile(&policy).unwrap();
+    assert_eq!(compiled.evaluate("https://a.example.com/"), Decision::None);
+    // The builtins still apply on top of a domain wildcard.
+    let compiled = CompiledPolicy::compile(&with_domains(&[], &["*.example.com"])).unwrap();
+    assert_eq!(
+        compiled.evaluate("https://a.example.com/?token=x"),
+        Decision::NeverSave
+    );
+}
+
+// --- PSL override (docs/issue-025-policy-engine.md, PSL override) ---
+
+#[test]
+fn the_list_snapshot_is_named_as_bundled() {
+    use crate::public_suffix::{SNAPSHOT_DATE, SOURCE, SOURCE_COMMIT};
+    // Bound to the digest checked in `the_bundled_public_suffix_list_is_the_pinned_one_and_is_read`.
+    assert_eq!(SOURCE, "publicsuffix/list");
+    assert_eq!(SOURCE_COMMIT, "8437e5262f13305f94087abe699b4fe2be1d1de8");
+    assert_eq!(SNAPSHOT_DATE, "2026-10-22");
+    let doc = include_str!("../../../docs/issue-025-policy-engine.md");
+    assert!(doc.contains(SOURCE_COMMIT) && doc.contains(SNAPSHOT_DATE));
+}
+
+#[test]
+fn syntax_and_the_list_are_judged_apart() {
+    use crate::public_suffix::{diagnose, Diagnosis, Restriction::*};
+    let restricted = |domain: &str, restriction| Diagnosis::Restricted {
+        domain: domain.into(),
+        restriction,
+    };
+    for (rule, expected) in [
+        ("*.amazon.co.jp", Diagnosis::Valid("amazon.co.jp".into())),
+        ("*.Amazon.CO.jp", Diagnosis::Valid("amazon.co.jp".into())),
+        ("*.co.jp", restricted("co.jp", PublicSuffix)),
+        ("*.CO.JP", restricted("co.jp", PublicSuffix)),
+        ("*.com", restricted("com", PublicSuffix)),
+        ("*.github.io", restricted("github.io", PublicSuffix)),
+        (
+            "*.foo.kawasaki.jp",
+            restricted("foo.kawasaki.jp", PublicSuffix),
+        ),
+        (
+            "*.個人.香港",
+            restricted("xn--gmqw5a.xn--j6w193g", PublicSuffix),
+        ),
+        (
+            "*.xn--55qx5d.xn--j6w193g",
+            restricted("xn--55qx5d.xn--j6w193g", PublicSuffix),
+        ),
+        (
+            "*.example.newtld",
+            restricted("example.newtld", UnknownSuffix),
+        ),
+        (
+            "*.corp.internal",
+            restricted("corp.internal", UnknownSuffix),
+        ),
+        ("*.newtld", restricted("newtld", UnknownSuffix)),
+        (
+            "*.kawasaki.jp",
+            restricted("kawasaki.jp", DelegatedBoundary),
+        ),
+        (
+            "*.amazonaws.com",
+            restricted("amazonaws.com", DelegatedBoundary),
+        ),
+        (
+            "*.www.example.com",
+            restricted("www.example.com", NotRegistrable),
+        ),
+        (
+            "*.mail.amazon.co.jp",
+            restricted("mail.amazon.co.jp", NotRegistrable),
+        ),
+    ] {
+        assert_eq!(diagnose(rule), expected, "{rule}");
+    }
+    for hard in [
+        "*.amazon.co.jp/*",
+        "https://*.amazon.co.jp",
+        "*.amazon.co.jp:443",
+        "www.*.amazon.co.jp",
+        "*.*.example.com",
+        "www?.example.com",
+        "?.example.com",
+        "example.*",
+        "*.example.*",
+        "*",
+        "*.",
+        " *.co.jp",
+        "*.co.jp.",
+        "*..co.jp",
+        "*.-a.com",
+        "*.a_b.com",
+        "*.1.2.3.4",
+        "*.xn--.com",
+        "amazon.co.jp",
+    ] {
+        assert_eq!(diagnose(hard), Diagnosis::InvalidSyntax, "{hard:?}");
+    }
+    assert_eq!(
+        diagnose(&format!("*.{}.com", "a".repeat(64))),
+        Diagnosis::InvalidSyntax
+    );
+    assert_eq!(
+        diagnose(&format!("*.{}.com", "a".repeat(5000))),
+        Diagnosis::InvalidSyntax
+    );
+}
+
+fn approved(domains: &[&str]) -> DomainApprovals {
+    DomainApprovals::of(domains.iter().map(|d| d.to_string()))
+}
+
+#[test]
+fn an_approval_makes_exactly_its_domain_usable_and_nothing_else() {
+    let co = approved(&["co.jp"]);
+    let rule = domain("*.co.jp");
+    for (url, expected) in [
+        ("https://co.jp/", true),
+        ("https://amazon.co.jp/", true),
+        ("https://a.b.example.co.jp/", true),
+        ("https://amazon.ne.jp/", false),
+        ("https://co.jp.evil.com/", false),
+    ] {
+        assert_eq!(rule_matches_with(&rule, url, &co), Ok(expected), "{url}");
+    }
+    assert_eq!(
+        rule_matches_with(&domain("*.CO.JP"), "https://x.co.jp/", &co),
+        Ok(true),
+        "the canonical domain is the identity"
+    );
+    for other in [
+        "*.ne.jp",
+        "*.x.co.jp.newtld",
+        "*.github.io",
+        "*.kawasaki.jp",
+    ] {
+        assert_eq!(
+            rule_matches_with(&domain(other), "https://a.ne.jp/", &co),
+            Err(Error::UnapprovedDomain),
+            "{other}"
+        );
+    }
+    // No approval makes bad syntax usable, whatever is approved.
+    let everything = approved(&["co.jp", "amazon.co.jp", "com", "example.com"]);
+    for hard in [
+        "*.co.jp/*",
+        "https://*.co.jp",
+        "*.co.jp:443",
+        "*.*.co.jp",
+        "co.jp",
+    ] {
+        assert_eq!(
+            rule_matches_with(&domain(hard), "https://a.co.jp/", &everything),
+            Err(Error::InvalidPolicy),
+            "{hard}"
+        );
+    }
+    // An approval is no match: a URL elsewhere is not refused by it.
+    let mut policy = with_domains(&[], &["*.co.jp"]);
+    let compiled = CompiledPolicy::compile_with(&policy, &co).unwrap();
+    assert_eq!(compiled.evaluate("https://public.test/"), Decision::None);
+    assert_eq!(
+        compiled.evaluate("https://shop.co.jp/"),
+        Decision::SaveButNoMcp
+    );
+    // A valid domain needs none, and gains nothing from one.
+    policy.layers.save_but_no_mcp.rules = vec![domain("*.example.com")];
+    let plain = CompiledPolicy::compile(&policy).unwrap();
+    let with = CompiledPolicy::compile_with(&policy, &everything).unwrap();
+    for url in urls() {
+        assert_eq!(plain.evaluate(&url), with.evaluate(&url), "{url}");
+    }
+}
+
+#[test]
+fn an_unapproved_domain_refuses_the_whole_policy_and_is_named() {
+    let mut policy = with_domains(&["*.example.com"], &["*.github.io", "*.co.jp/x"]);
+    policy.layers.save_but_no_mcp.enabled = false;
+    assert_eq!(
+        CompiledPolicy::compile_with(&policy, &approved(&["co.jp"])).unwrap_err(),
+        Error::UnapprovedDomain
+    );
+    assert_eq!(
+        policy.problems_with(&approved(&["co.jp"])),
+        [
+            Problem {
+                layer: Some("saveButNoMcp"),
+                rule_index: Some(0),
+                code: "domain_wildcard_not_approved",
+            },
+            Problem {
+                layer: Some("saveButNoMcp"),
+                rule_index: Some(1),
+                code: "invalid_domain_wildcard",
+            }
+        ]
+    );
+    policy.layers.save_but_no_mcp.rules.pop();
+    assert!(policy.problems_with(&approved(&["github.io"])).is_empty());
+    assert!(policy.validate_with(&approved(&["github.io"])).is_ok());
+    assert_eq!(policy.validate().unwrap_err(), Error::UnapprovedDomain);
+    assert_eq!(
+        domain("*.a").error_code(Error::UnapprovedDomain),
+        "domain_wildcard_not_approved"
+    );
+    assert_eq!(
+        domain("*.a").error_code(Error::SuffixListUnavailable),
+        "psl_unavailable"
+    );
+}
+
+#[test]
+fn a_policy_depends_on_the_approvals_of_its_restricted_domains_only() {
+    let mut policy = with_domains(&["*.co.jp", "*.example.com"], &["*.CO.JP", "*.newtld"]);
+    policy.layers.never_save.enabled = false;
+    policy
+        .layers
+        .save_but_no_mcp
+        .rules
+        .push(domain("*.co.jp/*"));
+    policy.layers.save_but_no_mcp.rules.push("*.com".into());
+    assert_eq!(
+        policy.approval_dependencies(),
+        HashSet::from(["co.jp".to_owned(), "newtld".to_owned()]),
+        "patterns, valid domains and bad syntax need none"
+    );
+}
+
+#[test]
+fn the_engine_reads_no_store() {
+    let engine = include_str!("../policy.rs");
+    let list = include_str!("../public_suffix.rs");
+    for source in [engine, list] {
+        for forbidden in ["rusqlite", "domain_approvals", "std::fs", "File::"] {
+            assert!(!source.contains(forbidden), "{forbidden}");
+        }
+    }
+}

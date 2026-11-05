@@ -3144,3 +3144,73 @@ fn regex_rules_keep_rows_recorded_before_them_out_of_the_public_read() {
     let sources = sources_of(&f, &public.id).unwrap();
     assert_clean(&sources);
 }
+
+fn add_domain(f: &Fixture, never_save: bool, pattern: &str) {
+    use memocampus_native_host::policy::{RuleSpec, TypedRule};
+    let store = f.policy_store();
+    let current = store.load().unwrap();
+    let mut next = current.policy.clone();
+    let layer = if never_save {
+        &mut next.layers.never_save
+    } else {
+        &mut next.layers.save_but_no_mcp
+    };
+    layer.rules.push(RuleSpec::Typed(TypedRule::DomainWildcard {
+        pattern: pattern.into(),
+    }));
+    store.update(&current, next).unwrap();
+}
+
+#[test]
+fn domain_wildcards_keep_rows_recorded_before_them_out_of_the_public_read() {
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    let rows = [
+        ("apex", "https://blind-zone.com/CANARY", false),
+        ("sub", "https://a.b.blind-zone.com/CANARY", false),
+        ("private", "https://www.private-zone.com/notes", false),
+        ("upper", "https://WWW.PRIVATE-ZONE.COM./x", false),
+        ("near", "https://fake-blind-zone.com/", true),
+        ("suffix", "https://blind-zone.com.evil.com/", true),
+        ("public", "https://public-zone.com/", true),
+    ];
+    for (id, url, _) in rows {
+        visit(&db, id, url, "Title", &day(3));
+    }
+    drop(db);
+    assert_eq!(
+        f.store.search_visits(&ALL).unwrap().total,
+        rows.len() as u64
+    );
+
+    add_domain(&f, true, "*.blind-zone.com");
+    add_domain(&f, false, "*.private-zone.com");
+    let visible = f.urls();
+    for (id, url, public) in rows {
+        assert_eq!(visible.iter().any(|u| u == url), public, "{id}");
+    }
+    assert_eq!(visible.len(), 3, "{visible:?}");
+}
+
+#[test]
+fn an_approved_domain_hides_rows_and_lost_approvals_close_the_read() {
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    for (id, url) in [
+        ("shop", "https://shop.co.jp/a"),
+        ("apex", "https://co.jp/"),
+        ("other", "https://shop.ne.jp/"),
+    ] {
+        visit(&db, id, url, "Title", &day(3));
+    }
+    drop(db);
+    let store = f.policy_store();
+    store.approve_domain("co.jp").unwrap();
+    add_domain(&f, false, "*.co.jp");
+    assert_eq!(f.urls(), ["https://shop.ne.jp/"]);
+
+    // The approvals cannot be read: the policy that needs one is unusable, and nothing is public.
+    let settings = f.app.join("settings.sqlite3");
+    std::fs::write(&settings, b"damaged").unwrap();
+    assert_failed(f.store.search_visits(&ALL), VisibleError::PolicyUnavailable);
+}

@@ -15,10 +15,14 @@ import {
   LAYER_OF_CATEGORY,
   RULE_KINDS,
   applyDraft,
+  approveDomain,
+  checkDomain,
   compareAfterApply,
   createDraft,
+  listApprovals,
   loadActivePolicy,
   matchState,
+  revokeDomain,
   sameRule,
   testRule,
   testUrl,
@@ -28,7 +32,19 @@ import {
 const LAYER_ID = { neverSave: "never-save", saveButNoMcp: "save-but-no-mcp" };
 const LAYER_NAME = { neverSave: "保存しないグループ", saveButNoMcp: "MCPサーバに見せないグループ" };
 const CATEGORY_NAME = { authentication: "認証関連", credentials: "認証情報", government: "行政サイト", webmail: "Webメール", aiChats: "AIチャット" };
-const KIND_LABEL = { pattern: "Pattern", regex: "Regex" };
+const KIND_LABEL = { pattern: "Pattern", regex: "Regex", domainWildcard: "Domain Wildcard" };
+/** What the rule field shows for each kind. The domain wildcard is the only kind with an example in it. */
+const RULE_PLACEHOLDER = { pattern: "", regex: "", domainWildcard: "*.example.com" };
+/** Why the host restricts a domain wildcard, by its reason; the date is that of the bundled list. */
+const REASON_TEXT = {
+  public_suffix: (domain, date) =>
+    `この指定は、複数の登録者が利用する可能性がある広いドメイン範囲に一致します。${date}時点のPublic Suffix Listでは、「${domain}」は公開サフィックス（誰でもその下にドメインを登録できる範囲）です。`,
+  delegated_boundary: (domain, date) =>
+    `この指定は、複数の登録者が利用する可能性がある広いドメイン範囲に一致します。${date}時点のPublic Suffix Listでは、「${domain}」の配下に公開サフィックスがあります。`,
+  unknown_suffix: (domain, date) => `${date}時点のPublic Suffix Listでは、このドメイン（${domain}）の登録境界を確認できません。末尾が一覧にないドメインです。`,
+  not_registrable: (domain, date) =>
+    `${date}時点のPublic Suffix Listでは、「${domain}」は登録可能なドメインそのものではなく、そのサブドメインです。この範囲だけを対象にするには承認が必要です。`,
+};
 
 // The label names the state in words, so it never depends on colour alone.
 const STATE_LABEL = {
@@ -64,6 +80,11 @@ const PROBLEM_TEXT = {
   invalid_regex: "正規表現の書き方が正しくありません。",
   unsupported_regex: "このバージョンでは使えない正規表現です（先読み・後読み・後方参照）。",
   regex_limit: "正規表現が長すぎるか複雑すぎます。上限は正規表現ルールの数によって変わります。",
+  invalid_domain_wildcard:
+    "Domain Wildcardの書き方が正しくありません。ドメインのみを指定してください（例: *.example.com）。スキーム・パス・ポート・クエリ・空白・途中のワイルドカードは使えず、承認によっても使えるようにはなりません。",
+  domain_wildcard_not_approved:
+    "このDomain Wildcardのドメインは、Public Suffix Listによる制限があり、承認されていません。URLチェッカーで確認して承認するか、ルールを変更してください。",
+  psl_unavailable: "Public Suffix Listを読み込めないため、Domain Wildcardを判定できません。",
   invalid_rule_form: "ルールの形式が正しくありません。",
   invalid_rule: "ルールの形式が正しくありません。",
   too_many_rules: "このグループのルールが多すぎます（上限1,000件）。",
@@ -90,6 +111,11 @@ const ERROR_TEXT = {
   host_unavailable: "Native Hostに接続できません。",
   invalid_response: "Native Hostから不正な応答を受け取りました。",
   unknown_type: "Native Hostがこの操作に対応していません。Hostを更新してください。",
+  domain_in_use: "適用中の設定でこのドメインのルールが使われているため、取り消せません。先に該当ルールを削除または変更して、適用してください。",
+  approvals_unavailable: "承認したドメインの情報を読み書きできません。",
+  domain_mismatch: "確認したドメインと一致しないため、承認しませんでした。もう一度確認してください。",
+  domain_not_restricted: "このドメインは承認しなくても使えます。",
+  invalid_domain: "ドメインの指定が正しくありません。",
 };
 const problemText = (code) => PROBLEM_TEXT[code] ?? ERROR_TEXT[code] ?? describeErrorCode(code);
 const errorText = (code) => ERROR_TEXT[code] ?? PROBLEM_TEXT[code] ?? describeErrorCode(code);
@@ -426,6 +452,14 @@ export function startOptionsPage({ document, window, send }) {
   let helpPinned = false;
   let highlighted = null;
   const checkGate = createLatestGate();
+  /** A request to approve the domain of the current check is on its way. */
+  let approving = false;
+  /** Approved domains as the host listed them: `{ state: "loading" | "ready" | "failed", items, psl, code }`. */
+  let approvals = { state: "loading", items: [], psl: null, code: null };
+  let approvalsNote = "";
+  /** The domain whose revocation is on its way, or null. */
+  let revoking = null;
+  const approvalsGate = createLatestGate();
 
   const checkerKind = () => RULE_KINDS.find((kind) => $(`checker-kind-${kind}`).checked) ?? null;
   /** What the checker holds, as typed: nothing is trimmed, converted or completed. */
@@ -479,6 +513,7 @@ export function startOptionsPage({ document, window, send }) {
     no_match: () => "一致しませんでした",
     rule_error: (code) => `ルールを確認してください。${problemText(code)}`,
     url_error: (code) => `URLを確認してください。${errorText(code)}`,
+    approval_needed: () => "承認が必要です（Public Suffix Listによる制限）",
     failed: (code) => `判定できませんでした。${errorText(code ?? "invalid_response")}`,
   };
 
@@ -486,6 +521,11 @@ export function startOptionsPage({ document, window, send }) {
     const enabled = canCheck();
     for (const kind of RULE_KINDS) $(`checker-kind-${kind}`).disabled = !enabled;
     for (const id of ["checker-rule", "checker-url", "checker-run"]) $(id).disabled = !enabled;
+    const kind = checkerKind();
+    $("checker-rule").placeholder = RULE_PLACEHOLDER[kind] ?? "";
+    // A screen reader reads a description even when it is hidden, so the note is named only while shown.
+    $("checker-kind-note").hidden = kind !== "domainWildcard";
+    $("checker-rule").setAttribute("aria-describedby", kind === "domainWildcard" ? "checker-kind-note checker-gate" : "checker-gate");
 
     const current = currentCheck();
     const result = $("checker-result");
@@ -523,6 +563,17 @@ export function startOptionsPage({ document, window, send }) {
     const status = $("checker-status");
     status.textContent = checkerNote;
     status.hidden = checkerNote === "";
+    renderApproval(current);
+  }
+
+  /** The approval offered for the current check, when the host restricts its domain. */
+  function renderApproval(current) {
+    const offer = current?.state === "approval_needed" ? current.approval : null;
+    $("checker-approval").hidden = offer === null;
+    $("checker-approve").disabled = offer === null || approving || !canCheck();
+    if (!offer) return;
+    $("checker-approval-reason").textContent = REASON_TEXT[offer.reason](offer.domain, offer.psl.snapshotDate);
+    $("checker-approval-domain").textContent = `承認するドメイン: ${offer.domain}`;
   }
 
   /** A change of the kind, rule or URL: the answer about what was there before no longer counts. */
@@ -559,10 +610,114 @@ export function startOptionsPage({ document, window, send }) {
     check = { token, ...input, state: "checking", code: null };
     checkerNote = "";
     renderChecker();
-    const answer = await testRule({ send, rule: { kind: input.kind, pattern: input.pattern }, url: input.url });
+    const rule = { kind: input.kind, pattern: input.pattern };
+    const answer = await testRule({ send, rule, url: input.url });
     if (!checkGate.isCurrent(token) || check?.token !== token) return;
-    check = { ...check, state: matchState(answer), code: answer.ok ? null : answer.code };
+    let state = matchState(answer);
+    let code = answer.ok ? null : answer.code;
+    let approval = null;
+    if (state === "approval_needed") {
+      // Why the host restricts the domain, and which domain an approval would be for: from the host.
+      const diagnosis = await checkDomain({ send, rule });
+      if (!checkGate.isCurrent(token) || check?.token !== token) return;
+      if (diagnosis.ok && diagnosis.status === "restricted" && !diagnosis.approved) approval = diagnosis;
+      else [state, code] = ["failed", diagnosis.ok ? "invalid_response" : diagnosis.code];
+    }
+    check = { ...check, state, code, approval };
     renderChecker();
+  }
+
+  /** Approves the domain the host restricts in the current check. It adds no rule: a new check follows. */
+  async function approve() {
+    const current = currentCheck();
+    if (approving || !canCheck() || current?.state !== "approval_needed" || !current.approval) return renderChecker();
+    const { domain } = current.approval;
+    approving = true;
+    checkerNote = "";
+    renderChecker();
+    const result = await approveDomain({ send, rule: { kind: current.kind, pattern: current.pattern }, domain });
+    approving = false;
+    if (result.ok) {
+      if (check?.token === current.token) {
+        check = null;
+        checkGate.next();
+      }
+      checkerNote = `「${domain}」を承認しました。ルールはまだ追加されていません。もう一度「マッチングを確認」を押して、一致を確認してください。`;
+      void refreshApprovals();
+    } else {
+      checkerNote = `承認しませんでした。${errorText(result.code)}`;
+    }
+    renderChecker();
+  }
+
+  // --- Approved domains ---------------------------------------------------------------------------
+
+  async function refreshApprovals() {
+    const token = approvalsGate.next();
+    approvals = { ...approvals, state: "loading" };
+    renderApprovals();
+    const result = await listApprovals({ send });
+    if (!approvalsGate.isCurrent(token)) return;
+    approvals = result.ok
+      ? { state: "ready", items: result.approvals, psl: result.psl, code: null }
+      : { state: "failed", items: [], psl: null, code: result.code };
+    renderApprovals();
+  }
+
+  async function revoke(domain) {
+    if (revoking !== null || locked()) return;
+    revoking = domain;
+    approvalsNote = "";
+    renderApprovals();
+    const result = await revokeDomain({ send, domain });
+    revoking = null;
+    approvalsNote = result.ok
+      ? `「${domain}」の承認を取り消しました。このドメインのDomain Wildcardは、再び承認するまで使えません。`
+      : `取り消しませんでした。${errorText(result.code)}`;
+    await refreshApprovals();
+  }
+
+  function renderApprovals() {
+    const stateText = {
+      loading: "読み込んでいます…",
+      failed: `承認したドメインを読み込めませんでした。${errorText(approvals.code ?? "invalid_response")}`,
+      ready: approvals.items.length ? "" : "承認したドメインはありません。",
+    }[approvals.state];
+    $("approvals-state").textContent = stateText;
+    $("approvals-psl").textContent = approvals.psl ? `判定に使うPublic Suffix List: ${approvals.psl.snapshotDate}時点` : "";
+    const list = $("approvals-list");
+    list.replaceChildren(
+      ...approvals.items.map((item, index) => {
+        const li = document.createElement("li");
+        const name = document.createElement("code");
+        name.textContent = item.domain;
+        const state = document.createElement("span");
+        state.className = "approval-state";
+        state.textContent = `承認済み（${item.approvedAt}）`;
+        const note = document.createElement("p");
+        note.id = `approval-${index}-note`;
+        note.className = "note";
+        note.textContent =
+          item.inUse === true
+            ? "適用中の設定で使われています。取り消すには、先にこのドメインのルールを削除または変更して適用してください。"
+            : item.inUse === null
+              ? "適用中の設定で使われているかを確認できません。"
+              : "";
+        note.hidden = note.textContent === "";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "承認を取り消す";
+        button.setAttribute("aria-label", `${item.domain} の承認を取り消す`);
+        button.setAttribute("aria-describedby", note.id);
+        button.disabled = item.inUse === true || revoking !== null || locked();
+        button.addEventListener("click", () => void revoke(item.domain));
+        li.append(name, state, button, note);
+        return li;
+      }),
+    );
+    const status = $("approvals-status");
+    status.textContent = approvalsNote;
+    status.hidden = approvalsNote === "";
   }
 
   /** Scrolls to a rule just added or changed, marks it for a moment and moves focus to it. */
@@ -675,6 +830,8 @@ export function startOptionsPage({ document, window, send }) {
     for (const key of LAYER_KEYS) buildRules(key);
     invalidateTests();
     finish(note);
+    // What the active policy uses has changed.
+    void refreshApprovals();
   }
 
   async function apply() {
@@ -824,7 +981,9 @@ export function startOptionsPage({ document, window, send }) {
     for (const key of LAYER_KEYS) buildRules(key);
     invalidateTests();
     render();
-    const result = await loadActivePolicy({ send });
+    const reading = loadActivePolicy({ send });
+    void refreshApprovals();
+    const result = await reading;
     if (!loadGate.isCurrent(token)) return;
     loading = false;
     view = result;
@@ -865,6 +1024,7 @@ export function startOptionsPage({ document, window, send }) {
     $(id).addEventListener("keydown", onEnter(runCheck));
   }
   $("checker-run").addEventListener("click", () => void runCheck());
+  $("checker-approve").addEventListener("click", () => void approve());
   $("checker-apply-edit").addEventListener("click", reflectEdit);
   $("checker-cancel-edit").addEventListener("click", cancelEdit);
   const help = $("checker-help-toggle");

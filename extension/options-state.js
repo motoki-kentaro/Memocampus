@@ -15,7 +15,7 @@ export const LAYER_OF_CATEGORY = {
   webmail: "saveButNoMcp",
   aiChats: "saveButNoMcp",
 };
-export const RULE_KINDS = ["pattern", "regex"];
+export const RULE_KINDS = ["pattern", "regex", "domainWildcard"];
 export const DECISIONS = ["never_save", "save_but_no_mcp", "allow"];
 
 // The host's `policy_status` states; any other value is not an answer.
@@ -269,16 +269,18 @@ export async function validateDraft({ send, policy }) {
 }
 
 // What `policy_test_rule` may refuse, by what the person should look at.
-const RULE_CODES = new Set(["invalid_rule", "invalid_pattern", "invalid_regex", "unsupported_regex", "regex_limit"]);
+const RULE_CODES = new Set(["invalid_rule", "invalid_pattern", "invalid_regex", "unsupported_regex", "regex_limit", "invalid_domain_wildcard"]);
 const URL_CODES = new Set(["invalid_url"]);
 
 /**
  * The state of a URL checker answer: "match", "no_match", "rule_error" (check the rule),
- * "url_error" (check the URL) or "failed" (no usable answer). Only "match" lets a rule be added.
+ * "url_error" (check the URL), "approval_needed" (a domain wildcard the Public Suffix List restricts, for
+ * a domain not approved) or "failed" (no usable answer). Only "match" lets a rule be added.
  */
 export function matchState(answer) {
   if (answer?.ok === true && answer.matched === true) return "match";
   if (answer?.ok === true && answer.matched === false) return "no_match";
+  if (answer?.code === "domain_wildcard_not_approved") return "approval_needed";
   if (RULE_CODES.has(answer?.code)) return "rule_error";
   if (URL_CODES.has(answer?.code)) return "url_error";
   return "failed";
@@ -353,4 +355,73 @@ export function compareAfterApply({ expectedEtag, submitted, loaded }) {
   if (loaded.etag === expectedEtag && loaded.revision === submitted.revision) return "not_applied";
   if (loaded.revision === submitted.revision + 1 && sameValue({ ...loaded.policy, revision: submitted.revision }, submitted)) return "applied";
   return "changed";
+}
+
+// --- Domains approved for restricted domain wildcards (the host's PSL override) -------------------
+
+const REASONS = ["public_suffix", "unknown_suffix", "delegated_boundary", "not_registrable"];
+const isSnapshot = (psl) => isObject(psl) && typeof psl.snapshotDate === "string" && typeof psl.sourceCommit === "string" && typeof psl.source === "string";
+const isDomain = (domain) => typeof domain === "string" && domain !== "";
+
+/**
+ * What the host says of a domain wildcard: `{ ok, status: "valid" | "restricted" | "invalid", reason?,
+ * domain?, approved?, psl }`. Only the host judges; the page shows the answer and nothing else.
+ */
+export async function checkDomain({ send, rule }) {
+  try {
+    const reply = await callHost({ type: "policy_domain_check", rule }, { send, resultType: "policy_domain_check_result" });
+    if (!isSnapshot(reply.psl)) return { ok: false, code: "invalid_response" };
+    const psl = { snapshotDate: reply.psl.snapshotDate, sourceCommit: reply.psl.sourceCommit, source: reply.psl.source };
+    if (reply.status === "invalid") return { ok: true, status: "invalid", psl };
+    if (reply.status === "valid" && isDomain(reply.domain)) return { ok: true, status: "valid", domain: reply.domain, psl };
+    if (reply.status === "restricted" && isDomain(reply.domain) && REASONS.includes(reply.reason) && typeof reply.approved === "boolean") {
+      return { ok: true, status: "restricted", domain: reply.domain, reason: reply.reason, approved: reply.approved, psl };
+    }
+    return { ok: false, code: "invalid_response" };
+  } catch (error) {
+    return { ok: false, code: codeOf(error) };
+  }
+}
+
+/**
+ * Asks the host to approve the domain of a restricted rule. The host judges the rule again and stores
+ * the approval only for the very domain named; only its answer says it was stored.
+ */
+export async function approveDomain({ send, rule, domain }) {
+  try {
+    const reply = await callHost({ type: "policy_domain_approve", rule, domain }, { send, resultType: "policy_domain_approve_result" });
+    if (reply.domain !== domain || typeof reply.approvedAt !== "string") return { ok: false, code: "invalid_response" };
+    return { ok: true, domain: reply.domain, approvedAt: reply.approvedAt };
+  } catch (error) {
+    return { ok: false, code: codeOf(error) };
+  }
+}
+
+/** Every approved domain: `{ domain, approvedAt, inUse }`, `inUse` null where the host cannot tell. */
+export async function listApprovals({ send }) {
+  try {
+    const reply = await callHost({ type: "policy_domain_approvals" }, { send, resultType: "policy_domain_approvals_result" });
+    if (!Array.isArray(reply.approvals) || !isSnapshot(reply.psl)) return { ok: false, code: "invalid_response" };
+    const approvals = [];
+    for (const item of reply.approvals) {
+      if (!isObject(item) || !isDomain(item.domain) || typeof item.approvedAt !== "string" || ![true, false, null].includes(item.inUse)) {
+        return { ok: false, code: "invalid_response" };
+      }
+      approvals.push({ domain: item.domain, approvedAt: item.approvedAt, inUse: item.inUse });
+    }
+    return { ok: true, approvals, psl: { snapshotDate: reply.psl.snapshotDate } };
+  } catch (error) {
+    return { ok: false, code: codeOf(error) };
+  }
+}
+
+/** Revokes an approval; the host refuses one the active policy uses (`domain_in_use`). */
+export async function revokeDomain({ send, domain }) {
+  try {
+    const reply = await callHost({ type: "policy_domain_revoke", domain }, { send, resultType: "policy_domain_revoke_result" });
+    if (reply.domain !== domain || typeof reply.revoked !== "boolean") return { ok: false, code: "invalid_response" };
+    return { ok: true, revoked: reply.revoked };
+  } catch (error) {
+    return { ok: false, code: codeOf(error) };
+  }
 }

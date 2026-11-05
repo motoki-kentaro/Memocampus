@@ -1,9 +1,9 @@
 //! URL/rule contract; see docs/issue-010-privacy-policy.md. Version 1 stores each rule as a string,
 //! version 2 as a typed rule (docs/issue-025-policy-engine.md). A pattern means the same in both;
-//! a regex, version 2 only, meets the whole URL.
+//! a regex, version 2 only, meets the whole URL; a domain wildcard, version 2 only, meets the host.
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use url::Url;
 
@@ -66,6 +66,11 @@ pub enum TypedRule {
     Regex {
         pattern: String,
     },
+    /// `*.` and a registrable domain (`public_suffix::wildcard_domain`): that domain and every
+    /// subdomain, by host alone.
+    DomainWildcard {
+        pattern: String,
+    },
 }
 /// A pattern in the current form (version 2). A version 1 rule is written `RuleSpec::Text`.
 impl From<&str> for RuleSpec {
@@ -78,10 +83,11 @@ impl From<String> for RuleSpec {
         Self::Typed(TypedRule::Pattern { pattern })
     }
 }
-/// What a stored rule is: a pattern with the grammar of its version, or a regex.
+/// What a stored rule is: a pattern with the grammar of its version, a regex, or a domain wildcard.
 enum Form<'a> {
     Pattern(&'a str, Syntax),
     Regex(&'a str),
+    Domain(&'a str),
 }
 impl RuleSpec {
     fn form(&self) -> Form<'_> {
@@ -89,6 +95,20 @@ impl RuleSpec {
             Self::Text(pattern) => Form::Pattern(pattern, Syntax::Version1),
             Self::Typed(TypedRule::Pattern { pattern }) => Form::Pattern(pattern, Syntax::Version2),
             Self::Typed(TypedRule::Regex { pattern }) => Form::Regex(pattern),
+            Self::Typed(TypedRule::DomainWildcard { pattern }) => Form::Domain(pattern),
+        }
+    }
+    /// The code of `error` for this rule: what `problems` and the rule test say of it.
+    pub fn error_code(&self, error: Error) -> &'static str {
+        match (self.form(), error) {
+            (_, Error::InvalidUrl) => "invalid_url",
+            (Form::Pattern(..), _) => "invalid_pattern",
+            (Form::Domain(_), Error::UnapprovedDomain) => "domain_wildcard_not_approved",
+            (Form::Domain(_), Error::SuffixListUnavailable) => "psl_unavailable",
+            (Form::Domain(_), _) => "invalid_domain_wildcard",
+            (Form::Regex(_), Error::UnsupportedRule) => "unsupported_regex",
+            (Form::Regex(_), Error::RegexLimit) => "regex_limit",
+            (Form::Regex(_), _) => "invalid_regex",
         }
     }
 }
@@ -131,6 +151,33 @@ pub enum Error {
     RegexLimit,
     /// Only a valid version 1 policy can be migrated.
     NotMigratable,
+    /// A domain wildcard the Public Suffix List restricts, for a domain no one approved.
+    UnapprovedDomain,
+    /// The bundled Public Suffix List could not be read: no domain wildcard can be judged.
+    SuffixListUnavailable,
+}
+
+/// The domains a person approved for domain wildcards the Public Suffix List restricts, canonical
+/// (`public_suffix::Diagnosis`). The host reads them from its own store and hands them over; the
+/// engine reads no file or database. An approval makes a restricted rule usable and nothing else:
+/// it matches no URL by itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DomainApprovals {
+    domains: HashSet<String>,
+}
+impl DomainApprovals {
+    /// No approval: what a failure to read them means.
+    pub fn none() -> Self {
+        Self::default()
+    }
+    pub fn of(domains: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            domains: domains.into_iter().collect(),
+        }
+    }
+    pub fn contains(&self, domain: &str) -> bool {
+        self.domains.contains(domain)
+    }
 }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,9 +201,32 @@ impl Policy {
     }
     /// The policy and its compiled form, compiling each rule once: compiling is the validation.
     pub fn parse_compiled(bytes: &[u8]) -> Result<(Self, CompiledPolicy), Error> {
+        Self::parse_compiled_with(bytes, &DomainApprovals::none())
+    }
+    /// `parse_compiled` with the domains a person approved.
+    pub fn parse_compiled_with(
+        bytes: &[u8],
+        approvals: &DomainApprovals,
+    ) -> Result<(Self, CompiledPolicy), Error> {
         let policy: Self = serde_json::from_slice(bytes).map_err(|_| Error::InvalidPolicy)?;
-        let compiled = CompiledPolicy::compile(&policy)?;
+        let compiled = CompiledPolicy::compile_with(&policy, approvals)?;
         Ok((policy, compiled))
+    }
+    /// The canonical domains of the domain wildcards that need an approval, in every layer: what a
+    /// stored policy depends on in the approvals.
+    pub fn approval_dependencies(&self) -> HashSet<String> {
+        use crate::public_suffix::{diagnose, Diagnosis};
+        [&self.layers.never_save, &self.layers.save_but_no_mcp]
+            .iter()
+            .flat_map(|layer| &layer.rules)
+            .filter_map(|rule| match rule.form() {
+                Form::Domain(pattern) => match diagnose(pattern) {
+                    Diagnosis::Restricted { domain, .. } => Some(domain),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
     }
     /// Versions 1 and 2 only, and each with its own form of rule throughout.
     fn check_header(&self) -> Result<(), Error> {
@@ -192,12 +262,19 @@ impl Policy {
     }
     /// Every rule, also of a disabled layer. Valid means exactly that the policy compiles.
     pub fn validate(&self) -> Result<(), Error> {
-        CompiledPolicy::compile(self).map(drop)
+        self.validate_with(&DomainApprovals::none())
+    }
+    pub fn validate_with(&self, approvals: &DomainApprovals) -> Result<(), Error> {
+        CompiledPolicy::compile_with(self, approvals).map(drop)
     }
     /// Why a policy does not compile, rule by rule where the rule is known; empty if it compiles.
     /// A cause that belongs to no rule has no place, and none is guessed.
     pub fn problems(&self) -> Vec<Problem> {
-        if CompiledPolicy::compile(self).is_ok() {
+        self.problems_with(&DomainApprovals::none())
+    }
+    /// `problems` with the domains a person approved.
+    pub fn problems_with(&self, approvals: &DomainApprovals) -> Vec<Problem> {
+        if CompiledPolicy::compile_with(self, approvals).is_ok() {
             return Vec::new();
         }
         let mut found = Vec::new();
@@ -236,21 +313,12 @@ impl Policy {
                     found.push(at("invalid_rule_form"));
                     continue;
                 }
-                let code = match rule.form() {
-                    Form::Pattern(pattern, syntax) => Rule::parse_in(pattern, syntax)
-                        .err()
-                        .map(|_| "invalid_pattern"),
-                    Form::Regex(pattern) => {
-                        compile_regex(pattern, budget)
-                            .err()
-                            .map(|error| match error {
-                                Error::UnsupportedRule => "unsupported_regex",
-                                Error::RegexLimit => "regex_limit",
-                                _ => "invalid_regex",
-                            })
-                    }
+                let error = match rule.form() {
+                    Form::Pattern(pattern, syntax) => Rule::parse_in(pattern, syntax).err(),
+                    Form::Regex(pattern) => compile_regex(pattern, budget).err(),
+                    Form::Domain(pattern) => domain_of(pattern, approvals).err(),
                 };
-                found.extend(code.map(at));
+                found.extend(error.map(|error| at(rule.error_code(error))));
             }
         }
         if found.is_empty() {
@@ -302,7 +370,8 @@ impl Policy {
 }
 
 /// Patterns of one zone by host, so a URL meets only the patterns of its own host and parent
-/// domains. A `None` path covers the whole host. Regexes have no host and meet every URL.
+/// domains. A `None` path covers the whole host. Regexes have no host and meet every URL. A domain
+/// wildcard is a wildcard host with no path: it is judged exactly as the pattern `*.domain` is.
 #[derive(Debug, Default)]
 struct Zone {
     exact: HashMap<String, Vec<Option<PathRule>>>,
@@ -325,11 +394,23 @@ impl Zone {
             .iter()
             .try_for_each(|rule| self.add(rule, Syntax::Version1))
     }
-    fn add_specs(&mut self, rules: &[RuleSpec], budget: RegexBudget) -> Result<(), Error> {
+    fn add_specs(
+        &mut self,
+        rules: &[RuleSpec],
+        budget: RegexBudget,
+        approvals: &DomainApprovals,
+    ) -> Result<(), Error> {
         rules.iter().try_for_each(|rule| match rule.form() {
             Form::Pattern(pattern, syntax) => self.add(pattern, syntax),
             Form::Regex(pattern) => {
                 self.regexes.push(compile_regex(pattern, budget)?);
+                Ok(())
+            }
+            Form::Domain(pattern) => {
+                self.wildcard
+                    .entry(domain_of(pattern, approvals)?)
+                    .or_default()
+                    .push(None);
                 Ok(())
             }
         })
@@ -377,19 +458,24 @@ pub struct CompiledPolicy {
     private: Zone,
 }
 impl CompiledPolicy {
+    /// With no approved domain: what tests and pure checks use. The host compiles with the
+    /// approvals it read (`compile_with`).
     pub fn compile(policy: &Policy) -> Result<Self, Error> {
+        Self::compile_with(policy, &DomainApprovals::none())
+    }
+    pub fn compile_with(policy: &Policy, approvals: &DomainApprovals) -> Result<Self, Error> {
         policy.check_header()?;
         let a = &policy.layers.never_save;
         let b = &policy.layers.save_but_no_mcp;
         let c = &policy.categories;
         let budget = RegexBudget::of(policy);
         let mut blind = Zone::default();
-        blind.add_specs(&a.rules, budget)?;
+        blind.add_specs(&a.rules, budget, approvals)?;
         if c.authentication {
             blind.add_all(&BUILTINS.authentication)?;
         }
         let mut private = Zone::default();
-        private.add_specs(&b.rules, budget)?;
+        private.add_specs(&b.rules, budget, approvals)?;
         for (enabled, rules) in [
             (c.government, &BUILTINS.government),
             (c.webmail, &BUILTINS.webmail),
@@ -683,6 +769,21 @@ impl Rule {
         })
     }
 }
+/// The domain a domain wildcard covers; see `public_suffix::diagnose`. A restricted domain only if
+/// it was approved, exactly that canonical domain; a syntax error or an unreadable list never.
+fn domain_of(pattern: &str, approvals: &DomainApprovals) -> Result<String, Error> {
+    use crate::public_suffix::{diagnose, Diagnosis};
+    if pattern.encode_utf16().count() > 2048 {
+        return Err(Error::InvalidPolicy);
+    }
+    match diagnose(pattern) {
+        Diagnosis::Valid(domain) => Ok(domain),
+        Diagnosis::Restricted { domain, .. } if approvals.contains(&domain) => Ok(domain),
+        Diagnosis::Restricted { .. } => Err(Error::UnapprovedDomain),
+        Diagnosis::InvalidSyntax => Err(Error::InvalidPolicy),
+        Diagnosis::ListUnavailable => Err(Error::SuffixListUnavailable),
+    }
+}
 /// What one regex of a policy may use: an equal share of the policy's budget, at most the limit
 /// of one rule. So all regexes of a policy together stay within the totals.
 #[derive(Debug, Clone, Copy)]
@@ -732,6 +833,14 @@ fn regex_syntax_error(pattern: &str) -> Error {
 /// match may still be refused by another rule or a builtin. An invalid URL is `InvalidUrl`, which
 /// a policy would refuse. The rule gets the regex budget of a policy holding only it.
 pub fn rule_matches(rule: &RuleSpec, url: &str) -> Result<bool, Error> {
+    rule_matches_with(rule, url, &DomainApprovals::none())
+}
+/// `rule_matches` with the domains a person approved, as the host judges.
+pub fn rule_matches_with(
+    rule: &RuleSpec,
+    url: &str,
+    approvals: &DomainApprovals,
+) -> Result<bool, Error> {
     if matches!(rule, RuleSpec::Text(_)) {
         return Err(Error::InvalidPolicy);
     }
@@ -756,7 +865,7 @@ pub fn rule_matches(rule: &RuleSpec, url: &str) -> Result<bool, Error> {
         },
         ..Policy::default()
     };
-    Ok(CompiledPolicy::compile(&alone)?.evaluate(url) == Decision::NeverSave)
+    Ok(CompiledPolicy::compile_with(&alone, approvals)?.evaluate(url) == Decision::NeverSave)
 }
 fn path_matches(path: &str, prefix: &str) -> bool {
     path == prefix || path.starts_with(&format!("{prefix}/"))

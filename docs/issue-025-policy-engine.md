@@ -1,6 +1,7 @@
 # Issue #25 — Privacy Policy engine
 
 Status: **Slices 1 to 5 merged; Slice 6 implemented, for review.** Version 2 has patterns with exact paths and a wildcard in the last path segment, path rules also meet the path with its slashes collapsed, and regex rules meet the whole URL. The host offers messages to validate, test and apply a draft and to start a new install; no settings UI exists.
+Since then: **Domain Wildcard rules** (`domainWildcard`), and the **PSL override** (approved domains), at the end of this file, for review.
 Labels: **[verified]** was run, **[code]** was read in the source, **[inferred]** is reasoning not run.
 
 ## Slice 1: what changed
@@ -637,7 +638,8 @@ regex fits depends on how many regexes the draft has, so a regex may be `regex_l
 ```text
 → { type: "policy_test_rule", requestId, rule: { kind, pattern }, url }
 ← { ok: true, …, matched }
-← { ok: false, …, error: "invalid_rule" | "invalid_pattern" | "invalid_regex" | "unsupported_regex" | "regex_limit" | "invalid_url" }
+← { ok: false, …, error: "invalid_rule" | "invalid_pattern" | "invalid_regex" | "unsupported_regex" | "regex_limit"
+                      | "invalid_domain_wildcard" | "invalid_url" }
 ```
 
 The rule is judged by the compiled zone a policy uses: alone in an enabled Blind Zone, with no builtin. So the host wildcard, paths raw and collapsed, and
@@ -784,3 +786,254 @@ VisibleStore, 10,000 image rows, 50 % public, 999 patterns: 72.8 → 68.9 ms wit
 2. Ask for a vault with the existing vault messages; `policy_start` refuses without one.
 3. "記憶を開始する" sends `policy_start` with the draft. Before it, nothing is recorded; the existing uninitialized state already holds that.
 4. Existing installs are initialized: `policy_start` refuses them, so they keep their policy and recording.
+
+## Domain Wildcard: a third kind of rule
+
+A version 2 rule may be `{ "kind": "domainWildcard", "pattern": "*.amazon.co.jp" }`: that domain and every subdomain of it, judged by the host of a
+URL alone. It is a kind of its own (`TypedRule::DomainWildcard`), not a regex and not a rewritten pattern. `kind` is exactly `domainWildcard`; any other
+spelling, a missing or non-string `pattern`, or another field is no rule, and the policy is refused as with every other malformed rule.
+
+**No migration and no compatibility layer.** The schema and engine versions stay 2: a version 2 policy without such a rule reads and decides exactly as
+before, and nothing converts rules into or out of this kind. A version 1 policy holds strings only, so a typed rule in it is refused. A host from before
+this change refuses a policy holding the new kind (unknown `kind`), fail-closed. Nothing initializes, repairs or rewrites a policy that does not read.
+
+### Grammar [code] [verified]
+
+Since the PSL override (below), the list's restrictions in this section can be approved per domain; the syntax cannot.
+
+`*.` followed by a **registrable domain**, written as it is: nothing is trimmed or completed.
+
+- `*` only as the whole first label, once. No `*` or `?` anywhere else.
+- No scheme, path, query, fragment, port, userinfo, `%`, `\`, `[` `]`, space or control character, and no leading, trailing or empty label
+  (`*.example.com.` and `*..example.com` are refused).
+- The domain is written by the URL parser of the host, as a URL's host is: lower case, IDNA to ASCII. `*.例え.jp` and `*.xn--r8jz45g.jp` name the
+  same domain; `*.Amazon.CO.jp` is `amazon.co.jp`. It must then be a DNS name: labels of 1 to 63 of `a-z`, `0-9` and `-`, not starting or ending with
+  `-`, at most 253 bytes. An IP address is no domain.
+- **Registrable** by the bundled Public Suffix List, both its ICANN and its PRIVATE section:
+  - the domain is exactly its own registrable domain: not a public suffix (`*.com`, `*.co.jp`, `*.github.io`), and not a subdomain of a registrable
+    domain (`*.www.example.com`, `*.mail.amazon.co.jp`: use a pattern for those);
+  - its public suffix is one the list knows. A suffix only the list's default rule gives (`*.example.test`, `*.corp.internal`, `*.localhost`) is
+    refused;
+  - **no public suffix lies below it.** `*.kawasaki.jp` (every `x.kawasaki.jp` is a suffix by `*.kawasaki.jp`) and `*.amazonaws.com`
+    (`s3.amazonaws.com` and others) would each cover many registrants, so they are refused; `*.city.kawasaki.jp` (an exception of the list) and
+    `*.mybucket.s3.amazonaws.com` are registrable and allowed.
+
+| Valid | Invalid |
+|---|---|
+| `*.amazon.co.jp`, `*.example.com`, `*.example.co.jp`, `*.foo.github.io`, `*.例え.jp` | `*.amazon.co.jp/*`, `https://*.amazon.co.jp`, `*.amazon.co.jp:443`, `*.amazon.co.jp?q=test`, `*.amazon.co.jp#fragment`, `www.*.amazon.co.jp`, `*.*.example.com`, `*amazon.co.jp`, `www?.example.com`, `?.example.com`, `example.*`, `*.example.*`, `*.com`, `*.co.jp`, `*.github.io`, `amazon.co.jp`, `*`, ` *.example.com`, `*.example.com.` |
+
+A refused rule is `invalid_domain_wildcard` in `problems` (with its layer and index) and in `policy_test_rule`. As every rule, it refuses the whole
+policy, also in a disabled layer, and its text is never sent back.
+
+### Public Suffix List [code] [verified]
+
+- Data: `native-host/data/public_suffix_list.dat`, the list at publicsuffix/list commit `8437e5262f13305f94087abe699b4fe2be1d1de8` (2026-10-22), as
+  published (16,560 lines, 337,923 bytes). Mozilla Public License 2.0, as its header says. It is compiled into the host (`include_str!`): no network,
+  no file read at run time. `.gitattributes` keeps its bytes (`-text`), and a test checks its SHA-256.
+- Library: `publicsuffix = "=2.3.0"` (MIT or Apache-2.0; adds `psl-types` only, `idna` was there through `url`), which parses that text and gives the
+  public suffix and registrable domain of a name, wildcard and exception rules included, Unicode and Punycode alike. The `psl` crate (the same list
+  compiled into code) was tried first; it does not give the rules themselves, which the "no suffix below" check needs.
+- The host also reads every rule of the text to know which domains have a public suffix below them.
+- **Fail-closed.** If the text lacks its ICANN or PRIVATE section, does not parse, or holds a name the URL parser refuses, no domain is registrable:
+  every domain wildcard is refused, and so is every policy that holds one.
+- Updating: replace the file with the list of a later commit, update the digest in `the_bundled_public_suffix_list_is_the_pinned_one_and_is_read`
+  and the commit above, and run the tests. A domain that becomes a suffix in a later list makes a policy that holds it invalid: the host then refuses
+  that policy rather than judging with a rule that has become too wide. Pinning the crate (`=`) makes an update of the parser a deliberate step too.
+- Cost: the list is read once per host process, and only when a domain wildcard is compiled or tested; a policy without one does not read it. In a
+  release build it took 11 to 21 ms in process (five runs). The host binary grows by 366,592 bytes (4,711,936 to 5,078,528).
+
+### Matching [code] [verified]
+
+A domain wildcard is compiled into the zone's index of wildcard hosts with no path, exactly the entry the pattern `*.amazon.co.jp` makes. So one
+evaluator judges both: the URL's host (parsed, lower case, trailing dots removed, IDNA to ASCII, the inner URL of a `blob:`) meets it if it is the
+domain or ends in `.` and the domain, on a label boundary. Path, query, fragment, port and userinfo are not looked at; schemes stay as before (HTTP and
+HTTPS only, anything else refused).
+
+| URL | `*.amazon.co.jp` |
+|---|---|
+| `https://amazon.co.jp/`, `https://www.amazon.co.jp/`, `https://seller.amazon.co.jp/`, `https://a.b.amazon.co.jp/` | match |
+| `https://WWW.Amazon.CO.JP/`, `https://www.amazon.co.jp./`, `https://u:p@www.amazon.co.jp:8443/a?b#c` | match |
+| `https://fake-amazon.co.jp/`, `https://amazon.co.jp.evil.com/`, `https://notamazon.co.jp/`, `https://amazon.co.jp@evil.com/` | no match |
+| `https://evil.com/amazon.co.jp`, `https://evil.com/?u=https://www.amazon.co.jp/`, `https://1.2.3.4/`, `https://[::1]/` | no match |
+
+A test checks that a domain wildcard and the pattern of the same text decide alike for the whole URL corpus of the pattern tests, in either zone. It
+is not a regex: it is not counted in the 128 regexes, and `*.example.com` does not meet `xexample.com`. The Blind Zone still wins, the builtins still
+apply on top, and a disabled layer still judges nothing.
+
+`policy_test_rule`, `policy_test_url`, `policy_validate`, `policy_apply`, the batch, the check before the vault and VisibleStore all compile through
+`CompiledPolicy`, so the checker and recording read a domain wildcard the same way. The extension's own evaluator (`extension/policy.js`) knows
+patterns only; it refuses a policy with a domain wildcard, as it refuses one with a regex, and nothing in recording uses it.
+
+### Difference from the pattern `*.domain`
+
+The pattern `*.amazon.co.jp` matches the same URLs and stays as it is (its grammar is unchanged; a pattern may also be `*.com`). The domain wildcard
+adds the check that the domain is registrable, so it cannot be made wider than one registrant by mistake.
+
+### Verification [verified]
+
+Unit tests (`policy/tests.rs`, `public_suffix.rs`): the grammar with every example above and more, every public suffix of the list refused
+(`*.` and, for a wildcard rule, `*.x.`), the digest of the list, a list without its sections refused, the label boundary, case, trailing dots, ports,
+userinfo, paths, queries, `blob:`, IP addresses, invalid URLs and escapes, a 40,000-character URL, Unicode and Punycode, the agreement with the
+pattern, the JSON form, version 1, and fail-closed problems. `stdio_protocol.rs`: `policy_test_rule`, `policy_validate`, `policy_test_url`,
+`policy_apply`, the batch in a new process, the check before the vault, and Blind over Private. VisibleStore: rows recorded before a domain wildcard
+leave the public read.
+
+### Measurements [verified]
+
+Release build, Windows 11, one host process per request (as `sendNativeMessage`), median of 15, a temporary app directory.
+
+| Request | This change | Before |
+|---|---|---|
+| unknown message type (process start) | 17.4 ms | 17.9 ms |
+| `policy_test_rule`, a pattern | 18.4 ms | 17.8 ms |
+| `policy_test_rule`, a domain wildcard (reads the list) | 31.0 ms | — |
+| batch of 1,000 URLs, 1,000 domain wildcards | 37.8 ms | — |
+| batch of 1,000 URLs, 2 domain wildcards | 37.2 ms | — |
+
+So reading the list adds about 13 ms to a request that needs it; the number of domain wildcards adds little. In process, after the list is read,
+judging whether 1,000 more domains are valid takes 0.7 to 1.6 ms. The ASCII names of the list are taken without the URL parser (a test checks that
+the parser would write each the same); that saves the parsing of about 10,000 names, but the run-to-run spread is larger than what it saves, so no
+gain is claimed. No baseline exists for the batch rows: the version before this change cannot hold a domain wildcard.
+
+### Remaining risks
+
+- The list is as of 2026-10-22 and is updated only by hand. A suffix added later is accepted until then; one removed later is refused.
+- Every recorded event of a policy with a domain wildcard pays for reading the list, since each event starts a host process.
+- Registrable is the list's view. A domain whose owner gives out subdomains without being in the list is still one registrable domain.
+- MPL-2.0 data is now compiled into the host binary. Its notice is the header of the file; a notice for distributed binaries is not written yet.
+
+## PSL override: approved domains
+
+The Public Suffix List is a judgement about registration boundaries, not the person's will. A domain wildcard the list restricts can be used once
+the person explicitly approves **that one domain**. Five things stay apart, and none stands in for another:
+
+1. **Syntax**: whether the text is a domain wildcard at all. Never approvable.
+2. **PSL**: whether the list makes the domain registrable.
+3. **Approval**: whether the person approved the list's restriction for that domain.
+4. **Match**: whether the host matched the rule against a URL (the checker's gate, `issue-023-privacy-policy-options.md`).
+5. **Apply**: whether the person applied the draft.
+
+An approval makes a restricted rule *valid*; it matches no URL, permits no recording, adds no rule and changes no policy.
+
+### Diagnosis [code] [verified]
+
+`public_suffix::diagnose` answers apart from the syntax (`syntax_domain`, unchanged from the grammar above):
+
+| Diagnosis | Example | Approvable |
+|---|---|---|
+| `Valid` | `*.amazon.co.jp` | not needed |
+| `InvalidSyntax` | `*.amazon.co.jp/*`, `https://*.amazon.co.jp`, `*.amazon.co.jp:443`, `www.*.amazon.co.jp`, `*.*.example.com`, `www?.example.com`, `?.example.com`, `example.*`, `*.example.*`, `*`, bad DNS labels, over-long input, IDNA the URL parser refuses | **never** |
+| `Restricted` / `public_suffix` | `*.co.jp`, `*.com`, `*.github.io`, `*.foo.kawasaki.jp` | yes |
+| `Restricted` / `unknown_suffix` | `*.example.newtld`, `*.corp.internal` | yes |
+| `Restricted` / `delegated_boundary` (public suffixes below it) | `*.kawasaki.jp`, `*.amazonaws.com` | yes |
+| `Restricted` / `not_registrable` (below a registrable domain) | `*.www.example.com` | yes |
+| `ListUnavailable` (the bundled list could not be read) | — | **never**: a failure, not a restriction |
+
+The order of the reasons: a suffix the list does not know is `unknown_suffix` first; then a domain that is itself a suffix; then one below a
+registrable domain; then one with suffixes below it.
+
+### Snapshot [code] [verified]
+
+`public_suffix::SOURCE` `publicsuffix/list`, `SOURCE_COMMIT` `8437e5262f13305f94087abe699b4fe2be1d1de8`, `SNAPSHOT_DATE` `2026-10-22`: constants
+written beside the file, never guessed at run time. A test checks them together with the file's SHA-256 and that this document names them. The host
+sends them with every check and list (`psl: { source, sourceCommit, snapshotDate }`), and the page shows the date in its explanations.
+
+### Identity [code] [verified]
+
+An approval is of a **canonical domain**: the domain as `syntax_domain` writes it (lower case, IDNA to ASCII). `*.CO.JP` and `*.co.jp` are one
+approval, and so are `*.個人.香港` and `*.xn--gmqw5a.xn--j6w193g`. A rule keeps its text as written, and duplicates of rules are still the exact
+`kind` and `pattern` (`issue-023`). An approval of `co.jp` is no approval of `ne.jp` or of `x.co.jp`; there is no global consent.
+
+### Storage [code] [verified]
+
+`settings.sqlite3` in the host's application directory (`%LOCALAPPDATA%\Memocampus`, or `MEMOCAMPUS_APP_DIR`), beside `policy.json` and apart from
+every vault. Only the host opens it (`domain_approvals.rs`); no extension page, no Chrome storage, and the service worker never asks.
+
+```sql
+CREATE TABLE IF NOT EXISTS metadata (
+    key        TEXT PRIMARY KEY NOT NULL,   -- domainWildcard.pslOverride.<canonical domain>
+    value      TEXT NOT NULL,               -- exactly "true"
+    updated_at TEXT NOT NULL                -- UTC, 2026-11-04T01:02:03.004Z
+)
+```
+
+- One row per domain. Approving again keeps the first time. No URL, title or anything of browsing is stored.
+- A row counts only if its value is exactly `true` and its key names a canonical domain. `TRUE`, `1`, `true `, a non-canonical key: no approval.
+- Reading never creates the file. A missing file is no approval; a file that cannot be read (damaged, not a database, no table, a directory) is no
+  approval for judging, and an error (`approvals_unavailable`) for the list. It is never written over.
+- Writes are one `BEGIN IMMEDIATE` transaction, committed before the host answers; a write that cannot take the database approves nothing.
+- Migration: none needed. The file is new and created on the first approval; nothing else changes format.
+
+### Engine boundary [code] [verified]
+
+The engine reads no file or database (a test checks the sources). The host reads the approvals and hands them over:
+`CompiledPolicy::compile_with(policy, &DomainApprovals)`, `Policy::validate_with`, `problems_with`, `parse_compiled_with`, `rule_matches_with`.
+The forms without `_with` mean no approval. A restricted domain wildcard compiles only if its canonical domain is approved
+(`Error::UnapprovedDomain`, code `domain_wildcard_not_approved`); a syntax error stays `invalid_domain_wildcard`; an unreadable list is
+`psl_unavailable`. Matching is unchanged: an approved `*.co.jp` is the wildcard host `co.jp`, judged as any other.
+
+Every judgement uses the approvals as stored: `policy_test_rule`, `policy_test_url` and `policy_validate` read them for the request; the store reads
+them when it loads the policy (the batch, recording, the check before the vault, VisibleStore) and again under its write lock when it stores one
+(`policy_apply`, `policy_start`). A policy without a restricted domain wildcard never opens the file.
+
+### Consistency with the policy lock [code] [verified]
+
+Approving and revoking take the policy's write lock (`policy.lock`), the lock an apply takes. Under it a revocation reads the stored policy as a
+document (also a disabled layer, also a policy that would not compile) and refuses a domain it needs (`domain_in_use`); an apply validates with the
+approvals read under it. So no apply comes between a revocation's check and its removal, and a stored policy never needs a domain that is not
+approved — unless the file is lost or damaged outside the host. Then the stored policy does not load: recording and the MCP read stop
+(fail-closed), nothing is reset, and approving the domain again makes the same policy load again.
+
+### Messages [code] [verified]
+
+All for the settings page only; none writes the policy.
+
+```text
+→ { type: "policy_domain_check", requestId, rule: { kind: "domainWildcard", pattern } }
+← { ok: true, …, status: "valid", domain, psl }
+← { ok: true, …, status: "restricted", reason, domain, approved, psl }
+← { ok: true, …, status: "invalid", psl }                       (no domain: nothing of the text comes back)
+← { ok: false, …, error: "invalid_rule" | "psl_unavailable" }
+
+→ { type: "policy_domain_approve", requestId, rule: { kind: "domainWildcard", pattern }, domain }
+← { ok: true, …, domain, approvedAt }
+← { ok: false, …, error: "invalid_rule" | "invalid_domain" | "invalid_domain_wildcard" | "domain_not_restricted"
+                       | "domain_mismatch" | "psl_unavailable" | "approvals_unavailable" | "policy_busy" | "policy_unavailable" }
+
+→ { type: "policy_domain_approvals", requestId }
+← { ok: true, …, approvals: [{ domain, approvedAt, inUse }], psl }   (inUse null: the stored policy cannot be read)
+← { ok: false, …, error: "approvals_unavailable" | "policy_busy" | "policy_unavailable" }
+
+→ { type: "policy_domain_revoke", requestId, domain }
+← { ok: true, …, domain, revoked }                                  (false: it was not approved)
+← { ok: false, …, error: "invalid_domain" | "domain_in_use" | "policy_invalid" | "approvals_unavailable" | "policy_busy" | … }
+```
+
+`policy_domain_approve` judges the rule again, whatever the page showed, and stores its canonical domain only if it is exactly the `domain` named,
+so the person approves the domain they were shown. A registrable domain needs none (`domain_not_restricted`). `policy_domain_revoke` takes a
+canonical domain only. Busy is tried again as for the other writes.
+
+### Measurements [verified]
+
+Release build, Windows 11, one host process per request, median of 15, a temporary app directory; before is `64c9631` (Domain Wildcard only).
+
+| Request | This change | Before |
+|---|---|---|
+| `policy_status`, default policy | 10.3 ms | 10.3 ms |
+| `policy_status`, a policy needing an approval (reads the list and `settings.sqlite3`) | 19.4 ms | — |
+| batch of 1,000 URLs, approved `*.co.jp` | 23.2 ms | — |
+| `policy_test_rule`, approved `*.co.jp` | 19.7 ms | — |
+| `policy_domain_check` / `policy_domain_approvals` / `policy_domain_approve` (again) | 19.5 / 20.0 / 20.0 ms | — |
+
+The host binary grows by 91,136 bytes (5,078,528 to 5,169,664). These runs were faster overall than those of the Domain Wildcard section on the same
+machine; compare within a table only.
+
+### Remaining risks
+
+- An approved public suffix (`*.com`) refuses or hides a very wide range: that is the person's decision, and the page says so before approving.
+- The page shows the canonical domain, so an IDN is shown in Punycode in the approval offer and the list.
+- If `settings.sqlite3` is deleted or damaged outside the host, a policy that needs an approval stops recording until the domain is approved again;
+  the settings page then shows the policy as invalid, and the checker, which needs a usable policy, cannot be used to approve it (the list still
+  can be read).
+- The MPL-2.0 obligations of the bundled list for distributed binaries remain a separate release requirement (see the Domain Wildcard remaining
+  risks); this change does not address them.
