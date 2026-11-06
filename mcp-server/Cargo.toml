@@ -1,0 +1,38 @@
+[package]
+name = "memocampus-mcp"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# Its own workspace, like visible-store. Every read goes through `memocampus-visible-store`; this
+# package declares no SQLite dependency of its own (only its tests do, to build synthetic vaults).
+[workspace]
+
+[[bin]]
+name = "memocampus-mcp"
+path = "src/main.rs"
+
+[dependencies]
+memocampus-visible-store = { path = "../visible-store" }
+rmcp = { version = "=3.7.0", default-features = false, features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
+tokio = { version = "1", features = ["rt", "macros", "io-std", "net", "signal", "sync", "time"] }
+tokio-util = "0.7"
+# Streamable HTTP (Issue: local HTTP transport): rmcp's tower service, served by hyper.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "http1"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+getrandom = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Time"] }
+
+[dev-dependencies]
+memocampus-native-host = { path = "../native-host" }
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }

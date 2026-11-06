@@ -15,7 +15,8 @@ const MAGIC: &[u8] = b"SQLite format 3\0";
 /// File-format read and write versions in the header: 1 is a rollback journal, 2 is WAL.
 const ROLLBACK_JOURNAL: u8 = 1;
 const WAL: u8 = 2;
-const SELECT_VISITS: &str = "SELECT event_id, url, title, visited_at FROM visits";
+// `page_metadata` has one row per URL (its latest capture), so each visit gets at most one.
+const SELECT_VISITS: &str = "SELECT v.event_id, v.url, v.title, v.visited_at, m.title, m.description, m.og_title, m.og_description, m.og_site_name, m.og_image_url, m.favicon_url, m.captured_at FROM visits v LEFT JOIN page_metadata m ON m.url = v.url";
 // Never `data` or the blob's counters. `sha256` and `save_id` identify; no rowid leaves the vault.
 const SELECT_IMAGE_SAVES: &str = "SELECT s.save_id, s.image_url, s.page_url, s.frame_url, s.saved_at, s.incognito, s.mcp_public, b.sha256, b.mime_type, b.width, b.height FROM saved_images s JOIN image_blobs b ON b.id = s.blob_id";
 
@@ -25,6 +26,21 @@ pub(crate) struct RawVisit {
     pub url: String,
     pub title: String,
     pub visited_at: String,
+    /// The metadata stored for the visit's URL, if any could be read.
+    pub page: Option<RawPage>,
+}
+
+/// One `page_metadata` row, not yet checked. Never leaves this crate.
+#[derive(Default)]
+pub(crate) struct RawPage {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub og_title: Option<String>,
+    pub og_description: Option<String>,
+    pub og_site_name: Option<String>,
+    pub og_image_url: Option<String>,
+    pub favicon_url: Option<String>,
+    pub captured_at: String,
 }
 
 /// One stored save action with its image's metadata, not yet judged. Never leaves this crate.
@@ -106,6 +122,7 @@ pub(crate) fn check_schema(db: &Connection) -> Result<(), VisibleError> {
 }
 
 /// A stored value of another type or invalid UTF-8 has no text to judge, so that row is left out.
+/// The same in a metadata column leaves out the metadata only: the visit does not depend on it.
 fn read_rows(db: &Connection) -> rusqlite::Result<Vec<RawVisit>> {
     let mut statement = db.prepare(SELECT_VISITS)?;
     let mut rows = statement.query([])?;
@@ -115,6 +132,45 @@ fn read_rows(db: &Connection) -> rusqlite::Result<Vec<RawVisit>> {
             row.get_ref(index)
                 .map(|value| value.as_str().ok().map(str::to_owned))
         };
+        let optional = |index: usize| {
+            row.get_ref(index).map(|value| {
+                value
+                    .as_str_or_null()
+                    .ok()
+                    .map(|text| text.map(str::to_owned))
+            })
+        };
+        let page = match (
+            optional(4)?,
+            optional(5)?,
+            optional(6)?,
+            optional(7)?,
+            optional(8)?,
+            optional(9)?,
+            optional(10)?,
+            optional(11)?,
+        ) {
+            (
+                Some(title),
+                Some(description),
+                Some(og_title),
+                Some(og_description),
+                Some(og_site_name),
+                Some(og_image_url),
+                Some(favicon_url),
+                Some(Some(captured_at)),
+            ) => Some(RawPage {
+                title,
+                description,
+                og_title,
+                og_description,
+                og_site_name,
+                og_image_url,
+                favicon_url,
+                captured_at,
+            }),
+            _ => None,
+        };
         if let (Some(event_id), Some(url), Some(title), Some(visited_at)) =
             (text(0)?, text(1)?, text(2)?, text(3)?)
         {
@@ -123,10 +179,20 @@ fn read_rows(db: &Connection) -> rusqlite::Result<Vec<RawVisit>> {
                 url,
                 title,
                 visited_at,
+                page,
             });
         }
     }
     Ok(visits)
+}
+
+/// Nothing is read: the vault passes the same checks as for a read, and is closed again.
+fn read_nothing(_: &Connection) -> rusqlite::Result<()> {
+    Ok(())
+}
+
+pub(crate) fn check_vault(path: &Path, stage: &mut dyn FnMut(Stage)) -> Result<(), VisibleError> {
+    read_committed(path, stage, read_nothing)
 }
 
 /// As with visits, a row with a value of another type is left out. For an optional URL that means
