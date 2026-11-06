@@ -1,6 +1,7 @@
 # Rust build output (also contains the locally built host executable)
 /native-host/target/
 /visible-store/target/
+/mcp-server/target/
 
 # Node
 node_modules/

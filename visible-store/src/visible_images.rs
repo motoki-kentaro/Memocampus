@@ -45,7 +45,8 @@ CREATE INDEX visible_image_sources_by_image ON visible_image_sources (image_id, 
 const RECOUNT: &str = "UPDATE visible_images SET (public_save_count, first_saved_ms, last_saved_ms) =
     (SELECT count(*), min(saved_ms), max(saved_ms) FROM visible_image_sources WHERE image_id = visible_images.public_id)";
 const MATCHES: &str = "EXISTS (SELECT 1 FROM visible_image_sources s WHERE s.image_id = i.public_id
-    AND (s.image_url LIKE ?1 ESCAPE '\\' OR s.page_url LIKE ?1 ESCAPE '\\' OR s.frame_url LIKE ?1 ESCAPE '\\')
+    AND (s.image_url LIKE ?1 ESCAPE '\\' OR s.page_url LIKE ?1 ESCAPE '\\' OR s.frame_url LIKE ?1 ESCAPE '\\'
+         OR i.mime_type LIKE ?1 ESCAPE '\\')
     AND s.saved_ms >= ?2 AND s.saved_ms < ?3)";
 
 pub(crate) struct VisibleImages {

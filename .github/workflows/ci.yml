@@ -52,3 +52,11 @@ jobs:
         working-directory: visible-store
       - run: cargo build --release --locked
         working-directory: visible-store
+      - run: cargo fmt --all -- --check
+        working-directory: mcp-server
+      - run: cargo test --locked
+        working-directory: mcp-server
+      - run: cargo clippy --locked --all-targets -- -D warnings
+        working-directory: mcp-server
+      - run: cargo build --release --locked
+        working-directory: mcp-server

@@ -1,4 +1,5 @@
-//! VisibleStore: the only read path from a vault to MCP (Issue #12: visits and image metadata).
+//! VisibleStore: the only read path from a vault to MCP (Issue #12: visits and image metadata;
+//! Issue #8: page metadata, domain counts and paging).
 //!
 //! Every call builds its own visible set from a fresh policy and a fresh snapshot, answers from it
 //! and drops it. Nothing is cached, so no failure can fall back on an older set. See
@@ -47,7 +48,7 @@ use memocampus_native_host::policy_store::{PolicyStore, StoreError};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use visible_images::VisibleImages;
-use visible_set::{IdKey, VisibleSet};
+use visible_set::{public_id, IdKey, Position, VisibleSet};
 
 pub const DEFAULT_LIMIT: u32 = 50;
 pub const MAX_LIMIT: u32 = 100;
@@ -74,6 +75,8 @@ pub enum VisibleError {
     VisibleSetFailed,
     /// The same for an image that never existed and one with no public save.
     NotFound,
+    /// A cursor this store did not issue, or not in the form it issues.
+    InvalidCursor,
 }
 
 impl VisibleError {
@@ -87,6 +90,7 @@ impl VisibleError {
             Self::VaultCorrupt => "vault_corrupt",
             Self::VisibleSetFailed => "visible_set_failed",
             Self::NotFound => "not_found",
+            Self::InvalidCursor => "invalid_cursor",
         }
     }
 }
@@ -98,31 +102,78 @@ pub struct VisibleVisit {
     pub url: String,
     pub title: String,
     pub visited_at: String,
+    /// The latest metadata stored for this URL (Issue #22), not necessarily read at this visit.
+    pub page: Option<VisiblePage>,
+}
+
+/// Page metadata of a public URL. Text is page-supplied, published as stored, like titles (D7).
+/// The two URLs are given only when they are public themselves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisiblePage {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub og_title: Option<String>,
+    pub og_description: Option<String>,
+    pub og_site_name: Option<String>,
+    pub og_image_url: Option<String>,
+    pub favicon_url: Option<String>,
+    pub captured_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisitPage {
     pub items: Vec<VisibleVisit>,
-    /// Matching public rows, before the limit.
+    /// Matching public rows, before the cursor and the limit.
     pub total: u64,
+    /// More public rows follow the last item; `VisibleStore::cursor_after` of it continues.
     pub has_more: bool,
 }
 
-/// `from` is inclusive and `to` exclusive, both as `Date#toISOString()` text.
+/// `from` is inclusive and `to` exclusive, both as `Date#toISOString()` text. `query` is looked
+/// for in the URL, the title and the metadata text. `cursor` continues after the visit it was
+/// issued for.
 #[derive(Debug, Clone, Default)]
 pub struct SearchVisits<'a> {
     pub query: &'a str,
     pub from: Option<&'a str>,
     pub to: Option<&'a str>,
     pub limit: Option<u32>,
+    pub cursor: Option<&'a str>,
 }
 
 /// `date` is `YYYY-MM-DD` in the zone given by `utc_offset`, a fixed offset such as `+09:00`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VisitsByDay<'a> {
     pub date: &'a str,
     pub utc_offset: &'a str,
     pub limit: Option<u32>,
+    pub cursor: Option<&'a str>,
+}
+
+/// Public visits per host in a half-open range, as for `SearchVisits`.
+#[derive(Debug, Clone, Default)]
+pub struct DomainStats<'a> {
+    pub from: Option<&'a str>,
+    pub to: Option<&'a str>,
+    pub limit: Option<u32>,
+}
+
+/// `domain` is the URL's host as the policy judges it: lower case, no trailing dot, no port.
+/// Subdomains are counted apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainCount {
+    pub domain: String,
+    pub visit_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainStatsPage {
+    pub items: Vec<DomainCount>,
+    /// Public visits in the range, of all domains.
+    pub total_visits: u64,
+    /// Domains with a public visit in the range, before the limit.
+    pub total_domains: u64,
+    pub has_more: bool,
 }
 
 /// One image, described from its public saves only. `id` is opaque and stable only for the lifetime
@@ -229,6 +280,68 @@ impl VisibleStore {
         self.search_visits_staged(request, &mut |_| {})
     }
 
+    /// The vault passes every check a read makes (location, mode, schema), and nothing is read.
+    /// The policy is not needed for this.
+    pub fn check_vault(&self) -> Result<(), VisibleError> {
+        snapshot::check_vault(&self.vault, &mut |_| {})
+    }
+
+    pub fn domain_stats(&self, request: &DomainStats) -> Result<DomainStatsPage, VisibleError> {
+        let (_, range, limit) = search_terms("", request.from, request.to, request.limit)?;
+        self.read_visible(
+            &mut |_| {},
+            snapshot::read_visits,
+            VisibleSet::build,
+            |set: &VisibleSet| set.domains(range, limit),
+        )
+    }
+
+    /// The cursor that continues a page after `visit`, a visit this store returned. It names a
+    /// position only: the next read applies the policy of its own time, and a row that became
+    /// private is simply not there. It is valid for this store only.
+    pub fn cursor_after(&self, visit: &VisibleVisit) -> Result<String, VisibleError> {
+        let ms = time::parse_timestamp(&visit.visited_at).ok_or(VisibleError::InvalidArgument)?;
+        if !is_visit_id(&visit.id) {
+            return Err(VisibleError::InvalidArgument);
+        }
+        Ok(format!(
+            "{ms}.{}.{}",
+            visit.id,
+            self.cursor_mac(ms, &visit.id)
+        ))
+    }
+
+    fn cursor_mac(&self, ms: i64, id: &str) -> String {
+        let mac = public_id(&self.id_key, "cursor", &format!("{ms}\0{id}"));
+        mac["cursor_".len()..].to_owned()
+    }
+
+    fn position(&self, cursor: Option<&str>) -> Result<Option<Position>, VisibleError> {
+        let Some(cursor) = cursor else {
+            return Ok(None);
+        };
+        let mut parts = cursor.split('.');
+        let (Some(ms), Some(id), Some(mac), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return Err(VisibleError::InvalidCursor);
+        };
+        let valid = !ms.is_empty()
+            && ms.len() <= 15
+            && ms.bytes().all(|byte| byte.is_ascii_digit())
+            && is_visit_id(id);
+        // Only the spelling `cursor_after` writes: no sign and no leading zero.
+        let ms_text = ms;
+        let ms: i64 = match ms_text.parse() {
+            Ok(ms) if valid && format!("{ms}") == ms_text => ms,
+            _ => return Err(VisibleError::InvalidCursor),
+        };
+        if self.cursor_mac(ms, id) != mac {
+            return Err(VisibleError::InvalidCursor);
+        }
+        Ok(Some((ms, id.to_owned())))
+    }
+
     pub fn get_visits_by_day(&self, request: &VisitsByDay) -> Result<VisitPage, VisibleError> {
         self.get_visits_by_day_staged(request, &mut |_| {})
     }
@@ -257,11 +370,12 @@ impl VisibleStore {
     ) -> Result<VisitPage, VisibleError> {
         let (pattern, range, limit) =
             search_terms(request.query, request.from, request.to, request.limit)?;
+        let after = self.position(request.cursor)?;
         self.read_visible(
             stage,
             snapshot::read_visits,
             VisibleSet::build,
-            |set: &VisibleSet| set.query(&pattern, range, limit),
+            |set: &VisibleSet| set.query(&pattern, range, after.as_ref(), limit),
         )
     }
 
@@ -288,11 +402,12 @@ impl VisibleStore {
         let range = time::day_range(request.date, request.utc_offset)
             .ok_or(VisibleError::InvalidArgument)?;
         let limit = checked_limit(request.limit)?;
+        let after = self.position(request.cursor)?;
         self.read_visible(
             stage,
             snapshot::read_visits,
             VisibleSet::build,
-            |set: &VisibleSet| set.query("%", range, limit),
+            |set: &VisibleSet| set.query("%", range, after.as_ref(), limit),
         )
     }
 
@@ -362,6 +477,16 @@ fn search_terms(
     }
     let limit = checked_limit(limit)?;
     Ok((visible_set::like_pattern(query), range, limit))
+}
+
+/// `visit_` and 32 lower-case hexadecimal digits, as `public_id` writes them.
+fn is_visit_id(id: &str) -> bool {
+    id.strip_prefix("visit_").is_some_and(|hex| {
+        hex.len() == 32
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
 }
 
 fn checked_limit(limit: Option<u32>) -> Result<u32, VisibleError> {

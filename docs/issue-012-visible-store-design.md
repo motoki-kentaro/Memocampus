@@ -270,6 +270,8 @@ counter and ETag so that a change between them is caught; dropping the set on ev
 
 ## 8. API
 
+> Issue #8 added page metadata on visits, cursors, domain counts, `check_vault` and `invalid_cursor`, and made the MIME type searchable; see `docs/issue-008-mcp-server.md` §5. The text below is the Slice 1 API.
+
 ```rust
 VisibleStore::new(vault, app_dir) / from_process(vault)
 search_visits(&SearchVisits { query, from, to, limit }) -> Result<VisitPage, VisibleError>

@@ -33,8 +33,9 @@ incognito in `chrome://extensions`. An image you explicitly save from an incogni
   saved from both kinds of window is stored once and has a row of each kind. A save whose window type cannot be
   determined is refused. The image is fetched inside the page, or else without cookies or HTTP cache, so the normal
   profile's cookies are not sent; an image that the page may not read and that requires a login can therefore fail.
-- **Future MCP access**: saving and publishing are separate operations. Nothing is published initially, and this
-  attribute is kept so that a future gate can use it.
+- **MCP access**: saving and publishing are separate operations. Nothing is published initially. The MCP server
+  describes a save only if its row is marked public in 保存履歴, it is not incognito, and every source URL passes the
+  privacy policy; an incognito row is never public.
 - **Native host**: as a second layer it accepts a visit or tab snapshot only if it is declared `"incognito": false`;
   anything else is refused without being stored, and the extension discards it without keeping its URL or title. The host
   cannot see the browser: it enforces the extension's declaration, and telling incognito tabs apart is the extension's job.
@@ -47,7 +48,7 @@ not changed or deleted.
 Automatic recording (visits and **全タブを記録**) is judged against `%LOCALAPPDATA%\Memocampus\policy.json`, which is global and does not change with the vault.
 
 - **Layer A (`neverSave`)**: not recorded at all. Initially authentication hosts and paths, and URLs carrying credentials (`access_token` and the like). A malformed URL is treated the same way.
-- **Layer B (`saveButNoMcp`)**: recorded locally as usual. The MCP gate that will use this layer is not connected yet, and no MCP server exists.
+- **Layer B (`saveButNoMcp`)**: recorded locally as usual, and never given to AI: the MCP server (below) leaves these pages out of every result and count.
 
 **First use**: nothing is created implicitly. Until you press **プライバシー設定を初期化** at the top of the side panel's URL tab, automatic recording is stopped. The button is offered only if the policy was never initialized.
 
@@ -62,6 +63,22 @@ The check happens three times, with the same rules:
 To find the cause, look at the toolbar badge and the message at the top of the URL tab; **再確認** reads the state again, and delivery resumes by itself once the policy is readable. A policy that was initialized and then lost or damaged is never reset for you, and the button is not offered: restore the file, or, if you accept losing your rules, close Chrome and move `policy.json`, `policy.initialized` and `policy.lock` out of `%LOCALAPPDATA%\Memocampus` yourself, which makes it first use again.
 
 **Manual image saves** are explicit, are not automatic recording, and do not depend on the policy. Rows already in a vault are not changed when rules change. See `docs/issue-011-privacy-ingress.md`.
+
+## MCP server (local, read-only)
+
+`memocampus-mcp.exe --vault "<absolute path to the vault>"` lets an MCP client such as Claude Desktop or Claude Code
+search the vault over stdio: visits (URL, title, page metadata), one day's visits, visit counts per domain, and the
+metadata of images marked public. It never writes and never returns image data, and by default it opens no network port.
+With `--transport streamable-http` it serves the same tools on `http://127.0.0.1:8765/mcp` instead: loopback only, a bearer
+token required on every request, browser origins refused ([docs/mcp-streamable-http.md](docs/mcp-streamable-http.md)). Every call goes
+through VisibleStore, which applies the current privacy policy: never-save and save-but-no-MCP pages, and anything that
+cannot be judged, are absent from every result and count. A policy change applies from the next call. Build, client
+setup, tools, limits and the dogfood checklist: [docs/issue-008-mcp-server.md](docs/issue-008-mcp-server.md).
+
+Data given to an MCP client leaves Memocampus's control: the client may send it to its AI provider.
+
+For troubleshooting a client that cannot connect, the server appends start-up and connection events (no URLs, titles, queries
+or vault paths) to `%LOCALAPPDATA%\Memocampus\logs\mcp-startup.log`, three files of about 5 MiB at most.
 
 ## Images (Image Vault)
 
@@ -140,6 +157,8 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 ## Tests
 
 - Native host: `cargo test` in `native-host/` (unit tests plus a stdio protocol test against the built binary).
+- VisibleStore: `cargo test` in `visible-store/`.
+- MCP server: `cargo test` in `mcp-server/` (unit tests plus MCP sessions against the built binary, synthetic vaults only).
 - Extension modules: `npm test` at the repository root (Node's built-in test runner, no dependencies).
 
 ## Continuous Integration
@@ -147,7 +166,7 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 GitHub Actions (`.github/workflows/ci.yml`) runs on pull requests targeting `main`, on pushes to `main`, and on manual runs. It only has read access to the repository contents, uses no secrets, and uploads no artifacts.
 
 - **JavaScript** (`ubuntu-latest`, Node.js 24): `npm ci`, `npm test`. The extension tests use fake Chrome APIs and need no Windows.
-- **Rust** (`windows-latest`, stable MSVC toolchain): format check, tests, Clippy and a release build. The host calls Windows APIs, embeds its icon through the MSVC linker, and has tests that only run on Windows/MSVC, so a Linux run would not verify it.
+- **Rust** (`windows-latest`, stable MSVC toolchain): format check, tests, Clippy and a release build, for `native-host`, `visible-store` and `mcp-server` in turn. The host calls Windows APIs, embeds its icon through the MSVC linker, and has tests that only run on Windows/MSVC, so a Linux run would not verify it.
 
 Run the same checks locally:
 
@@ -187,6 +206,8 @@ The **Require lockfile** policy is not enabled, and enabling it is a separate de
 
 - `extension/` — Chrome Manifest V3 service worker (visits, image saving) and side panel (search, images, vault)
 - `native-host/` — Rust Native Messaging host and SQLite persistence
+- `visible-store/` — the only read path from a vault to MCP, with the privacy gate
+- `mcp-server/` — `memocampus-mcp`, the read-only stdio MCP server over VisibleStore
 - `docs/` — issue and slice acceptance criteria
 - `assets/icon.png` — master of the app icon; `scripts/generate-icons.py` — regenerates the icons from it
 

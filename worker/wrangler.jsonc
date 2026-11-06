@@ -1,0 +1,19 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "memocampus",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-11-04",
+	"vpc_services": [
+		{
+			"binding": "MEMOCAMPUS",
+			"service_id": "01a1af23-288c-72a0-b62f-013d132e4643" // ここにVPC ServiceのUUIDを入れる
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "OAUTH_KV",
+			"id": "9686052707824e30a8edf4e5200ef725",
+			"remote": true
+		}
+	]
+}

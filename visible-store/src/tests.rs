@@ -18,6 +18,7 @@ const ALL: SearchVisits = SearchVisits {
     from: None,
     to: None,
     limit: Some(MAX_LIMIT),
+    cursor: None,
 };
 
 struct Fixture {
@@ -303,9 +304,13 @@ fn the_gate_agrees_with_the_shared_policy_vectors() {
             url: vector["url"].as_str().unwrap().into(),
             title: "t".into(),
             visited_at: day(1),
+            page: None,
         };
         let set = VisibleSet::build(vec![row], &compiled(&policy), &key).unwrap();
-        let total = set.query("%", (i64::MIN, i64::MAX), 10).unwrap().total;
+        let total = set
+            .query("%", (i64::MIN, i64::MAX), None, 10)
+            .unwrap()
+            .total;
         assert_eq!(
             total == 1,
             vector["expected"] == "none",
@@ -350,6 +355,7 @@ fn private_rows_do_not_change_totals_order_or_limits() {
         date: "2026-10-03",
         utc_offset: "+00:00",
         limit: None,
+        cursor: None,
     };
     let day_before = f.store.get_visits_by_day(&by_day).unwrap();
     // Newer, older and same-time private rows, some with the searched word, on every position.
@@ -396,6 +402,7 @@ fn limits_default_cap_and_refuse_bad_values() {
             date: "2026-10-01",
             utc_offset: "+00:00",
             limit: None,
+            cursor: None,
         })
         .unwrap();
     assert_eq!((by_day.items.len(), by_day.total), (50, 120));
@@ -505,6 +512,7 @@ fn a_local_day_uses_the_explicit_offset() {
                 date,
                 utc_offset,
                 limit: None,
+                cursor: None,
             })
             .unwrap()
             .items
@@ -536,6 +544,7 @@ fn a_local_day_uses_the_explicit_offset() {
                 date,
                 utc_offset: offset,
                 limit: None,
+                cursor: None,
             }),
             VisibleError::InvalidArgument,
         );
@@ -757,8 +766,9 @@ fn a_schema_3_vault_relabelled_as_4_is_refused_and_its_rows_stay_hidden() {
 }
 
 #[test]
-fn page_metadata_never_reaches_a_reader_and_a_vault_without_it_is_refused() {
-    // Issue #22: VisibleStore reads no metadata, for public URLs or private ones.
+fn page_metadata_reaches_a_reader_only_with_a_public_visit_and_a_vault_without_it_is_refused() {
+    // Issue #8 publishes the metadata of a public URL (Issue #22). Before #8, no metadata was read
+    // at all; private URLs keep every field to themselves, as their titles.
     let f = Fixture::new();
     f.seed();
     let before = f.store.search_visits(&ALL).unwrap();
@@ -773,23 +783,52 @@ fn page_metadata_never_reaches_a_reader_and_a_vault_without_it_is_refused() {
         .collect::<rusqlite::Result<Vec<_>>>()
         .unwrap();
     for (event_id, url) in rows {
-        db.execute(
-            "INSERT INTO page_metadata (url, event_id, title, description, og_title, og_site_name, og_image_url, favicon_url, captured_at) VALUES (?1, ?2, 'CANARY meta', 'CANARY desc', 'CANARY og', 'CANARY site', 'https://a-layer.test/CANARY.png', 'https://b-layer.test/CANARY.ico', '2026-11-05T00:00:00.000Z')",
-            params![url, event_id],
-        )
-        .unwrap();
+        if event_id.starts_with("pub-") {
+            meta(
+                &db,
+                &url,
+                &event_id,
+                &format!("Meta {event_id}"),
+                "2026-11-05T00:00:00.000Z",
+            );
+        } else {
+            db.execute(
+                "INSERT INTO page_metadata (url, event_id, title, description, og_title, og_description, og_site_name, og_image_url, favicon_url, captured_at) VALUES (?1, ?2, 'CANARY meta', 'CANARY desc', 'CANARY og', 'CANARY ogd', 'CANARY site', 'https://cdn.public.test/CANARY.png', 'https://cdn.public.test/CANARY.ico', '2026-11-05T00:00:00.000Z')",
+                params![url, event_id],
+            )
+            .unwrap();
+        }
     }
     let after = f.store.search_visits(&ALL).unwrap();
     assert_clean(&after);
-    assert_eq!(format!("{after:?}"), format!("{before:?}"));
-    let found = f
-        .store
-        .search_visits(&SearchVisits {
-            query: "CANARY",
-            ..ALL
-        })
+    assert_eq!(after.total, before.total);
+    let ids = |page: &VisitPage| page.items.iter().map(|v| v.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&after), ids(&before));
+    assert!(before.items.iter().all(|v| v.page.is_none()));
+    let one = after
+        .items
+        .iter()
+        .find(|v| v.url == "https://one.public.test/")
         .unwrap();
-    assert!(found.items.is_empty());
+    let page = one.page.as_ref().unwrap();
+    assert_eq!(page.description.as_deref(), Some("Meta pub-1 description"));
+    assert_eq!(page.og_site_name.as_deref(), Some("Meta pub-1 site"));
+    assert_eq!(
+        page.og_image_url.as_deref(),
+        Some("https://cdn.public.test/og.png?w=1")
+    );
+    assert_eq!(page.captured_at, "2026-11-05T00:00:00.000Z");
+    for query in ["CANARY", "CANARY desc", "CANARY ogd", "CANARY site"] {
+        let found = f
+            .store
+            .search_visits(&SearchVisits { query, ..ALL })
+            .unwrap();
+        assert_eq!(
+            (found.total, found.items.len(), found.has_more),
+            (0, 0, false),
+            "{query}"
+        );
+    }
 
     // A vault shaped like schema 4 (no page_metadata) is not the current schema.
     let sql = schema::create_sql();
@@ -802,6 +841,7 @@ fn page_metadata_never_reaches_a_reader_and_a_vault_without_it_is_refused() {
         .unwrap();
     let store = VisibleStore::new(path, f.app.clone()).unwrap();
     assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
+    assert_failed(store.check_vault(), VisibleError::VaultSchemaMismatch);
 }
 
 #[test]
@@ -944,6 +984,7 @@ fn reads_never_modify_the_vault_or_policy() {
                 date: "2026-10-01",
                 utc_offset: "+09:00",
                 limit: None,
+                cursor: None,
             })
             .unwrap();
     }
@@ -1188,6 +1229,7 @@ fn damaged_policies_mean_no_data_and_recovery_needs_only_the_next_read() {
                 date: "2026-10-01",
                 utc_offset: "+00:00",
                 limit: None,
+                cursor: None,
             }),
             VisibleError::PolicyUnavailable,
         );
@@ -1334,12 +1376,14 @@ fn canary_set() -> VisibleSet {
             url: url.into(),
             title: title.into(),
             visited_at: day(1),
+            page: None,
         })
         .chain([RawVisit {
             event_id: "pub".into(),
             url: "https://public.test/".into(),
             title: "Public".into(),
             visited_at: day(1),
+            page: None,
         }]);
     let mut policy = Policy::default();
     policy.layers.never_save.rules.push("a-layer.test".into());
@@ -3261,4 +3305,659 @@ fn an_approved_domain_hides_rows_and_lost_approvals_close_the_read() {
     let settings = f.app.join("settings.sqlite3");
     std::fs::write(&settings, b"damaged").unwrap();
     assert_failed(f.store.search_visits(&ALL), VisibleError::PolicyUnavailable);
+}
+
+// --- Issue #8: metadata, paging and domain counts ----------------------------------------------
+
+/// A metadata row in the form the host writes, every text field derived from `name`.
+fn meta(db: &Connection, url: &str, event_id: &str, name: &str, captured_at: &str) {
+    db.execute(
+        "INSERT INTO page_metadata (url, event_id, title, description, og_title, og_description, og_site_name, og_image_url, favicon_url, captured_at)
+         VALUES (?1, ?2, ?3 || ' title', ?3 || ' description', ?3 || ' og', ?3 || ' og description', ?3 || ' site', 'https://cdn.public.test/og.png?w=1', 'https://cdn.public.test/favicon.ico', ?4)",
+        params![url, event_id, name, captured_at],
+    )
+    .unwrap();
+}
+
+fn search(f: &Fixture, query: &str) -> VisitPage {
+    let page = f
+        .store
+        .search_visits(&SearchVisits { query, ..ALL })
+        .unwrap();
+    assert_clean(&page);
+    page
+}
+
+#[test]
+fn every_metadata_text_field_is_searched_and_a_visit_without_metadata_still_is() {
+    let f = Fixture::new();
+    f.seed();
+    let db = writer(&f.vault);
+    visit(&db, "m", "https://news.public.test/a?id=7", "Doc", &day(5));
+    meta(
+        &db,
+        "https://news.public.test/a?id=7",
+        "m",
+        "Kyoto 紅葉",
+        &day(5),
+    );
+    visit(
+        &db,
+        "plain",
+        "https://plain.public.test/",
+        "No meta here",
+        &day(6),
+    );
+    let urls = |page: VisitPage| page.items.into_iter().map(|v| v.url).collect::<Vec<_>>();
+    for query in [
+        "news.public",      // URL
+        "Doc",              // visit title
+        "紅葉 title",       // page title
+        "紅葉 description", // description
+        "紅葉 og",          // og:title
+        "og description",   // og:description
+        "紅葉 site",        // og:site_name
+        "kyoto",            // ASCII case-insensitive, as for URLs and titles
+    ] {
+        assert_eq!(
+            urls(search(&f, query)),
+            ["https://news.public.test/a?id=7"],
+            "{query}"
+        );
+    }
+    // The metadata URLs name other resources and are not searched.
+    assert!(search(&f, "favicon.ico").items.is_empty());
+    assert!(search(&f, "og.png").items.is_empty());
+    let plain = search(&f, "No meta");
+    assert_eq!(urls(plain.clone()), ["https://plain.public.test/"]);
+    assert_eq!(plain.items[0].page, None);
+    // Metadata of no visit at all (another URL) is never searched or returned.
+    meta(&db, "https://orphan.public.test/", "m", "Orphan", &day(5));
+    assert!(search(&f, "Orphan").items.is_empty());
+}
+
+#[test]
+fn every_visit_of_a_url_carries_the_url_s_latest_metadata() {
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    let url = "https://repeat.public.test/";
+    for (id, n) in [("r1", 1), ("r2", 2), ("r3", 3)] {
+        visit(&db, id, url, "Repeat", &day(n));
+    }
+    meta(&db, url, "r2", "Latest", &day(2));
+    let page = search(&f, "Latest og");
+    assert_eq!(page.total, 3, "one row per visit, not per URL");
+    assert!(page
+        .items
+        .iter()
+        .all(|v| v.page.as_ref().unwrap().og_title.as_deref() == Some("Latest og")));
+    let ids: std::collections::HashSet<_> = page.items.iter().map(|v| v.id.clone()).collect();
+    assert_eq!(ids.len(), 3);
+}
+
+#[test]
+fn metadata_urls_of_private_hosts_and_values_the_host_never_writes_are_left_out() {
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    type Case = (
+        &'static str,
+        &'static str,
+        &'static str,
+        Option<&'static str>,
+        Option<&'static str>,
+    );
+    let cases: [Case; 6] = [
+        // (id, og_image_url, favicon_url, expected og_image_url, expected favicon_url)
+        (
+            "ok",
+            "https://cdn.public.test/a.png",
+            "https://cdn.public.test/i.ico",
+            Some("https://cdn.public.test/a.png"),
+            Some("https://cdn.public.test/i.ico"),
+        ),
+        (
+            "a",
+            "https://a-layer.test/CANARY.png",
+            "https://b-layer.test/CANARY.ico",
+            None,
+            None,
+        ),
+        (
+            "cred",
+            "https://cdn.public.test/x.png?access_token=CANARY",
+            "https://cdn.public.test/i.ico",
+            None,
+            Some("https://cdn.public.test/i.ico"),
+        ),
+        (
+            "user",
+            "https://u:CANARY@cdn.public.test/x.png",
+            "https://cdn.public.test/login/CANARY",
+            None,
+            None,
+        ),
+        (
+            "scheme",
+            "javascript:CANARY",
+            "data:image/png;base64,CANARY",
+            None,
+            None,
+        ),
+        (
+            "blank",
+            " https://cdn.public.test/CANARY.png",
+            "https://cdn.public.test/i.ico",
+            None,
+            Some("https://cdn.public.test/i.ico"),
+        ),
+    ];
+    for (n, (id, image, icon, _, _)) in cases.iter().enumerate() {
+        let url = format!("https://page.public.test/{id}");
+        visit(&db, id, &url, "Page", &day(n as u32 + 1));
+        db.execute(
+            "INSERT INTO page_metadata (url, event_id, og_title, og_image_url, favicon_url, captured_at) VALUES (?1, ?2, 'Shown', ?3, ?4, ?5)",
+            params![url, id, image, icon, day(n as u32 + 1)],
+        )
+        .unwrap();
+    }
+    // Text not in the host's form (control characters, outer or double spaces) is absent, not repaired.
+    visit(
+        &db,
+        "text",
+        "https://page.public.test/text",
+        "Page",
+        &day(9),
+    );
+    db.execute(
+        "INSERT INTO page_metadata (url, event_id, title, description, og_title, og_site_name, captured_at) VALUES ('https://page.public.test/text', 'text', ' CANARY', 'CANARY  two', ?1, 'kept', ?2)",
+        params![format!("CANARY{}", '\u{7}'), day(9)],
+    )
+    .unwrap();
+    // A timestamp of another form leaves out the whole metadata, never the visit.
+    visit(
+        &db,
+        "time",
+        "https://page.public.test/time",
+        "Page",
+        &day(10),
+    );
+    db.execute(
+        "INSERT INTO page_metadata (url, event_id, og_title, captured_at) VALUES ('https://page.public.test/time', 'time', 'CANARY time', '2026-11-05 00:00:00.000Z')",
+        [],
+    )
+    .unwrap();
+    let page = f.store.search_visits(&ALL).unwrap();
+    assert_clean(&page);
+    assert_eq!(page.total, 8);
+    for (id, _, _, image, icon) in cases {
+        let visit = page
+            .items
+            .iter()
+            .find(|v| v.url.ends_with(&format!("/{id}")))
+            .unwrap();
+        let meta = visit.page.as_ref().unwrap();
+        assert_eq!(meta.og_title.as_deref(), Some("Shown"), "{id}");
+        assert_eq!(
+            (meta.og_image_url.as_deref(), meta.favicon_url.as_deref()),
+            (image, icon),
+            "{id}"
+        );
+    }
+    let text = page
+        .items
+        .iter()
+        .find(|v| v.url.ends_with("/text"))
+        .unwrap();
+    let meta = text.page.as_ref().unwrap();
+    assert_eq!(
+        (
+            meta.title.clone(),
+            meta.description.clone(),
+            meta.og_title.clone()
+        ),
+        (None, None, None)
+    );
+    assert_eq!(meta.og_site_name.as_deref(), Some("kept"));
+    let time = page
+        .items
+        .iter()
+        .find(|v| v.url.ends_with("/time"))
+        .unwrap();
+    assert_eq!(time.page, None);
+}
+
+#[test]
+fn metadata_of_a_wrong_type_is_left_out_and_the_visit_is_kept() {
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    visit(&db, "v", "https://typed.public.test/", "Typed", &day(1));
+    // The vault's CHECK constraints do not stop a BLOB: length() of a BLOB is its size.
+    db.execute(
+        "INSERT INTO page_metadata (url, event_id, og_title, captured_at) VALUES ('https://typed.public.test/', 'v', CAST('CANARY' AS BLOB), ?1)",
+        [day(1)],
+    )
+    .unwrap();
+    let page = f.store.search_visits(&ALL).unwrap();
+    assert_clean(&page);
+    assert_eq!(page.total, 1);
+    assert_eq!(page.items[0].page, None);
+}
+
+#[test]
+fn private_metadata_never_changes_a_total_a_page_or_a_cursor() {
+    // The same public rows with and without private metadata matching the query.
+    let f = Fixture::new();
+    f.seed();
+    let db = writer(&f.vault);
+    for n in 1..=5 {
+        let url = format!("https://list.public.test/{n}");
+        visit(&db, &format!("l{n}"), &url, "List", &day(n));
+        meta(&db, &url, &format!("l{n}"), "Shared word", &day(n));
+    }
+    let first = f
+        .store
+        .search_visits(&SearchVisits {
+            query: "Shared word",
+            limit: Some(2),
+            ..ALL
+        })
+        .unwrap();
+    for (id, url, _) in private_rows() {
+        // Private visits whose metadata alone holds the query, newer than every public one.
+        db.execute(
+            "INSERT OR IGNORE INTO page_metadata (url, event_id, og_description, captured_at) VALUES (?1, ?2, 'Shared word CANARY', ?3)",
+            params![url, id, day(20)],
+        )
+        .unwrap();
+    }
+    let again = f
+        .store
+        .search_visits(&SearchVisits {
+            query: "Shared word",
+            limit: Some(2),
+            ..ALL
+        })
+        .unwrap();
+    assert_clean(&again);
+    assert_eq!(again, first);
+    assert_eq!(again.total, 5);
+    let only_private = search(&f, "CANARY");
+    assert_eq!((only_private.total, only_private.has_more), (0, false));
+}
+
+#[test]
+fn a_cursor_pages_through_public_rows_only_without_gaps_or_repeats() {
+    let f = Fixture::new();
+    f.seed();
+    let db = writer(&f.vault);
+    // Equal times too: the order is time, then ID.
+    for n in 0..7 {
+        visit(
+            &db,
+            &format!("p{n}"),
+            &format!("https://page.public.test/{n}"),
+            "Paged",
+            &day(5 + n / 3),
+        );
+    }
+    let request = |cursor: Option<&str>| {
+        f.store
+            .search_visits(&SearchVisits {
+                query: "page.public",
+                limit: Some(3),
+                cursor,
+                ..ALL
+            })
+            .unwrap()
+    };
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page = request(cursor.as_deref());
+        assert_clean(&page);
+        assert_eq!(page.total, 7, "the whole match, whatever the cursor");
+        seen.extend(page.items.iter().map(|v| v.id.clone()));
+        if !page.has_more {
+            break;
+        }
+        cursor = Some(f.store.cursor_after(page.items.last().unwrap()).unwrap());
+    }
+    let all = f
+        .store
+        .search_visits(&SearchVisits {
+            query: "page.public",
+            ..ALL
+        })
+        .unwrap();
+    assert_eq!(
+        seen,
+        all.items.iter().map(|v| v.id.clone()).collect::<Vec<_>>()
+    );
+    assert_eq!(seen.len(), 7);
+
+    // The same pages over a day.
+    let by_day = |cursor: Option<&str>| {
+        f.store
+            .get_visits_by_day(&VisitsByDay {
+                date: "2026-10-05",
+                utc_offset: "+00:00",
+                limit: Some(2),
+                cursor,
+            })
+            .unwrap()
+    };
+    let first = by_day(None);
+    assert_eq!(
+        (first.total, first.items.len(), first.has_more),
+        (3, 2, true)
+    );
+    let next = by_day(Some(&f.store.cursor_after(&first.items[1]).unwrap()));
+    assert_eq!((next.total, next.items.len(), next.has_more), (3, 1, false));
+    assert!(!first.items.contains(&next.items[0]));
+}
+
+#[test]
+fn a_row_that_became_private_is_skipped_by_the_next_page() {
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    for n in 1..=4 {
+        visit(
+            &db,
+            &format!("h{n}"),
+            &format!("https://h{n}.public.test/"),
+            "Hot",
+            &day(n),
+        );
+    }
+    let first = f
+        .store
+        .search_visits(&SearchVisits {
+            query: "Hot",
+            limit: Some(2),
+            ..ALL
+        })
+        .unwrap();
+    let cursor = f.store.cursor_after(first.items.last().unwrap()).unwrap();
+    // The policy changes between two pages: the next page applies the new one.
+    f.add_rule(false, "h2.public.test");
+    let next = f
+        .store
+        .search_visits(&SearchVisits {
+            query: "Hot",
+            limit: Some(2),
+            cursor: Some(&cursor),
+            ..ALL
+        })
+        .unwrap();
+    assert_eq!(
+        next.items
+            .iter()
+            .map(|v| v.url.as_str())
+            .collect::<Vec<_>>(),
+        ["https://h1.public.test/"]
+    );
+    assert_eq!((next.total, next.has_more), (3, false));
+}
+
+#[test]
+fn cursors_are_checked_before_any_read_and_belong_to_one_store() {
+    let f = Fixture::new();
+    f.seed();
+    let page = f.store.search_visits(&ALL).unwrap();
+    let cursor = f.store.cursor_after(&page.items[0]).unwrap();
+    let other = VisibleStore::new(f.vault.clone(), f.app.clone()).unwrap();
+    let (ms, rest) = cursor.split_once('.').unwrap();
+    let (id, mac) = rest.split_once('.').unwrap();
+    let mut flipped = mac.to_owned();
+    flipped.replace_range(0..1, if mac.starts_with('0') { "1" } else { "0" });
+    let forged = [
+        String::new(),
+        "x".into(),
+        format!("{ms}.{id}"),
+        format!("{ms}.{id}.{mac}.x"),
+        format!("0{ms}.{id}.{mac}"),
+        format!("-{ms}.{id}.{mac}"),
+        format!("{}.{id}.{mac}", ms.parse::<i64>().unwrap() + 1),
+        format!("{ms}.{}.{mac}", id.to_uppercase()),
+        format!("{ms}.{id}.{flipped}"),
+        format!("{ms}.{id}.{}", mac.to_uppercase()),
+        format!("{ms}.visit_{}.{mac}", "0".repeat(32)),
+        "9".repeat(400),
+    ];
+    for bad in &forged {
+        assert_failed(
+            f.store.search_visits(&SearchVisits {
+                cursor: Some(bad),
+                ..ALL
+            }),
+            VisibleError::InvalidCursor,
+        );
+    }
+    assert_failed(
+        other.search_visits(&SearchVisits {
+            cursor: Some(&cursor),
+            ..ALL
+        }),
+        VisibleError::InvalidCursor,
+    );
+    assert_eq!(VisibleError::InvalidCursor.code(), "invalid_cursor");
+    // Checked before the policy or the vault is touched.
+    fs::remove_file(&f.vault).unwrap();
+    assert_failed(
+        f.store.search_visits(&SearchVisits {
+            cursor: Some("x"),
+            ..ALL
+        }),
+        VisibleError::InvalidCursor,
+    );
+    assert!(f
+        .store
+        .search_visits(&SearchVisits {
+            cursor: Some(&cursor),
+            ..ALL
+        })
+        .is_err());
+}
+
+#[test]
+fn domains_count_public_visits_per_host_and_private_rows_change_nothing() {
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    let rows = [
+        ("1", "https://www.example.test/a", 1),
+        ("2", "https://www.example.test/a", 2), // the same URL again: counted again
+        ("3", "https://WWW.Example.test./b", 3), // case and trailing dot as the policy sees them
+        ("4", "https://www.example.test:8443/c", 3), // the port is not part of the domain
+        ("5", "https://docs.example.test/", 4), // subdomains apart
+        ("6", "https://other.test/", 5),
+        ("7", "https://other.test/", 30), // outside the range below
+    ];
+    for (id, url, n) in rows {
+        visit(&db, id, url, "T", &day(n));
+    }
+    let stats = |from: Option<&str>, to: Option<&str>, limit| {
+        let page = f
+            .store
+            .domain_stats(&DomainStats { from, to, limit })
+            .unwrap();
+        assert_clean(&page);
+        page
+    };
+    let to = day(10);
+    let all = stats(None, Some(&to), None);
+    let pairs = |page: &DomainStatsPage| {
+        page.items
+            .iter()
+            .map(|item| (item.domain.clone(), item.visit_count))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        pairs(&all),
+        [
+            ("www.example.test".into(), 4),
+            ("docs.example.test".into(), 1),
+            ("other.test".into(), 1)
+        ]
+    );
+    assert_eq!(
+        (all.total_visits, all.total_domains, all.has_more),
+        (6, 3, false)
+    );
+    assert_eq!(
+        all.items.iter().map(|i| i.visit_count).sum::<u64>(),
+        all.total_visits
+    );
+    let limited = stats(None, Some(&to), Some(1));
+    assert_eq!(
+        (
+            limited.items.len(),
+            limited.total_visits,
+            limited.total_domains,
+            limited.has_more
+        ),
+        (1, 6, 3, true)
+    );
+    let from = day(3);
+    let ranged = stats(Some(&from), Some(&to), None);
+    assert_eq!(ranged.total_visits, 4);
+
+    // Private rows, before and inside the range, of public-looking and private hosts alike.
+    for (id, url, title) in private_rows() {
+        visit(&db, id, url, title, &day(4));
+    }
+    visit(
+        &db,
+        "priv-sub",
+        "https://www.example.test/?password=CANARY",
+        "CANARY",
+        &day(4),
+    );
+    assert_eq!(stats(None, Some(&to), None), all);
+    assert_eq!(stats(Some(&from), Some(&to), None), ranged);
+    let empty = stats(Some(&day(28)), Some(&day(29)), None);
+    assert_eq!(
+        (
+            empty.items.len(),
+            empty.total_visits,
+            empty.total_domains,
+            empty.has_more
+        ),
+        (0, 0, 0, false)
+    );
+}
+
+#[test]
+fn domain_arguments_are_checked_like_search_arguments() {
+    let f = Fixture::new();
+    for request in [
+        DomainStats {
+            limit: Some(0),
+            ..Default::default()
+        },
+        DomainStats {
+            limit: Some(MAX_LIMIT + 1),
+            ..Default::default()
+        },
+        DomainStats {
+            from: Some("2026-10-01"),
+            ..Default::default()
+        },
+        DomainStats {
+            from: Some(&day(2)),
+            to: Some(&day(1)),
+            ..Default::default()
+        },
+    ] {
+        assert_failed(
+            f.store.domain_stats(&request),
+            VisibleError::InvalidArgument,
+        );
+    }
+    fs::remove_file(f.app.join("policy.json")).unwrap();
+    assert_failed(
+        f.store.domain_stats(&DomainStats::default()),
+        VisibleError::PolicyUnavailable,
+    );
+}
+
+#[test]
+fn checking_the_vault_reads_nothing_and_reports_what_a_read_would() {
+    let f = Fixture::new();
+    f.seed();
+    let before = f.fingerprint();
+    f.store.check_vault().unwrap();
+    assert_eq!(f.fingerprint(), before);
+    assert!(!f.sidecars());
+    // The policy is not needed to check the vault.
+    fs::remove_file(f.app.join("policy.json")).unwrap();
+    f.store.check_vault().unwrap();
+    let missing = VisibleStore::new(f.dir.join("missing.sqlite3"), f.app.clone()).unwrap();
+    assert_failed(missing.check_vault(), VisibleError::VaultUnavailable);
+    assert!(!f.dir.join("missing.sqlite3").exists());
+    let junk = f.dir.join("junk.sqlite3");
+    fs::write(&junk, b"not a database at all, padded beyond one hundred bytes of header so that the read is complete .....").unwrap();
+    let junk = VisibleStore::new(junk, f.app.clone()).unwrap();
+    assert_failed(junk.check_vault(), VisibleError::VaultSchemaMismatch);
+}
+
+#[test]
+fn an_image_is_found_by_its_type_within_the_range_of_its_public_saves() {
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    let blob_id = blob(&db, 1);
+    save(&db, blob_id, &PUBLIC_SAVE);
+    let found = f
+        .store
+        .search_images(&SearchImages {
+            query: "image/png",
+            ..ALL_IMAGES
+        })
+        .unwrap();
+    assert_eq!(found.total, 1);
+    assert!(f
+        .store
+        .search_images(&SearchImages {
+            query: "image/jpeg",
+            ..ALL_IMAGES
+        })
+        .unwrap()
+        .items
+        .is_empty());
+    let late = at(PUBLIC_SAVE.at - T1 + 1);
+    assert!(f
+        .store
+        .search_images(&SearchImages {
+            query: "png",
+            from: Some(&late),
+            ..ALL_IMAGES
+        })
+        .unwrap()
+        .items
+        .is_empty());
+    // A private save of a JPEG is not found by its type.
+    let jpeg = db
+        .execute(
+            "INSERT INTO image_blobs (sha256, mime_type, byte_length, width, height, created_at, last_saved_at, data) VALUES (printf('%064d', 2), 'image/jpeg', 1, 1, 1, 1, 1, x'00')",
+            [],
+        )
+        .map(|_| db.last_insert_rowid())
+        .unwrap();
+    save(
+        &db,
+        jpeg,
+        &Save {
+            id: "private-jpeg",
+            public: 0,
+            ..PUBLIC_SAVE
+        },
+    );
+    assert!(f
+        .store
+        .search_images(&SearchImages {
+            query: "jpeg",
+            ..ALL_IMAGES
+        })
+        .unwrap()
+        .items
+        .is_empty());
 }
