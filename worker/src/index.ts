@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { SignJWT, jwtVerify } from 'jose';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 
 type Bindings = {
   MEMOCAMPUS: Fetcher;
@@ -7,6 +8,7 @@ type Bindings = {
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   ALLOWED_EMAIL: string;
+  ALLOWED_SUB: string;
   JWT_SECRET: string;
   MEMOCAMPUS_UPSTREAM_TOKEN: string;
 };
@@ -14,7 +16,7 @@ type Bindings = {
 const app = new Hono<{ Bindings: Bindings }>();
 
 // ----------------------------------------------------
-// 0. OAuth 2.0 メタデータ・ディスカバリ (Gemini 検証用)
+// 0. OAuth 2.0 メタデータ・ディスカバリ (RFC 8414)
 // ----------------------------------------------------
 const metadataHandler = (c: any) => {
   const origin = new URL(c.req.url).origin;
@@ -39,10 +41,21 @@ app.get('/oauth/authorize', async (c) => {
   const clientState = c.req.query('state') || '';
 
   if (!clientRedirectUri) {
-    return c.text('Missing redirect_uri', 400);
+    return c.text('Invalid request', 400);
   }
 
   const sessionState = crypto.randomUUID();
+
+  // ブラウザへCookie発行 (HttpOnly, Secure, SameSite=Lax, 5分期限)
+  setCookie(c, 'oauth_state', sessionState, {
+    path: '/oauth',
+    secure: true,
+    httpOnly: true,
+    sameSite: 'Lax',
+    maxAge: 300,
+  });
+
+  // KVに保存 (5分期限)
   await c.env.OAUTH_KV.put(
     `state:${sessionState}`,
     JSON.stringify({ clientRedirectUri, clientState }),
@@ -65,26 +78,33 @@ app.get('/oauth/authorize', async (c) => {
 // 2. Google OAuth コールバック
 // ----------------------------------------------------
 app.get('/oauth/callback', async (c) => {
-  const code = c.req.query('code');
-  const state = c.req.query('state');
+  const queryCode = c.req.query('code');
+  const queryState = c.req.query('state');
+  const cookieState = getCookie(c, 'oauth_state');
 
-  if (!code || !state) {
-    return c.text('Invalid OAuth callback parameter', 400);
+  // Cookieは検証有無を問わず即座に削除
+  deleteCookie(c, 'oauth_state', { path: '/oauth' });
+
+  // 判定1: stateの存在 & Cookieとの突合 (ログインCSRF防御)
+  if (!queryCode || !queryState || !cookieState || queryState !== cookieState) {
+    return c.text('Unauthorized', 400);
   }
 
-  const rawSession = await c.env.OAUTH_KV.get(`state:${state}`);
+  // KVのstate照合 & 即時削除 (リプレイ防御)
+  const rawSession = await c.env.OAUTH_KV.get(`state:${queryState}`);
   if (!rawSession) {
-    return c.text('State expired or invalid. Please retry authentication.', 400);
+    return c.text('Unauthorized', 400);
   }
-  await c.env.OAUTH_KV.delete(`state:${state}`);
+  await c.env.OAUTH_KV.delete(`state:${queryState}`);
   const { clientRedirectUri, clientState } = JSON.parse(rawSession);
 
+  // 判定2: Googleとのコード交換
   const workerCallback = `https://${new URL(c.req.url).host}/oauth/callback`;
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      code,
+      code: queryCode,
       client_id: c.env.GOOGLE_CLIENT_ID,
       client_secret: c.env.GOOGLE_CLIENT_SECRET,
       redirect_uri: workerCallback,
@@ -93,22 +113,42 @@ app.get('/oauth/callback', async (c) => {
   });
 
   if (!tokenRes.ok) {
-    return c.text('Failed to exchange code with Google', 502);
+    return c.text('Authentication failed', 400);
   }
 
   const tokenData: any = await tokenRes.json();
 
-  const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+  // 判定3: OIDCエンドポイント (/oauth2/v3/userinfo) から属性取得
+  const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
     headers: { Authorization: `Bearer ${tokenData.access_token}` },
   });
-  const userData: any = await userRes.json();
-
-  if (userData.email !== c.env.ALLOWED_EMAIL) {
-    return c.text(`Forbidden: Account ${userData.email} is not authorized.`, 403);
+  if (!userRes.ok) {
+    return c.text('Authentication failed', 400);
   }
 
+  const userData: any = await userRes.json();
+  const sub = userData.sub;
+  const emailVerified = userData.email_verified;
+  const email = userData.email;
+
+  // fail-closed判定 (設定漏れ・未定義時は絶対に403に落とす)
+  const isAllowedSubConfigured = typeof c.env.ALLOWED_SUB === 'string' && c.env.ALLOWED_SUB.trim().length > 0;
+  const isAllowedEmailConfigured = typeof c.env.ALLOWED_EMAIL === 'string' && c.env.ALLOWED_EMAIL.trim().length > 0;
+
+  if (!isAllowedSubConfigured || !isAllowedEmailConfigured) {
+    return c.text('Forbidden: Server configuration error', 403);
+  }
+
+  const isSubMatch = sub === c.env.ALLOWED_SUB.trim();
+  const isEmailMatch = email?.toLowerCase() === c.env.ALLOWED_EMAIL.trim().toLowerCase();
+
+  if (emailVerified !== true || !isSubMatch || !isEmailMatch) {
+    return c.text('Forbidden', 403);
+  }
+
+  // 判定4: 認可コードを発行 (subを保存)
   const authCode = crypto.randomUUID();
-  await c.env.OAUTH_KV.put(`auth_code:${authCode}`, userData.email, { expirationTtl: 180 });
+  await c.env.OAUTH_KV.put(`auth_code:${authCode}`, sub, { expirationTtl: 180 });
 
   const targetRedirect = new URL(clientRedirectUri);
   targetRedirect.searchParams.set('code', authCode);
@@ -135,17 +175,18 @@ app.post('/oauth/token', async (c) => {
   }
 
   if (!code) {
-    return c.json({ error: 'invalid_request', error_description: 'Missing code' }, 400);
+    return c.json({ error: 'invalid_request' }, 400);
   }
 
-  const userEmail = await c.env.OAUTH_KV.get(`auth_code:${code}`);
-  if (!userEmail) {
-    return c.json({ error: 'invalid_grant', error_description: 'Code expired or invalid' }, 400);
+  const userSub = await c.env.OAUTH_KV.get(`auth_code:${code}`);
+  if (!userSub) {
+    return c.json({ error: 'invalid_grant' }, 400);
   }
   await c.env.OAUTH_KV.delete(`auth_code:${code}`);
 
+  // JWT発行 (subクレームにGoogleのsubをセット)
   const secret = new TextEncoder().encode(c.env.JWT_SECRET);
-  const jwt = await new SignJWT({ email: userEmail })
+  const jwt = await new SignJWT({ sub: userSub })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('30d')
@@ -159,12 +200,12 @@ app.post('/oauth/token', async (c) => {
 });
 
 // ----------------------------------------------------
-// 4. MCP プロキシ
+// 4. MCP プロキシ (/mcp)
 // ----------------------------------------------------
 app.all('/mcp', async (c) => {
   const authHeader = c.req.header('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
-    return c.json({ error: 'Unauthorized: Missing or invalid token' }, 401);
+    return c.json({ error: 'Unauthorized' }, 401);
   }
 
   const token = authHeader.slice(7);
@@ -172,11 +213,12 @@ app.all('/mcp', async (c) => {
     const secret = new TextEncoder().encode(c.env.JWT_SECRET);
     const { payload } = await jwtVerify(token, secret);
 
-    if (payload.email !== c.env.ALLOWED_EMAIL) {
+    // subの一致検証 (fail-closed)
+    if (!c.env.ALLOWED_SUB || payload.sub !== c.env.ALLOWED_SUB.trim()) {
       return c.json({ error: 'Forbidden' }, 403);
     }
   } catch {
-    return c.json({ error: 'Unauthorized: Invalid token signature or expired' }, 401);
+    return c.json({ error: 'Unauthorized' }, 401);
   }
 
   const targetUrl = new URL('http://127.0.0.1:8765/mcp');
@@ -199,10 +241,7 @@ app.all('/mcp', async (c) => {
       headers: upstreamResponse.headers,
     });
   } catch (err: any) {
-    return c.json({
-      error: 'VPC Upstream Failed',
-      message: err.message || String(err),
-    }, 502);
+    return c.json({ error: 'Bad Gateway' }, 502);
   }
 });
 
