@@ -555,6 +555,33 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
     );
     assert_eq!(fs::read(&old).unwrap(), before);
 
+    // Schema 5: the shape before Issue #41 (no navigation_events), refused the same way.
+    let old = env.dir.join("schema5.sqlite3");
+    let start = sql.find(" CREATE TABLE navigation_events").unwrap();
+    let end = start + sql[start..].find(");").unwrap() + 2;
+    let schema_5 = format!("{}{}", &sql[..start], &sql[end..])
+        .replace(
+            " CREATE INDEX navigation_events_by_source ON navigation_events (source_visit_id);",
+            "",
+        )
+        .replace("PRAGMA user_version = 6;", "PRAGMA user_version = 5;");
+    assert!(!schema_5.contains("navigation_events"));
+    Connection::open(&old)
+        .unwrap()
+        .execute_batch(&schema_5)
+        .unwrap();
+    let before = fs::read(&old).unwrap();
+    let (code, stdout, stderr) = run(&["--vault".as_ref(), old.as_os_str()]);
+    assert_eq!(
+        (code, stdout.as_str(), stderr.trim()),
+        (
+            Some(2),
+            "",
+            "memocampus-mcp: vault refused: vault_schema_mismatch"
+        )
+    );
+    assert_eq!(fs::read(&old).unwrap(), before);
+
     // WAL is refused (the host uses a rollback journal), and nothing is converted.
     let wal = env.dir.join("wal.sqlite3");
     fs::copy(&env.vault, &wal).unwrap();
@@ -601,6 +628,7 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
             "app",
             "junk.sqlite3",
             "schema4.sqlite3",
+            "schema5.sqlite3",
             "vault.sqlite3",
             "wal.sqlite3"
         ]

@@ -4,6 +4,8 @@ import { createPolicyGate } from "./policy-gate.js";
 import { chromeNativeTransport } from "./search-client.js";
 import { bytesToBase64 } from "./image-format.js";
 import { capturePageMetadata } from "./page-metadata.js";
+import { createNavigationTracker } from "./navigation-tracker.js";
+import { checkHostCapabilities } from "./host-capabilities.js";
 import { SAVE_IMAGE_MENU_ID, describeImageSaveResult, registerImageMenu, saveImageFromClick } from "./image-save.js";
 
 const HOST_NAME = "com.memocampus.vault";
@@ -40,6 +42,8 @@ async function updateBadge() {
     const policyProblem = policy.problem();
     if (policyProblem) titles.push(describeErrorCode(policyProblem));
     if (problems > 0) titles.push(`記録できなかったイベント ${status.deadLetters}件・破棄 ${status.dropped}件`);
+    const navigationLost = status.navigationInvalid + status.navigationNotStored;
+    if (navigationLost > 0) titles.push(`遷移情報を保存できなかった訪問 ${navigationLost}件`);
     if (imageFailure) titles.push(`画像を保存できませんでした: ${imageFailure}`);
     await chrome.action.setBadgeText({ text: titles.length > 0 ? "!" : "" });
     await chrome.action.setTitle({ title: titles.length > 0 ? `Memocampus — ${titles.join(" / ")}` : "Memocampus" });
@@ -49,7 +53,20 @@ async function updateBadge() {
 }
 
 const policy = createPolicyGate({ send: chromeNativeTransport(chrome.runtime), onChange: () => void updateBadge() });
-const queue = createEventQueue({ storage: chrome.storage.local, send: sendNative, policy, onChange: () => void updateBadge() });
+const queue = createEventQueue({
+  storage: chrome.storage.local,
+  send: sendNative,
+  policy,
+  capabilities: () => checkHostCapabilities({ send: sendNative }),
+  onChange: () => void updateBadge(),
+});
+
+// Observed navigation facts (Issue #41), documents only. The tracker keeps its state in memory and
+// decides no privacy: every visit below is judged by the policy first, as before, and only then
+// carries its navigation.
+const tracker = createNavigationTracker({
+  isNormalTab: async (tabId) => (await chrome.tabs.get(tabId))?.incognito === false,
+});
 
 /** A policy failure the host reported while delivering also stops collection at once. */
 async function flushQueue() {
@@ -58,6 +75,7 @@ async function flushQueue() {
   return blockedBy;
 }
 
+/** Queues a visit; true if it is now in the queue (with or without its page metadata). */
 async function enqueueVisit(event) {
   try {
     await queue.enqueue(event);
@@ -74,9 +92,19 @@ async function enqueueVisit(event) {
     // Full queue or storage failure: nowhere durable to keep it, so count it visibly.
     if (!kept) {
       await queue.recordDropped().catch(() => {});
-      return;
+      return false;
     }
   }
+  return true;
+}
+
+/**
+ * Queues a visit, then lets the tracker name it as the source of what follows in its tab. Only a
+ * queued visit becomes a source, so a source is always queued before the visit that names it.
+ */
+async function recordVisit(event, tabId, token) {
+  const kept = await enqueueVisit(event);
+  if (kept && token) await tracker.recorded(tabId, token, event.id).catch(() => {});
   await flushQueue();
 }
 
@@ -120,6 +148,8 @@ async function recordAllTabs() {
 
 chrome.webNavigation.onCompleted.addListener(async (details) => {
   if (details.frameId !== 0 || !isRecordableUrl(details.url)) return;
+  // Taken first, in event order: the commit this document came from, if it was observed.
+  const observed = await tracker.completed(details).catch(() => null);
   // webNavigation does not say whether the tab is incognito. A tab that is gone (closed meanwhile)
   // or of unknown state is treated like an incognito one: nothing is recorded.
   let tab;
@@ -136,7 +166,9 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     type: "visit",
     id: crypto.randomUUID(),
     url: details.url,
-    title: typeof tab.title === "string" ? tab.title : "",
+    // The tab's title is the tab's now, not the event's: kept only while the tab still shows this URL,
+    // so a title of a later (possibly NeverSave) URL never lands on this one (audit F-1).
+    title: typeof tab.title === "string" && tab.url === details.url ? tab.title : "",
     incognito: tab.incognito,
     visitedAt: new Date().toISOString(),
   };
@@ -148,9 +180,26 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     documentId: details.documentId,
     url: details.url,
   });
-  if (page) event.page = page;
-  void enqueueVisit(event);
+  // The title and page were read after the load, while the page could still change its URL and content
+  // (pushState, even to a NeverSave URL and back). Kept only if no history update was seen in this
+  // document, up to now; otherwise the visit is recorded without them.
+  if (await tracker.pristine(details.tabId, details.documentId).catch(() => false)) {
+    if (page) event.page = page;
+  } else {
+    event.title = "";
+  }
+  if (observed?.navigation) event.navigation = observed.navigation;
+  void recordVisit(event, details.tabId, observed?.token);
 });
+
+chrome.webNavigation.onCommitted.addListener((details) => void tracker.committed(details).catch(() => {}));
+chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => void tracker.createdNavigationTarget(details).catch(() => {}));
+chrome.tabs.onRemoved.addListener((tabId) => void tracker.tabRemoved(tabId).catch(() => {}));
+chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => void tracker.tabReplaced(addedTabId, removedTabId).catch(() => {}));
+
+// A URL change inside a document (pushState / replaceState) is never recorded: the application keeps
+// its own state. It only makes the tracker forget what the tab showed (PO decision after the audit).
+chrome.webNavigation.onHistoryStateUpdated.addListener((details) => void tracker.historyStateUpdated(details).catch(() => {}));
 
 chrome.runtime.onStartup.addListener(() => void flushQueue());
 chrome.runtime.onInstalled.addListener(() => {

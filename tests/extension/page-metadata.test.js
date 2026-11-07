@@ -278,7 +278,7 @@ async function startWorker({ host = fakeHost(), tabs = {}, data = new Map(), pag
         reply(clone(host.respond(clone(message))));
       },
     },
-    webNavigation: { onCompleted: on("navigation") },
+    webNavigation: { onCompleted: on("navigation"), onCommitted: on("committed"), onCreatedNavigationTarget: on("createdTarget"), onHistoryStateUpdated: on("historyState") },
     contextMenus: { create() {}, onClicked: on("menuClick") },
     notifications: { create: async () => {} },
     action: { setBadgeText: async () => {}, setTitle: async () => {} },
@@ -292,6 +292,7 @@ async function startWorker({ host = fakeHost(), tabs = {}, data = new Map(), pag
       },
     },
     tabs: {
+      onRemoved: on("tabRemoved"), onReplaced: on("tabReplaced"),
       get: async (id) => {
         if (!(id in tabs)) throw new Error("No tab");
         return tabs[id];

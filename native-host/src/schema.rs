@@ -1,6 +1,8 @@
-//! Vault schema 5: the one format this version reads and writes.
+//! Vault schema 6: the one format this version reads and writes.
 //!
-//! Schema 5 is schema 4 with `page_metadata` (Issue #22). Like schema 4 it exists only by creation. Nothing upgrades an older vault, because `visits` has no column
+//! Schema 6 is schema 5 with `navigation_events` (Issue #41); schema 5 was schema 4 with
+//! `page_metadata` (Issue #22). Like schema 4 it exists only by creation: a schema 5 vault is refused
+//! as any other version, by PO decision, and nothing upgrades it. Nothing upgrades an older vault either, because `visits` has no column
 //! that tells whether a row predates the incognito fix (#9), so an upgraded vault could carry such rows
 //! under a number that later code trusts. `check` compares the stored definition of every object
 //! byte for byte with the ones below, which covers types, NOT NULL, keys, UNIQUE, CHECK, DEFAULT and
@@ -12,7 +14,7 @@ use rusqlite::Connection;
 
 /// `PRAGMA application_id` of vaults created by Memocampus ("MCMP").
 pub const APP_ID: i64 = 0x4D43_4D50;
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// Keep each `sql` as SQLite stores it: it keeps the text from `CREATE` on, without the final `;`.
 struct Object {
@@ -23,7 +25,7 @@ struct Object {
     sql: Option<&'static str>,
 }
 
-const OBJECTS: [Object; 13] = [
+const OBJECTS: [Object; 16] = [
     Object {
         kind: "table",
         name: "visits",
@@ -160,9 +162,46 @@ const OBJECTS: [Object; 13] = [
         table: "page_metadata",
         sql: None,
     },
+    // One row per target visit: the observed navigation that produced it (Issue #41). The row is
+    // written in the target visit's transaction, so it cannot exist without that visit. The source
+    // is the document shown before in the same tab, or in the tab that opened this one; it is not
+    // proof of a click or a hyperlink. It is NULL when it was not known, not stored, or not allowed
+    // by the policy. No URL is kept here: both ends are visits, judged again by any future reader.
+    Object {
+        kind: "table",
+        name: "navigation_events",
+        table: "navigation_events",
+        sql: Some(
+            "CREATE TABLE navigation_events (
+  target_visit_id  TEXT    NOT NULL PRIMARY KEY REFERENCES visits (event_id) ON DELETE CASCADE,
+  source_visit_id  TEXT    REFERENCES visits (event_id) ON DELETE SET NULL,
+  kind             TEXT    NOT NULL CHECK (kind IN ('document', 'history_state')),
+  transition_type  TEXT    NOT NULL CHECK (transition_type IN ('link', 'typed', 'auto_bookmark', 'auto_subframe', 'manual_subframe', 'generated', 'start_page', 'form_submit', 'reload', 'keyword', 'keyword_generated', 'unknown')),
+  client_redirect  INTEGER NOT NULL CHECK (client_redirect IN (0, 1)),
+  server_redirect  INTEGER NOT NULL CHECK (server_redirect IN (0, 1)),
+  forward_back     INTEGER NOT NULL CHECK (forward_back IN (0, 1)),
+  from_address_bar INTEGER NOT NULL CHECK (from_address_bar IN (0, 1)),
+  new_tab          INTEGER NOT NULL CHECK (new_tab IN (0, 1)),
+  occurred_at      TEXT    NOT NULL CHECK (length(occurred_at) = 24),
+  CHECK (source_visit_id IS NULL OR source_visit_id <> target_visit_id)
+)",
+        ),
+    },
+    Object {
+        kind: "index",
+        name: "sqlite_autoindex_navigation_events_1",
+        table: "navigation_events",
+        sql: None,
+    },
+    Object {
+        kind: "index",
+        name: "navigation_events_by_source",
+        table: "navigation_events",
+        sql: Some("CREATE INDEX navigation_events_by_source ON navigation_events (source_visit_id)"),
+    },
 ];
 
-/// Everything that makes an empty database a schema 5 vault, for one transaction. There is no form
+/// Everything that makes an empty database a schema 6 vault, for one transaction. There is no form
 /// of this that can run against an existing vault: `CREATE TABLE` fails if the table exists.
 pub fn create_sql() -> String {
     let mut sql =
@@ -308,6 +347,85 @@ mod tests {
     }
 
     #[test]
+    fn navigation_events_hold_only_allowed_values_and_follow_their_visits() {
+        let db = vault("");
+        db.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        assert_eq!(column(&db, "navigation_events", "target_visit_id").3, 1);
+        assert_eq!(
+            column(&db, "navigation_events", "source_visit_id"),
+            ("TEXT".to_owned(), false, None, 0)
+        );
+        let mut keys = db
+            .prepare("SELECT \"from\", \"table\", \"to\", on_delete FROM pragma_foreign_key_list('navigation_events') ORDER BY 1")
+            .unwrap()
+            .query_map([], |row| {
+                Ok(format!(
+                    "{}>{}.{} {}",
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "source_visit_id>visits.event_id SET NULL",
+                "target_visit_id>visits.event_id CASCADE"
+            ]
+        );
+        db.execute_batch(
+            "INSERT INTO visits VALUES ('a', 'https://a.test/', '', '2026-11-06T12:00:00.000Z');
+             INSERT INTO visits VALUES ('b', 'https://b.test/', '', '2026-11-06T12:00:00.000Z');",
+        )
+        .unwrap();
+        let insert = |values: &str| {
+            db.execute(
+                &format!("INSERT INTO navigation_events VALUES ({values})"),
+                [],
+            )
+        };
+        const OK: &str = "'b', 'a', 'document', 'link', 0, 0, 0, 0, 0, '2026-11-06T12:00:00.000Z'";
+        for bad in [
+            "'b', 'b', 'document', 'link', 0, 0, 0, 0, 0, '2026-11-06T12:00:00.000Z'",
+            "'b', 'a', 'fragment', 'link', 0, 0, 0, 0, 0, '2026-11-06T12:00:00.000Z'",
+            "'b', 'a', 'document', 'auto_toplevel', 0, 0, 0, 0, 0, '2026-11-06T12:00:00.000Z'",
+            "'b', 'a', 'document', 'link', 2, 0, 0, 0, 0, '2026-11-06T12:00:00.000Z'",
+            "'b', 'a', 'document', 'link', 0, 0, 0, 0, NULL, '2026-11-06T12:00:00.000Z'",
+            "'b', 'a', 'document', 'link', 0, 0, 0, 0, 0, '2026-11-06T12:00:00Z'",
+            "'b', 'missing', 'document', 'link', 0, 0, 0, 0, 0, '2026-11-06T12:00:00.000Z'",
+            "'missing', 'a', 'document', 'link', 0, 0, 0, 0, 0, '2026-11-06T12:00:00.000Z'",
+            "NULL, 'a', 'document', 'link', 0, 0, 0, 0, 0, '2026-11-06T12:00:00.000Z'",
+        ] {
+            assert!(insert(bad).is_err(), "{bad}");
+        }
+        insert(OK).unwrap();
+        assert!(insert(OK).is_err(), "one navigation per target visit");
+        let source = |db: &Connection| -> Option<String> {
+            db.query_row("SELECT source_visit_id FROM navigation_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(source(&db).as_deref(), Some("a"));
+        db.execute("DELETE FROM visits WHERE event_id = 'a'", [])
+            .unwrap();
+        assert_eq!(source(&db), None, "a removed source becomes NULL");
+        db.execute("DELETE FROM visits WHERE event_id = 'b'", [])
+            .unwrap();
+        let rows: i64 = db
+            .query_row("SELECT count(*) FROM navigation_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(rows, 0, "a removed target takes its navigation with it");
+    }
+
+    #[test]
     fn creating_over_an_existing_vault_fails_instead_of_filling_gaps() {
         let db = vault("");
         assert!(db.execute_batch(&create_sql()).is_err());
@@ -372,8 +490,9 @@ mod tests {
         for (extra, expected) in [
             ("PRAGMA user_version = 3;", 3),
             ("PRAGMA user_version = 4;", 4),
-            ("PRAGMA user_version = 6;", 6),
-            ("PRAGMA application_id = 0;", 5),
+            ("PRAGMA user_version = 5;", 5),
+            ("PRAGMA user_version = 7;", 7),
+            ("PRAGMA application_id = 0;", 6),
         ] {
             assert!(
                 matches!(check(&vault(extra)).unwrap_err(), SchemaError::UnsupportedVersion(v) if v == expected),

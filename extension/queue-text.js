@@ -26,5 +26,7 @@ export function describeQueueStatus(status) {
   if (status.pending > 0) parts.push(`送信待ち ${status.pending}件${status.blockedReason ? `（${status.blockedReason}）` : ""}`);
   if (status.deadLetters > 0) parts.push(`記録できず隔離したイベント ${status.deadLetters}件`);
   if (status.dropped > 0) parts.push(`キューに入れられず破棄したイベント ${status.dropped}件`);
+  if (status.navigationInvalid > 0) parts.push(`遷移情報がHostに拒否された訪問 ${status.navigationInvalid}件（訪問は保存済み）`);
+  if (status.navigationNotStored > 0) parts.push(`Hostが遷移情報に未対応のため遷移情報を保存できなかった訪問 ${status.navigationNotStored}件（訪問は保存済み）`);
   return parts.join("\n");
 }

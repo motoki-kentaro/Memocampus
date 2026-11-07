@@ -110,12 +110,13 @@ function fakeChrome() {
   const calls = { menus: [], notifications: [], badge: [], session: {} };
   const chrome = {
     runtime: { onStartup: on("startup"), onInstalled: on("installed"), onMessage: on("message"), sendMessage: async () => {}, sendNativeMessage() {}, connectNative() {}, lastError: undefined },
-    webNavigation: { onCompleted: on("navigation") },
+    webNavigation: { onCompleted: on("navigation"), onCommitted: on("committed"), onCreatedNavigationTarget: on("createdTarget"), onHistoryStateUpdated: on("historyState") },
     contextMenus: { create: (item, cb) => (calls.menus.push(item), cb?.()), onClicked: on("menuClick") },
     notifications: { create: async (id, options) => calls.notifications.push(options) },
     action: { setBadgeText: async ({ text }) => calls.badge.push(text), setTitle: async () => {} },
     sidePanel: { setPanelBehavior: async () => {} },
     scripting: { executeScript: async () => [] },
+    tabs: { onRemoved: on("tabRemoved"), onReplaced: on("tabReplaced"), get: async () => ({}) },
     storage: {
       local: { get: async () => ({}), set: async () => {} },
       session: {

@@ -13,11 +13,23 @@
 //   flush asks the policy first. Without a valid policy nothing is sent and nothing is removed.
 //   With one, whenever its version changes, the host judges every stored URL, and those it refuses
 //   are removed from the pending and dead-letter lists without a copy. Without a complete answer
-//   nothing is sent. The host judges each event again on arrival and acknowledges a refused one as
+//   nothing is sent. A visit that stays loses a `navigation.sourceVisitId` naming a removed event (its
+//   id and place are kept). The host judges each event again on arrival and acknowledges a refused one as
 //   dropped, so no event needs a separate check here and none can block those behind it.
 // - A visit or snapshot not declared normal (`incognito: false`) is removed without a dead-letter
 //   copy, so its URL and title are not kept anywhere. The service worker never queues one; this
 //   covers events queued by an older version and a refusal by the host.
+// - A visit with a `navigation` (Issue #41) is sent as queued, with the same id, source and facts on
+//   every resend. It is sent with its navigation only to a host that names `navigation_v1` (asked
+//   once per delivery run, `capabilities`). It counts as delivered with its navigation only if the
+//   host answers `navigation: "stored"`. The visit itself is stored in every other case below, so a
+//   resend could not store the navigation either: the event leaves the queue and the loss is counted
+//   (`navigationInvalid`, `navigationNotStored`), shown like the dropped count, never silent:
+//     `navigation: "invalid"`                  -> navigationInvalid
+//     no `navigation` in the ACK               -> navigationNotStored (the host is asked again)
+//     host without `navigation_v1`             -> sent without it, navigationNotStored
+//   No URL is copied anywhere for these counts. An answer with any other `navigation` value is an
+//   invalid ACK (temporary), as before.
 
 export const QUEUE_KEY = "pendingVisitEvents";
 export const DEAD_LETTER_KEY = "deadLetterEvents";
@@ -31,6 +43,10 @@ export const PERMANENT_ERRORS = new Set(["invalid_url", "invalid_event", "invali
 
 /** The host's refusal of an event not declared normal: discarded, never quarantined. */
 export const INCOGNITO_ERROR = "incognito_not_allowed";
+
+/** Navigation outcomes in a host ACK (Slice 1 contract). */
+export const NAVIGATION_STORED = "stored";
+export const NAVIGATION_INVALID = "invalid";
 
 export class QueueError extends Error {
   constructor(code) {
@@ -47,7 +63,13 @@ export class QueueError extends Error {
  */
 export function classifyResponse(event, response) {
   if (response?.ok === true && response.dropped === "policy" && (response.eventId === event?.id || response.eventId === null)) return { kind: "discard", code: "dropped_by_policy" };
-  if (response?.ok === true && response.dropped === undefined && response.eventId === event?.id) return { kind: "delivered" };
+  if (response?.ok === true && response.dropped === undefined && response.eventId === event?.id) {
+    if (!carriesNavigation(event)) return { kind: "delivered" };
+    if (response.navigation === NAVIGATION_STORED) return { kind: "delivered" };
+    if (response.navigation === NAVIGATION_INVALID) return { kind: "delivered", lost: "navigationInvalid" };
+    if (response.navigation === undefined) return { kind: "delivered", lost: "navigationNotStored" };
+    return { kind: "temporary", code: "invalid_ack" };
+  }
   if (response?.ok === false && typeof response.error === "string") {
     const sameEvent = response.eventId === event?.id || response.eventId === null;
     if (response.error === INCOGNITO_ERROR && sameEvent) return { kind: "discard", code: response.error };
@@ -55,6 +77,15 @@ export function classifyResponse(event, response) {
     return { kind: "temporary", code: response.error };
   }
   return { kind: "temporary", code: "invalid_ack" };
+}
+
+/** A visit that carries observed navigation facts (an own `navigation` key, whatever its value). */
+export const carriesNavigation = (event) => event?.type === "visit" && Object.hasOwn(event, "navigation");
+
+/** The same visit without its navigation, for a host that cannot store one. */
+function withoutNavigation(event) {
+  const { navigation: _navigation, ...visit } = event;
+  return visit;
 }
 
 const isUndeclared = (event) => (event.type === "visit" || event.type === "tab_snapshot") && event.incognito !== false;
@@ -80,7 +111,11 @@ function withTimeout(promise, timeoutMs) {
  * `{ ok: true, version, decisions }`, a Map from URL to "allow" or "deny". Both resolve to
  * `{ ok: false, code }` when no decision can be made.
  */
-export function createEventQueue({ storage, send, policy, now = () => new Date(), timeoutMs = SEND_TIMEOUT_MS, onChange = () => {} }) {
+/**
+ * `capabilities()` resolves to `{ ok: true, navigation }` or `{ ok: false, code }` (host-capabilities.js).
+ * Without it, no host is taken to store navigations.
+ */
+export function createEventQueue({ storage, send, policy, capabilities = async () => ({ ok: true, navigation: false }), now = () => new Date(), timeoutMs = SEND_TIMEOUT_MS, onChange = () => {} }) {
   if (typeof policy?.current !== "function") throw new TypeError("createEventQueue needs a policy");
   let tail = Promise.resolve();
   let sweptVersion = null;
@@ -136,10 +171,17 @@ export function createEventQueue({ storage, send, policy, now = () => new Date()
     }).finally(onChange);
   }
 
-  function remove(event) {
+  /** Removes `event`; `lost` names a navigation count to raise in the same write. */
+  function remove(event, lost = null) {
     return exclusive(async () => {
       const queue = await readList(QUEUE_KEY);
-      await storage.set({ [QUEUE_KEY]: queue.filter((item) => !sameEvent(item, event)) });
+      const items = { [QUEUE_KEY]: queue.filter((item) => !sameEvent(item, event)) };
+      if (lost) {
+        const stored = await storage.get(STATS_KEY);
+        const stats = stored?.[STATS_KEY] && typeof stored[STATS_KEY] === "object" ? stored[STATS_KEY] : {};
+        items[STATS_KEY] = { ...stats, [lost]: (Number(stats[lost]) || 0) + 1, lastNavigationLossAt: now().toISOString() };
+      }
+      await storage.set(items);
     });
   }
 
@@ -160,14 +202,30 @@ export function createEventQueue({ storage, send, policy, now = () => new Date()
       const list = (key) => (Array.isArray(stored?.[key]) ? stored[key] : []);
       const queue = list(QUEUE_KEY);
       const dead = list(DEAD_LETTER_KEY);
-      const keptQueue = queue.filter((event) => {
+      const removedIds = new Set();
+      const keep = (event) => {
         if (!refused(event)) return true;
+        if (hasId(event)) removedIds.add(event.id);
+        return false;
+      };
+      const keptQueue = queue.filter((event) => {
+        if (keep(event)) return true;
         noteDiscarded(event);
         return false;
       });
-      const keptDead = dead.filter((entry) => !refused(entry?.event));
-      if (keptQueue.length === queue.length && keptDead.length === dead.length) return;
-      await storage.set({ [QUEUE_KEY]: keptQueue, [DEAD_LETTER_KEY]: keptDead });
+      const keptDead = dead.filter((entry) => keep(entry?.event));
+      // A visit that stays may name a refused one as its source: that id goes too (audit F-4). Only the
+      // reference changes; the event keeps its id and place, and the host still judges any source.
+      let unlinked = 0;
+      const unlink = (event) => {
+        if (!carriesNavigation(event) || !removedIds.has(event.navigation?.sourceVisitId)) return event;
+        unlinked += 1;
+        return { ...event, navigation: { ...event.navigation, sourceVisitId: null } };
+      };
+      const finalQueue = keptQueue.map(unlink);
+      const finalDead = keptDead.map((entry) => (entry?.event ? { ...entry, event: unlink(entry.event) } : entry));
+      if (keptQueue.length === queue.length && keptDead.length === dead.length && unlinked === 0) return;
+      await storage.set({ [QUEUE_KEY]: finalQueue, [DEAD_LETTER_KEY]: finalDead });
     });
   }
 
@@ -205,6 +263,8 @@ export function createEventQueue({ storage, send, policy, now = () => new Date()
   async function drain() {
     // The first check of each drain asks the host; a long drain re-asks when the answer is old.
     let fresh = true;
+    // Whether this host stores navigations: asked once per drain, and again after a doubtful ACK.
+    let navigationSupport = null;
     for (;;) {
       const stored = await storage.get([QUEUE_KEY, DEAD_LETTER_KEY]);
       const pendingCount = Array.isArray(stored?.[QUEUE_KEY]) ? stored[QUEUE_KEY].length : 0;
@@ -226,10 +286,23 @@ export function createEventQueue({ storage, send, policy, now = () => new Date()
       }
       const [head] = await readList(QUEUE_KEY);
       if (head === undefined) return null;
-      const outcome = await deliver(head);
+      let sent = head;
+      if (carriesNavigation(head) && !isUndeclared(head)) {
+        if (navigationSupport === null) {
+          const answer = await capabilities();
+          if (answer?.ok !== true) return typeof answer?.code === "string" ? answer.code : "host_unavailable";
+          navigationSupport = answer.navigation === true;
+        }
+        if (!navigationSupport) sent = withoutNavigation(head);
+      }
+      const outcome = await deliver(sent);
       if (outcome.code === "dropped_by_policy") noteDiscarded(head);
+      let lost = null;
+      if (outcome.kind === "delivered") lost = sent !== head ? "navigationNotStored" : outcome.lost ?? null;
+      if (outcome.lost === "navigationNotStored") navigationSupport = null;
       try {
-        if (outcome.kind === "delivered" || outcome.kind === "discard") await remove(head);
+        if (outcome.kind === "delivered") await remove(head, lost);
+        else if (outcome.kind === "discard") await remove(head);
         else if (outcome.kind === "permanent") await quarantine(head, outcome.code);
         else return outcome.code;
       } catch (error) {
@@ -268,6 +341,8 @@ export function createEventQueue({ storage, send, policy, now = () => new Date()
       deadLetters: dead.length,
       deadLetterCodes: [...new Set(dead.map((entry) => entry?.errorCode).filter(Boolean))],
       dropped: Number(stored?.[STATS_KEY]?.dropped) || 0,
+      navigationInvalid: Number(stored?.[STATS_KEY]?.navigationInvalid) || 0,
+      navigationNotStored: Number(stored?.[STATS_KEY]?.navigationNotStored) || 0,
       blockedBy: lastBlockedBy,
     };
   }

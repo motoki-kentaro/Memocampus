@@ -33,13 +33,14 @@ async function startWorker({ tabs = {}, query = [], seed = {} } = {}) {
         reply({ ok: true, eventId: event.id });
       },
     },
-    webNavigation: { onCompleted: on("navigation") },
+    webNavigation: { onCompleted: on("navigation"), onCommitted: on("committed"), onCreatedNavigationTarget: on("createdTarget"), onHistoryStateUpdated: on("historyState") },
     contextMenus: { create() {}, onClicked: on("menuClick") },
     notifications: { create: async () => {} },
     action: { setBadgeText: async () => {}, setTitle: async () => {} },
     sidePanel: { setPanelBehavior: async () => {} },
     scripting: { executeScript: async () => [] },
     tabs: {
+      onRemoved: on("tabRemoved"), onReplaced: on("tabReplaced"),
       get: async (id) => {
         if (!(id in tabs)) throw new Error(`No tab with id: ${id}`);
         return tabs[id];
@@ -66,7 +67,7 @@ async function startWorker({ tabs = {}, query = [], seed = {} } = {}) {
     data,
     stored: () => JSON.stringify([...data.entries()]),
     async navigate(tabId, url = SECRET_URL) {
-      await Promise.all(listeners.navigation.map((fn) => fn({ frameId: 0, tabId, url })));
+      await Promise.all(listeners.navigation.map((fn) => fn({ frameId: 0, tabId, url, documentId: `doc-${tabId}-${url}` })));
       await new Promise((resolve) => setTimeout(resolve, 30));
     },
     message: (message) => new Promise((resolve) => listeners.message.forEach((fn) => fn(message, {}, resolve))),
@@ -167,7 +168,7 @@ test("a refusal by the host discards the event without a dead letter; a failure 
   const refusing = createEventQueue({ storage, policy, send: async (sent) => ({ ok: false, eventId: sent.id, error: "incognito_not_allowed" }) });
   await refusing.enqueue(event);
   assert.equal(await refusing.flush(), null, "delivery does not pause");
-  assert.deepEqual(await refusing.status(), { pending: 0, deadLetters: 0, deadLetterCodes: [], dropped: 0, blockedBy: null });
+  assert.deepEqual(await refusing.status(), { pending: 0, deadLetters: 0, deadLetterCodes: [], dropped: 0, navigationInvalid: 0, navigationNotStored: 0, blockedBy: null });
 
   const busy = createEventQueue({ storage, policy, send: async (sent) => ({ ok: false, eventId: sent.id, error: "vault_busy" }) });
   await busy.enqueue(event);

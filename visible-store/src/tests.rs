@@ -3961,3 +3961,55 @@ fn an_image_is_found_by_its_type_within_the_range_of_its_public_saves() {
         .items
         .is_empty());
 }
+
+#[test]
+fn navigation_events_never_reach_a_reader_and_a_vault_without_them_is_refused() {
+    // Issue #41 stores navigations; nothing reads them yet. Rows between public and private
+    // visits change no answer, no total and no domain count.
+    let f = Fixture::new();
+    f.seed();
+    let stats = DomainStats::default();
+    let before = (
+        f.store.search_visits(&ALL).unwrap(),
+        f.store.domain_stats(&stats).unwrap(),
+    );
+    let db = writer(&f.vault);
+    db.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+    for (target, source) in [
+        ("pub-2", Some("pub-1")),
+        ("pub-1", Some("priv-a")),
+        ("priv-a", Some("pub-2")),
+        ("priv-b", None),
+    ] {
+        db.execute(
+            "INSERT INTO navigation_events VALUES (?1, ?2, 'document', 'link', 0, 0, 0, 0, 1, '2026-11-06T12:00:00.000Z')",
+            params![target, source],
+        )
+        .unwrap();
+    }
+    drop(db);
+    let after = (
+        f.store.search_visits(&ALL).unwrap(),
+        f.store.domain_stats(&stats).unwrap(),
+    );
+    assert_eq!(after, before);
+    assert_clean(&after.0);
+
+    // A vault shaped like schema 5 (no navigation_events) is not the current schema.
+    let sql = schema::create_sql();
+    let start = sql.find(" CREATE TABLE navigation_events").unwrap();
+    let end = start + sql[start..].find(");").unwrap() + 2;
+    let sql = format!("{}{}", &sql[..start], &sql[end..]).replace(
+        " CREATE INDEX navigation_events_by_source ON navigation_events (source_visit_id);",
+        "",
+    );
+    assert!(!sql.contains("navigation_events"));
+    let path = f.dir.join("schema-5-shape.sqlite3");
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch(&sql.replace("PRAGMA user_version = 6;", "PRAGMA user_version = 5;"))
+        .unwrap();
+    let store = VisibleStore::new(path, f.app.clone()).unwrap();
+    assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
+    assert_failed(store.check_vault(), VisibleError::VaultSchemaMismatch);
+}

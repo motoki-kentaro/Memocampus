@@ -509,7 +509,7 @@ fn image_tables(path: &Path) -> i64 {
 fn vaults_created_by_the_host_start_at_schema_4_with_image_tables() {
     let tmp = TempDir::new();
     create_default_vault(&tmp);
-    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 5);
+    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 6);
     assert_eq!(image_tables(&tmp.default_vault()), 3);
     // Existing operations work on it.
     assert_eq!(
@@ -561,7 +561,7 @@ fn backups_of_a_vault_with_images_are_complete_and_verified() {
     };
     assert_eq!(dump(&copy), dump(&tmp.default_vault()));
     assert_eq!(dump(&copy).len(), 4);
-    assert_eq!(pragma(&copy, "user_version"), 5);
+    assert_eq!(pragma(&copy, "user_version"), 6);
 }
 
 const SAVE_ID: &str = "4f1d2c3b-5a6e-4d7f-8091-a2b3c4d5e6f7";
@@ -1100,18 +1100,36 @@ fn make_active_vault_from(tmp: &TempDir, sql: &str) -> PathBuf {
 
 const VISIT_AT: &str = "2026-10-30T10:00:00.000Z";
 
+/// `sql` without the `CREATE TABLE` statement of `table`.
+fn without_table(sql: &str, table: &str) -> String {
+    let start = sql.find(&format!(" CREATE TABLE {table} ")).unwrap();
+    let end = start + sql[start..].find(");").unwrap() + 2;
+    format!("{}{}", &sql[..start], &sql[end..])
+}
+
+/// Schema 5 as it was created before Issue #41: schema 6 without `navigation_events`.
+fn schema_5() -> String {
+    let sql = without_table(
+        &memocampus_native_host::schema::create_sql(),
+        "navigation_events",
+    )
+    .replace(
+        " CREATE INDEX navigation_events_by_source ON navigation_events (source_visit_id);",
+        "",
+    );
+    assert!(!sql.contains("navigation_events"));
+    sql.replace("PRAGMA user_version = 6;", "PRAGMA user_version = 5;")
+}
+
 /// Schema 4 as it was created before Issue #22: schema 5 without `page_metadata`.
 fn schema_4() -> String {
-    let sql = memocampus_native_host::schema::create_sql();
-    let start = sql.find(" CREATE TABLE page_metadata").unwrap();
-    let end = start + sql[start..].find(");").unwrap() + 2;
-    let sql = format!("{}{}", &sql[..start], &sql[end..]);
+    let sql = without_table(&schema_5(), "page_metadata");
     assert!(!sql.contains("page_metadata"));
     sql.replace("PRAGMA user_version = 5;", "PRAGMA user_version = 4;")
 }
 
 #[test]
-fn every_vault_other_than_schema_5_is_refused_for_every_operation_and_left_untouched() {
+fn every_vault_other_than_schema_6_is_refused_for_every_operation_and_left_untouched() {
     use memocampus_native_host::schema::create_sql;
     let v3 = |app_id: i64, version: i64| {
         format!("{SCHEMA_3} PRAGMA application_id = {app_id}; PRAGMA user_version = {version};")
@@ -1125,8 +1143,23 @@ fn every_vault_other_than_schema_5_is_refused_for_every_operation_and_left_untou
         ("schema 3 untagged, relabelled 4", v3(0, 4)),
         ("schema 4 (Issue #22: no page_metadata)", schema_4()),
         ("schema 4 relabelled 5", schema_4().replace("PRAGMA user_version = 4;", "PRAGMA user_version = 5;")),
-        ("future version", format!("{} PRAGMA user_version = 6;", create_sql())),
-        ("untagged schema 5", format!("{} PRAGMA application_id = 0;", create_sql())),
+        ("schema 5 (Issue #41: no navigation_events)", schema_5()),
+        ("schema 5 relabelled 6", schema_5().replace("PRAGMA user_version = 5;", "PRAGMA user_version = 6;")),
+        ("schema 6 labelled 5", create_sql().replace("PRAGMA user_version = 6;", "PRAGMA user_version = 5;")),
+        ("future version", format!("{} PRAGMA user_version = 7;", create_sql())),
+        ("untagged schema 6", format!("{} PRAGMA application_id = 0;", create_sql())),
+        ("navigation without its source index", create_sql().replace(
+            "CREATE INDEX navigation_events_by_source ON navigation_events (source_visit_id);",
+            "",
+        )),
+        ("navigation kind without CHECK", create_sql().replace(
+            "kind             TEXT    NOT NULL CHECK (kind IN ('document', 'history_state')),",
+            "kind             TEXT    NOT NULL,",
+        )),
+        ("navigation source without its foreign key", create_sql().replace(
+            "source_visit_id  TEXT    REFERENCES visits (event_id) ON DELETE SET NULL,",
+            "source_visit_id  TEXT,",
+        )),
         ("metadata without its limits", create_sql().replace(
             "title          TEXT CHECK (title IS NULL OR length(title) BETWEEN 1 AND 500),",
             "title          TEXT,",
@@ -1232,7 +1265,7 @@ fn from_a_refused_vault_the_user_can_still_create_a_new_one_which_inherits_nothi
     assert_eq!(replies[1]["ok"], true, "{}", replies[1]);
     assert_eq!(replies[2]["items"].as_array().unwrap().len(), 1);
     assert!(!replies[2].to_string().contains("CANARY"));
-    assert_eq!(pragma(&new, "user_version"), 5);
+    assert_eq!(pragma(&new, "user_version"), 6);
     assert_eq!(std::fs::read(&old).unwrap(), before);
     // And the old file stays refused if it is opened again.
     let reopened = &exchange(
@@ -4374,4 +4407,408 @@ fn metadata_is_judged_with_its_visit_by_the_policy() {
     assert_eq!(reply["ok"], false, "{reply}");
     assert_eq!(metadata_rows(&tmp).len(), 1);
     assert!(!vault_contains(&tmp, b"No policy"));
+}
+
+// --- Navigation facts (Issue #41, Slice 1) ------------------------------------------------------
+
+const NAV_AT: &str = "2026-11-06T12:00:00.000Z";
+
+fn navigation(source: Option<&str>) -> Value {
+    json!({
+        "sourceVisitId": source, "kind": "document", "transitionType": "link",
+        "clientRedirect": false, "serverRedirect": false, "forwardBack": false,
+        "fromAddressBar": false, "newTab": false, "occurredAt": NAV_AT
+    })
+}
+
+fn visit_with(id: &str, url: &str, navigation: Value) -> Value {
+    let mut event = visit(id, url, AT);
+    event["navigation"] = navigation;
+    event
+}
+
+fn nav_ack(id: &str, result: &str) -> Value {
+    json!({ "ok": true, "eventId": id, "navigation": result })
+}
+
+/// `target|source|kind|type|flags|occurred_at`, one per row, sorted.
+fn navigation_rows(tmp: &TempDir) -> Vec<String> {
+    let db = Connection::open_with_flags(
+        tmp.default_vault(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let mut statement = db
+        .prepare("SELECT target_visit_id || '|' || ifnull(source_visit_id, 'NULL') || '|' || kind || '|' || transition_type || '|' || client_redirect || server_redirect || forward_back || from_address_bar || new_tab || '|' || occurred_at FROM navigation_events ORDER BY 1")
+        .unwrap();
+    let rows = statement.query_map([], |row| row.get(0)).unwrap();
+    rows.collect::<Result<_, _>>().unwrap()
+}
+
+#[test]
+fn navigations_are_stored_with_their_visit_and_resends_change_nothing() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let mut spa = navigation(Some("b"));
+    spa["kind"] = json!("history_state");
+    spa["forwardBack"] = json!(true);
+    let mut typed = navigation(None);
+    typed["transitionType"] = json!("typed");
+    typed["fromAddressBar"] = json!(true);
+    let mut branch = navigation(Some("a"));
+    branch["newTab"] = json!(true);
+    branch["serverRedirect"] = json!(true);
+    branch["clientRedirect"] = json!(true);
+    let mut reload = navigation(Some("r1"));
+    reload["transitionType"] = json!("reload");
+    let events = [
+        visit("a", "https://a.test/", AT),
+        visit_with("b", "https://b.test/", branch),
+        visit_with("c", "https://b.test/#/next", spa),
+        visit_with("d", "https://d.test/", typed),
+        visit_with("r1", "https://r.test/", navigation(None)),
+        // The same URL again is another visit, and may be the source of the next one.
+        visit_with("r2", "https://r.test/", reload),
+    ];
+    let expected_acks = [
+        stored("a"),
+        nav_ack("b", "stored"),
+        nav_ack("c", "stored"),
+        nav_ack("d", "stored"),
+        nav_ack("r1", "stored"),
+        nav_ack("r2", "stored"),
+    ];
+    let expected_rows = [
+        format!("b|a|document|link|11001|{NAV_AT}"),
+        format!("c|b|history_state|link|00100|{NAV_AT}"),
+        format!("d|NULL|document|typed|00010|{NAV_AT}"),
+        format!("r1|NULL|document|link|00000|{NAV_AT}"),
+        format!("r2|r1|document|reload|00000|{NAV_AT}"),
+    ];
+    // Each round is a new host process, as when an ACK was lost and the queue resends.
+    for _ in 0..3 {
+        assert_eq!(exchange(&tmp, &events), expected_acks);
+        assert_eq!(navigation_rows(&tmp), expected_rows);
+        assert_eq!(row_dump(&tmp.default_vault()).len(), 6);
+    }
+    // A resend that differs keeps what was stored first and still reports it as stored.
+    let mut changed = visit_with("d", "https://d.test/", navigation(Some("a")));
+    changed["navigation"]["transitionType"] = json!("auto_bookmark");
+    assert_eq!(exchange(&tmp, &[changed]), [nav_ack("d", "stored")]);
+    assert_eq!(navigation_rows(&tmp), expected_rows);
+}
+
+#[test]
+fn a_source_that_is_missing_late_or_never_save_is_null_and_save_but_no_mcp_is_kept() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let store = store_of(&tmp);
+    let current = store.load().unwrap();
+    let mut edited = current.policy.clone();
+    edited
+        .layers
+        .save_but_no_mcp
+        .rules
+        .push("quiet.test".into());
+    store.update(&current, edited).unwrap();
+    assert_eq!(
+        exchange(
+            &tmp,
+            &[
+                visit("hidden", "https://becomes-hidden.test/CANARY", AT),
+                visit("quiet", "https://quiet.test/page", AT),
+            ]
+        ),
+        [stored("hidden"), stored("quiet")]
+    );
+    add_never_save_rule(&tmp, "becomes-hidden.test");
+    let replies = exchange(
+        &tmp,
+        &[
+            visit_with("t1", "https://t.test/1", navigation(Some("hidden"))),
+            visit_with("t2", "https://t.test/2", navigation(Some("quiet"))),
+            visit_with("t3", "https://t.test/3", navigation(Some("never-sent"))),
+            // The source arrives after its target: the target keeps NULL, nothing is patched later.
+            visit_with("t4", "https://t.test/4", navigation(Some("late"))),
+            visit("late", "https://late.test/", AT),
+        ],
+    );
+    assert_eq!(
+        replies,
+        [
+            nav_ack("t1", "stored"),
+            nav_ack("t2", "stored"),
+            nav_ack("t3", "stored"),
+            nav_ack("t4", "stored"),
+            stored("late"),
+        ]
+    );
+    let expected = [
+        format!("t1|NULL|document|link|00000|{NAV_AT}"),
+        format!("t2|quiet|document|link|00000|{NAV_AT}"),
+        format!("t3|NULL|document|link|00000|{NAV_AT}"),
+        format!("t4|NULL|document|link|00000|{NAV_AT}"),
+    ];
+    assert_eq!(navigation_rows(&tmp), expected);
+    // Resending t4 now that its source exists still changes nothing.
+    assert_eq!(
+        exchange(
+            &tmp,
+            &[visit_with(
+                "t4",
+                "https://t.test/4",
+                navigation(Some("late"))
+            )]
+        ),
+        [nav_ack("t4", "stored")]
+    );
+    assert_eq!(navigation_rows(&tmp), expected);
+    // No reply names a URL, and the navigation rows hold none.
+    assert!(!format!("{replies:?}").contains("CANARY"));
+    assert!(!navigation_rows(&tmp).join("\n").contains("hidden"));
+}
+
+#[test]
+fn an_invalid_navigation_keeps_its_visit_and_is_reported_as_invalid() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    exchange(&tmp, &[visit("src", "https://src.test/", AT)]);
+    let changed = |key: &str, value: Value| {
+        let mut nav = navigation(Some("src"));
+        nav[key] = value;
+        nav
+    };
+    let mut extra = navigation(Some("src"));
+    extra["sourceUrl"] = json!("https://src.test/");
+    let mut missing = navigation(Some("src"));
+    missing.as_object_mut().unwrap().remove("newTab");
+    let cases = [
+        Value::Null,
+        json!("link"),
+        json!([]),
+        extra,
+        missing,
+        changed("transitionType", json!("auto_toplevel")),
+        changed("kind", json!("fragment")),
+        changed("forwardBack", json!(1)),
+        changed("occurredAt", json!("2026-02-30T12:00:00.000Z")),
+        changed("occurredAt", json!("2026-11-06T12:00:00Z")),
+        changed("sourceVisitId", json!("")),
+        changed("sourceVisitId", json!(7)),
+        // Its own id (the last case is bad-12).
+        changed("sourceVisitId", json!("bad-12")),
+    ];
+    let events: Vec<Value> = cases
+        .iter()
+        .enumerate()
+        .map(|(index, nav)| visit_with(&format!("bad-{index}"), "https://t.test/", nav.clone()))
+        .collect();
+    assert_eq!(events.len(), 13);
+    let replies = exchange(&tmp, &events);
+    for (index, reply) in replies.iter().enumerate() {
+        assert_eq!(
+            reply,
+            &nav_ack(&format!("bad-{index}"), "invalid"),
+            "case {index}"
+        );
+    }
+    assert_eq!(navigation_rows(&tmp), Vec::<String>::new());
+    assert_eq!(row_dump(&tmp.default_vault()).len(), 1 + cases.len());
+    // A visit that is itself invalid is refused as before; its navigation changes nothing.
+    let mut broken = visit_with("broken", "https://t.test/", navigation(None));
+    broken["title"] = json!(1);
+    assert_eq!(
+        exchange(&tmp, &[broken]),
+        [json!({ "ok": false, "eventId": "broken", "error": "invalid_event" })]
+    );
+}
+
+#[test]
+fn a_navigation_never_attaches_to_an_id_stored_with_another_url() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    assert_eq!(
+        exchange(&tmp, &[visit("t", "https://first.test/", AT)]),
+        [stored("t")]
+    );
+    let replies = exchange(
+        &tmp,
+        &[visit_with("t", "https://second.test/", navigation(None))],
+    );
+    assert_eq!(replies, [nav_ack("t", "invalid")]);
+    assert_eq!(navigation_rows(&tmp), Vec::<String>::new());
+    assert_eq!(
+        row_dump(&tmp.default_vault()),
+        [format!("v|t|https://first.test/|Rust Book|{AT}")]
+    );
+}
+
+#[test]
+fn privacy_refusals_and_policy_failures_keep_every_navigation_out() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    exchange(&tmp, &[visit("src", "https://src.test/", AT)]);
+    add_never_save_rule(&tmp, "never.test");
+    let mut private = visit_with("p", "https://never.test/CANARY", navigation(Some("src")));
+    let mut incognito = visit_with("i", "https://src.test/CANARY", navigation(Some("src")));
+    incognito["incognito"] = json!(true);
+    let replies = exchange(&tmp, &[private.clone(), incognito]);
+    assert_eq!(replies[0], dropped("p"));
+    assert_refused_without_data(&replies[1], "i");
+    assert_eq!(navigation_rows(&tmp), Vec::<String>::new());
+    assert_eq!(row_dump(&tmp.default_vault()).len(), 1);
+
+    // No policy decision: nothing is stored, the failure is temporary, and a resend recovers.
+    let policy = tmp.app_dir().join("policy.json");
+    let good = std::fs::read(&policy).unwrap();
+    std::fs::write(&policy, b"{broken").unwrap();
+    let event = visit_with("t", "https://t.test/", navigation(Some("src")));
+    assert_policy_failure(
+        &exchange(&tmp, std::slice::from_ref(&event))[0],
+        "t",
+        "policy_invalid",
+    );
+    assert_eq!(navigation_rows(&tmp), Vec::<String>::new());
+    assert_eq!(row_dump(&tmp.default_vault()).len(), 1);
+    std::fs::write(&policy, &good).unwrap();
+    assert_eq!(exchange(&tmp, &[event]), [nav_ack("t", "stored")]);
+    assert_eq!(
+        navigation_rows(&tmp),
+        [format!("t|src|document|link|00000|{NAV_AT}")]
+    );
+    // Still refused after recovery.
+    private["id"] = json!("p2");
+    assert_eq!(exchange(&tmp, &[private]), [dropped("p2")]);
+    assert_eq!(navigation_rows(&tmp).len(), 1);
+}
+
+#[test]
+fn a_failed_write_keeps_neither_the_visit_nor_its_navigation() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    exchange(&tmp, &[visit("src", "https://src.test/", AT)]);
+    let event = visit_with("t", "https://t.test/", navigation(Some("src")));
+    let lock = Connection::open(tmp.default_vault()).unwrap();
+    lock.execute_batch("BEGIN EXCLUSIVE;").unwrap();
+    let reply = exchange(&tmp, std::slice::from_ref(&event)).remove(0);
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert_eq!(reply.get("navigation"), None);
+    lock.execute_batch("ROLLBACK;").unwrap();
+    assert_eq!(navigation_rows(&tmp), Vec::<String>::new());
+    assert_eq!(row_dump(&tmp.default_vault()).len(), 1);
+    assert_eq!(exchange(&tmp, &[event]), [nav_ack("t", "stored")]);
+    assert_eq!(navigation_rows(&tmp).len(), 1);
+}
+
+#[test]
+fn concurrent_hosts_store_every_navigation_once_and_keep_the_keys_sound() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    exchange(&tmp, &[visit("root", "https://root.test/", AT)]);
+    let workers = 4;
+    let per_worker = 15;
+    std::thread::scope(|scope| {
+        for worker in 0..workers {
+            let tmp = &tmp;
+            scope.spawn(move || {
+                let events: Vec<Value> = (0..per_worker)
+                    .map(|n| {
+                        // Each chain starts at the shared root, or at another worker's first visit,
+                        // which may or may not be stored yet.
+                        let source = match n {
+                            0 if worker % 2 == 0 => "root".to_owned(),
+                            0 => format!("w{}-0", worker - 1),
+                            n => format!("w{worker}-{}", n - 1),
+                        };
+                        visit_with(
+                            &format!("w{worker}-{n}"),
+                            &format!("https://w{worker}.test/{n}"),
+                            navigation(Some(&source)),
+                        )
+                    })
+                    .collect();
+                for reply in exchange(tmp, &events) {
+                    assert_eq!(reply["navigation"], "stored", "{reply}");
+                }
+            });
+        }
+    });
+    assert_eq!(navigation_rows(&tmp).len(), workers * per_worker);
+    let db = Connection::open(tmp.default_vault()).unwrap();
+    let broken: i64 = db
+        .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(broken, 0);
+    let integrity: String = db
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(integrity, "ok");
+    // Within a chain, and from the root, the source was always stored first, so it is kept.
+    let kept: i64 = db
+        .query_row(
+            "SELECT count(*) FROM navigation_events n JOIN visits s ON s.event_id = n.source_visit_id",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        kept >= (workers * (per_worker - 1) + workers / 2) as i64,
+        "{kept}"
+    );
+}
+
+#[test]
+fn backups_carry_the_navigations_and_count_them() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    exchange(
+        &tmp,
+        &[
+            visit("a", "https://a.test/", AT),
+            visit_with("b", "https://b.test/", navigation(Some("a"))),
+            visit_with("c", "https://c.test/", navigation(None)),
+        ],
+    );
+    let dest = tmp.0.join("backups");
+    std::fs::create_dir(&dest).unwrap();
+    let response = &exchange(
+        &tmp,
+        &[json!({ "type": "vault_backup", "requestId": "b", "directory": dest })],
+    )[0];
+    assert_eq!(response["ok"], true, "{response}");
+    let copy = PathBuf::from(response["backupPath"].as_str().unwrap());
+    let dump = |path: &Path| -> Vec<String> {
+        let db =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let mut statement = db
+            .prepare("SELECT target_visit_id || '|' || ifnull(source_visit_id, 'NULL') FROM navigation_events ORDER BY 1")
+            .unwrap();
+        let rows = statement.query_map([], |row| row.get(0)).unwrap();
+        rows.collect::<Result<_, _>>().unwrap()
+    };
+    assert_eq!(dump(&copy), ["b|a", "c|NULL"]);
+    assert_eq!(dump(&copy), dump(&tmp.default_vault()));
+    assert_eq!(pragma(&copy, "user_version"), 6);
+}
+
+#[test]
+fn the_host_names_its_capabilities_without_a_vault_or_a_policy() {
+    let tmp = TempDir::new();
+    let replies = exchange(
+        &tmp,
+        &[
+            json!({ "type": "host_capabilities", "requestId": "h" }),
+            json!({ "type": "host_capabilities" }),
+        ],
+    );
+    assert_eq!(
+        replies,
+        [
+            json!({ "ok": true, "type": "host_capabilities_result", "requestId": "h", "capabilities": ["navigation_v1"] }),
+            json!({ "ok": false, "type": "host_capabilities_result", "requestId": null, "error": "invalid_request_id" }),
+        ]
+    );
+    assert!(!tmp.app_dir().exists(), "nothing created");
 }

@@ -88,6 +88,12 @@ impl PolicyGate {
         }
     }
 
+    /// A gate over the policy of `store` (a test's own directory).
+    #[cfg(test)]
+    pub fn with_store(store: PolicyStore) -> Self {
+        Self { store: Ok(store) }
+    }
+
     fn load(&self) -> Result<Snapshot, &'static str> {
         let store = self.store.as_ref().map_err(|_| UNAVAILABLE)?;
         let mut attempt = 0;
