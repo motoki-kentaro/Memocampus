@@ -95,13 +95,13 @@ function startWorker({ host = fakeHost(), tabs = {}, query = [], data = new Map(
   };
   globalThis.chrome = {
     runtime,
-    webNavigation: { onCompleted: on("navigation") },
+    webNavigation: { onCompleted: on("navigation"), onCommitted: on("committed"), onCreatedNavigationTarget: on("createdTarget"), onHistoryStateUpdated: on("historyState") },
     contextMenus: { create() {}, onClicked: on("menuClick") },
     notifications: { create: async () => {} },
     action: { setBadgeText: async ({ text }) => void (badge.text = text), setTitle: async ({ title }) => void (badge.title = title) },
     sidePanel: { setPanelBehavior: async () => {} },
     scripting: { executeScript: async () => [] },
-    tabs: { get: async (id) => tabs[id], query: async () => query },
+    tabs: { onRemoved: on("tabRemoved"), onReplaced: on("tabReplaced"), get: async (id) => tabs[id], query: async () => query },
     storage: {
       local: {
         async get(keys) {
@@ -127,7 +127,7 @@ function startWorker({ host = fakeHost(), tabs = {}, query = [], data = new Map(
     dead: () => data.get(DEAD_LETTER_KEY) ?? [],
     async navigate(url, id = 1) {
       tabs[id] ??= tabOf(id, url);
-      await Promise.all(listeners.navigation.map((fn) => fn({ frameId: 0, tabId: id, url })));
+      await Promise.all(listeners.navigation.map((fn) => fn({ frameId: 0, tabId: id, url, documentId: `doc-${id}-${url}` })));
       await settle(20);
     },
     message: (message) => new Promise((resolve) => listeners.message.forEach((fn) => fn(message, {}, resolve))),

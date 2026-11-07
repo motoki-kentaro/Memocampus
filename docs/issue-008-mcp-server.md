@@ -13,7 +13,7 @@ memocampus-mcp.exe --vault <path>      mcp-server/  (rmcp: protocol, schemas, st
 VisibleStore                            visible-store/  (privacy gate, read-only snapshot)
         │ SQLite, read-only, one short read transaction per call
         ▼
-Vault (schema 5)  ◄── writes ── Native Host ◄── Native Messaging ── Chrome extension
+Vault (schema 6)  ◄── writes ── Native Host ◄── Native Messaging ── Chrome extension
 ```
 
 ## 1. Preflight
@@ -22,7 +22,7 @@ Vault (schema 5)  ◄── writes ── Native Host ◄── Native Messaging
 |---|---|---|
 | Packages | Three independent Cargo packages (`native-host`, `visible-store`, now `mcp-server`), each its own workspace and lock file | [code] |
 | VisibleStore | Already had `search_visits`, `get_visits_by_day` (fixed offset), `search_images`, `get_image_sources`; rebuilt per call from a fresh policy and a fresh snapshot, no cache; fixed error codes; no paging; no metadata | [code] |
-| Schema 5 | `visits` (no incognito column; incognito is refused at ingress), `page_metadata` (one row per URL, the latest capture), `image_blobs` / `saved_images` (`mcp_public` per save, written 0), `image_thumbnails` | [code] |
+| Schema 6 | `visits` (no incognito column; incognito is refused at ingress), `page_metadata` (one row per URL, the latest capture), `navigation_events` (Issue #41; not read by VisibleStore), `image_blobs` / `saved_images` (`mcp_public` per save, written 0), `image_thumbnails` | [code] |
 | Journal | The host never sets `journal_mode`: rollback journal (`delete`). VisibleStore **refuses WAL** (header, `-wal`/`-shm`, or mode), opens `SQLITE_OPEN_READ_ONLY`, `busy_timeout` 3 s, `query_only`, and never runs a PRAGMA that writes | [code][verified] |
 | Policy | Global `%LOCALAPPDATA%\Memocampus\policy.json` (`MEMOCAMPUS_APP_DIR` for tests), read and compiled on every call, ETag re-checked after the build; any failure is `policy_unavailable` | [code] |
 | Logging | VisibleStore has no logging call (source scan test) | [code] |
@@ -51,7 +51,7 @@ memocampus-mcp.exe --vault "C:\Users\<you>\AppData\Local\Memocampus\memocampus.s
 - Exactly `--vault <absolute path>` (or `--help` / `--version`). A relative path is refused: an MCP client's working directory is
   not something to rely on.
 - The vault is checked once at start with the same checks as a read (`VisibleStore::check_vault`): location (fixed local drive,
-  no UNC), file header, not WAL, `journal_mode = delete`, schema 5 byte for byte. Failure: exit code 2 and one line on stderr,
+  no UNC), file header, not WAL, `journal_mode = delete`, schema 6 byte for byte. Failure: exit code 2 and one line on stderr,
   e.g. `memocampus-mcp: vault refused: vault_schema_mismatch`. Nothing is created: a missing vault stays missing [verified].
 - The path is fixed for the life of the process; the Chrome side panel's active vault is not followed. Every call reads the file
   at that path again, so a file replaced there is read as the new file, and a removed one is an error (never an older answer).
@@ -271,13 +271,13 @@ Use your own vault only by hand; the automated tests never read it.
    ```
    The server is `C:\works\Memocampus\mcp-server\target\release\memocampus-mcp.exe`.
 2. Find the vault path: the side panel's **Vault** section shows it; by default
-   `C:\Users\<you>\AppData\Local\Memocampus\memocampus.sqlite3`. It must be a schema 5 vault.
+   `C:\Users\<you>\AppData\Local\Memocampus\memocampus.sqlite3`. It must be a schema 6 vault.
 3. Check it starts (it waits for a client; press Ctrl+C to stop):
    ```powershell
    & "C:\works\Memocampus\mcp-server\target\release\memocampus-mcp.exe" --vault "$env:LOCALAPPDATA\Memocampus\memocampus.sqlite3"
    ```
    An immediate exit with `memocampus-mcp: vault refused: <code>` means: `vault_unavailable` (path wrong or missing),
-   `vault_schema_mismatch` (not a schema 5 Memocampus vault), `vault_unsupported` (WAL, or not on a fixed local drive).
+   `vault_schema_mismatch` (not a schema 6 Memocampus vault), `vault_unsupported` (WAL, or not on a fixed local drive).
 4. Register with **Claude Code** (user scope, so it works from any folder):
    ```powershell
    claude mcp add --scope user memocampus -- "C:\works\Memocampus\mcp-server\target\release\memocampus-mcp.exe" --vault "C:\Users\<you>\AppData\Local\Memocampus\memocampus.sqlite3"

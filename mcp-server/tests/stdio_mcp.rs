@@ -555,6 +555,33 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
     );
     assert_eq!(fs::read(&old).unwrap(), before);
 
+    // Schema 5: the shape before Issue #41 (no navigation_events), refused the same way.
+    let old = env.dir.join("schema5.sqlite3");
+    let start = sql.find(" CREATE TABLE navigation_events").unwrap();
+    let end = start + sql[start..].find(");").unwrap() + 2;
+    let schema_5 = format!("{}{}", &sql[..start], &sql[end..])
+        .replace(
+            " CREATE INDEX navigation_events_by_source ON navigation_events (source_visit_id);",
+            "",
+        )
+        .replace("PRAGMA user_version = 6;", "PRAGMA user_version = 5;");
+    assert!(!schema_5.contains("navigation_events"));
+    Connection::open(&old)
+        .unwrap()
+        .execute_batch(&schema_5)
+        .unwrap();
+    let before = fs::read(&old).unwrap();
+    let (code, stdout, stderr) = run(&["--vault".as_ref(), old.as_os_str()]);
+    assert_eq!(
+        (code, stdout.as_str(), stderr.trim()),
+        (
+            Some(2),
+            "",
+            "memocampus-mcp: vault refused: vault_schema_mismatch"
+        )
+    );
+    assert_eq!(fs::read(&old).unwrap(), before);
+
     // WAL is refused (the host uses a rollback journal), and nothing is converted.
     let wal = env.dir.join("wal.sqlite3");
     fs::copy(&env.vault, &wal).unwrap();
@@ -601,6 +628,7 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
             "app",
             "junk.sqlite3",
             "schema4.sqlite3",
+            "schema5.sqlite3",
             "vault.sqlite3",
             "wal.sqlite3"
         ]
@@ -1436,18 +1464,20 @@ fn host_writes_continue_while_the_server_reads_and_no_read_sees_half_a_transacti
         }
         db.execute_batch("COMMIT").unwrap();
     }
+    let mut client = env.start();
     let vault = env.vault.clone();
-    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (stop, stopped) = mpsc::channel();
+    let (half_written, half_ready) = mpsc::channel();
+    let (resume, resumed) = mpsc::channel();
+    let (finished, done) = mpsc::channel();
     let writer = {
-        let stop = stop.clone();
         std::thread::spawn(move || {
             // Each transaction adds a pair of visits, as one commit.
             let db = Connection::open(&vault).unwrap();
             db.busy_timeout(Duration::from_secs(3)).unwrap();
             let mut commits = 0u32;
-            let mut slowest = Duration::ZERO;
-            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                let started = Instant::now();
+            // A failed reader drops `stop`, which also ends the writer.
+            while matches!(stopped.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                 db.execute_batch("BEGIN IMMEDIATE").unwrap();
                 for half in 0..2 {
                     visit(
@@ -1457,16 +1487,33 @@ fn host_writes_continue_while_the_server_reads_and_no_read_sees_half_a_transacti
                         "Written",
                         "2026-11-05T00:00:00.000Z",
                     );
+                    if commits == 0 && half == 0 {
+                        half_written.send(()).unwrap();
+                        resumed
+                            .recv_timeout(WAIT)
+                            .expect("reader releases the writer");
+                    }
                 }
                 db.execute_batch("COMMIT").unwrap();
-                slowest = slowest.max(started.elapsed());
                 commits += 1;
                 std::thread::sleep(Duration::from_millis(2));
             }
-            (commits, slowest)
+            finished.send(commits).unwrap();
         })
     };
-    let mut client = env.start();
+    // Prove a read completes while a write transaction is open and half inserted,
+    // without relying on the scheduler to make the two operations overlap.
+    half_ready
+        .recv_timeout(WAIT)
+        .expect("writer starts a transaction");
+    assert_eq!(
+        client.ok(
+            "memocampus_search_visits",
+            json!({"query": "Written", "limit": 1})
+        )["total"],
+        0
+    );
+    resume.send(()).unwrap();
     let mut last = 0;
     for _ in 0..20 {
         let list = client.ok(
@@ -1480,10 +1527,21 @@ fn host_writes_continue_while_the_server_reads_and_no_read_sees_half_a_transacti
         let stats = client.ok("memocampus_get_domain_stats", json!({"limit": 1}));
         assert!(stats["total_visits"].as_u64().unwrap() >= 5000 + total);
     }
-    stop.store(true, std::sync::atomic::Ordering::Relaxed);
-    let (commits, slowest) = writer.join().unwrap();
+    stop.send(()).unwrap();
+    // busy_timeout bounds SQLite's lock waits, not total transaction wall time.
+    // Use the harness's completion deadline to detect a stuck writer instead.
+    let commits = done
+        .recv_timeout(WAIT)
+        .expect("writer finishes after reads");
+    writer.join().unwrap();
     assert!(commits > 0);
-    assert!(slowest < Duration::from_secs(3), "{slowest:?}");
+    assert_eq!(
+        client.ok(
+            "memocampus_search_visits",
+            json!({"query": "Written", "limit": 1})
+        )["total"],
+        u64::from(commits) * 2
+    );
     assert_eq!(client.finish(), "");
 }
 

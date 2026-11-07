@@ -1,6 +1,7 @@
+use memocampus_native_host::navigation::{self, Navigation};
 use memocampus_native_host::page_metadata::{self, PageMetadata};
 use memocampus_native_host::policy::Decision;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
@@ -54,22 +55,35 @@ struct Ack<'a> {
     /// pointless. A policy that could not be evaluated is an `error`, never this.
     #[serde(skip_serializing_if = "Option::is_none")]
     dropped: Option<&'static str>,
+    /// Only for a stored visit that came with a `navigation`: `"stored"` when its row is in the
+    /// vault (also on a resend), `"invalid"` when it was refused and nothing of it was kept. Absent
+    /// otherwise, so acknowledgements without a navigation are unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    navigation: Option<&'static str>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum Recorded {
-    Stored,
+    Stored { navigation: Option<&'static str> },
     DroppedByPolicy,
 }
+
+const NAVIGATION_STORED: &str = "stored";
+const NAVIGATION_INVALID: &str = "invalid";
 
 impl<'a> Ack<'a> {
     fn from_result(event_id: Option<&'a str>, result: Result<Recorded, &'static str>) -> Self {
         let dropped = matches!(result, Ok(Recorded::DroppedByPolicy)).then_some("policy");
+        let navigation = match result {
+            Ok(Recorded::Stored { navigation }) => navigation,
+            _ => None,
+        };
         Self {
             ok: result.is_ok(),
             event_id,
             error: result.err(),
             dropped,
+            navigation,
         }
     }
 }
@@ -111,6 +125,8 @@ fn record_event(
         Some("visit") => {
             // Best effort and judged on its own: a page that cannot be used never refuses the visit.
             let page = value.get("page").and_then(page_metadata::parse);
+            // Present but unusable is reported (`"invalid"`); it never refuses the visit either.
+            let navigation_sent = value.get("navigation").cloned();
             let event: VisitEvent = serde_json::from_value(value).map_err(|_| INVALID_EVENT)?;
             if event.id.is_empty() {
                 return Err(INVALID_EVENT);
@@ -118,15 +134,32 @@ fn record_event(
             if !is_recordable_url(&event.url) {
                 return Err(INVALID_URL);
             }
+            let navigation = navigation_sent.map(|raw| navigation::parse(&raw, &event.id));
+            // Before the write: a source the policy cannot judge stops the whole event (temporary).
+            let source = match &navigation {
+                Some(Some(Navigation {
+                    source_visit_id: Some(id),
+                    ..
+                })) => allowed_source(session, gate, id)?,
+                _ => None,
+            };
+            let mut navigation_result = navigation.as_ref().map(|_| NAVIGATION_INVALID);
             session
                 .write(|db| {
                     let stored = db.execute("INSERT OR IGNORE INTO visits (event_id, url, title, visited_at) VALUES (?1, ?2, ?3, ?4)", params![event.id, event.url, event.title, event.visited_at])?;
-                    match &page {
-                        Some(page) => store_page(db, &event.id, &event.url, page),
-                        None => Ok(stored),
+                    if let Some(page) = &page {
+                        store_page(db, &event.id, &event.url, page)?;
                     }
+                    if let Some(Some(found)) = &navigation {
+                        if store_navigation(db, &event.id, &event.url, found, source.as_ref())? {
+                            navigation_result = Some(NAVIGATION_STORED);
+                        }
+                    }
+                    Ok(stored)
                 })
-                .map(|()| Recorded::Stored)
+                .map(|()| Recorded::Stored {
+                    navigation: navigation_result,
+                })
                 .map_err(vault::VaultError::code)
         }
         Some("tab_snapshot") => {
@@ -139,7 +172,7 @@ fn record_event(
             }
             session
                 .write(|db| db.execute("INSERT OR IGNORE INTO tab_snapshots (event_id, window_id, tab_index, url, title, pinned, incognito, recorded_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", params![event.id, event.window_id, event.tab_index, event.url, event.title, event.pinned, event.incognito, event.recorded_at]))
-                .map(|()| Recorded::Stored)
+                .map(|()| Recorded::Stored { navigation: None })
                 .map_err(vault::VaultError::code)
         }
         _ => Err(UNKNOWN_TYPE),
@@ -178,6 +211,97 @@ fn store_page(
             page.captured_at
         ],
     )
+}
+
+/// The source visit `id` with its URL, if it is stored and the current policy does not refuse its
+/// URL; otherwise None, which is stored as NULL. NeverSave gives None, SaveButNoMcp keeps the
+/// source (a future reader must judge both ends again). Without a decision, the event fails.
+fn allowed_source(
+    session: &mut vault::Session,
+    gate: &policy_gate::PolicyGate,
+    id: &str,
+) -> Result<Option<(String, String)>, &'static str> {
+    let url = session
+        .read(|db| {
+            db.query_row("SELECT url FROM visits WHERE event_id = ?1", [id], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()
+        })
+        .map_err(vault::VaultError::code)?
+        .map_err(|_| vault::VaultError::Db.code())?;
+    match url {
+        Some(url) if gate.decide(&url)? != Decision::NeverSave => Ok(Some((id.to_owned(), url))),
+        _ => Ok(None),
+    }
+}
+
+/// Writes the navigation of the visit `target_id`, in the visit's transaction; true when the vault
+/// holds it afterwards. Only a stored visit with exactly this id and URL gets one, so an id reused
+/// with another URL gets nothing (false). The source is bound to the id and URL that were judged:
+/// if that visit is not in this vault, it is NULL, never a foreign-key failure. A resend changes
+/// nothing (`DO NOTHING` on the target only: every other constraint still fails and rolls the
+/// whole event back, unlike `INSERT OR IGNORE`).
+fn store_navigation(
+    db: &rusqlite::Connection,
+    target_id: &str,
+    url: &str,
+    navigation: &Navigation,
+    source: Option<&(String, String)>,
+) -> rusqlite::Result<bool> {
+    let (source_id, source_url) = match source {
+        Some((id, url)) => (Some(id.as_str()), Some(url.as_str())),
+        None => (None, None),
+    };
+    db.execute(
+        "INSERT INTO navigation_events (target_visit_id, source_visit_id, kind, transition_type, client_redirect, server_redirect, forward_back, from_address_bar, new_tab, occurred_at)
+         SELECT v.event_id, (SELECT s.event_id FROM visits s WHERE s.event_id = ?3 AND s.url = ?4), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+         FROM visits v WHERE v.event_id = ?1 AND v.url = ?2
+         ON CONFLICT (target_visit_id) DO NOTHING",
+        params![
+            target_id,
+            url,
+            source_id,
+            source_url,
+            navigation.kind,
+            navigation.transition_type,
+            navigation.client_redirect,
+            navigation.server_redirect,
+            navigation.forward_back,
+            navigation.from_address_bar,
+            navigation.new_tab,
+            navigation.occurred_at
+        ],
+    )?;
+    db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM navigation_events n JOIN visits v ON v.event_id = n.target_visit_id WHERE n.target_visit_id = ?1 AND v.url = ?2)",
+        params![target_id, url],
+        |row| row.get(0),
+    )
+}
+
+/// Visits may carry `navigation` (`navigation.rs`) and are acknowledged with `navigation`.
+const CAPABILITY_NAVIGATION: &str = "navigation_v1";
+
+/// What this host can store, for an extension to ask before it sends anything new:
+///
+/// ```text
+/// → { type: "host_capabilities", requestId }
+/// ← { ok: true, type: "host_capabilities_result", requestId, capabilities: ["navigation_v1"] }
+/// ```
+///
+/// A host from before Issue #41 answers this as an unknown event: `{ ok: false, eventId: null,
+/// error: "unknown_type" }`. Reads neither the vault nor the policy.
+fn capabilities(message: &serde_json::Value) -> serde_json::Value {
+    const RESULT: &str = "host_capabilities_result";
+    match search::request_id(message) {
+        Some(id) => serde_json::json!({
+            "ok": true, "type": RESULT, "requestId": id, "capabilities": [CAPABILITY_NAVIGATION],
+        }),
+        None => serde_json::json!({
+            "ok": false, "type": RESULT, "requestId": null, "error": "invalid_request_id",
+        }),
+    }
 }
 
 fn is_recordable_url(raw: &str) -> bool {
@@ -270,6 +394,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &value,
                 ))?;
             }
+            Some("host_capabilities") => write_message(&capabilities(&value))?,
             Some("policy_status" | "policy_initialize") => {
                 write_message(&gate.handle(&value))?;
             }
@@ -343,5 +468,134 @@ mod tests {
             .query_row("SELECT count(*) FROM visits", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    fn navigation(kind: &'static str, transition_type: &'static str) -> super::Navigation {
+        super::Navigation {
+            source_visit_id: None,
+            kind,
+            transition_type,
+            client_redirect: false,
+            server_redirect: false,
+            forward_back: false,
+            from_address_bar: false,
+            new_tab: false,
+            occurred_at: "2026-11-06T12:00:00.000Z".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_navigation_the_table_refuses_fails_loudly_and_takes_its_visit_back() {
+        // `ON CONFLICT (target_visit_id) DO NOTHING` absorbs a resend only: unlike `INSERT OR
+        // IGNORE`, a CHECK failure is an error, and the visit written before it is rolled back.
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(&memocampus_native_host::schema::create_sql())
+            .unwrap();
+        db.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        for bad in [
+            navigation("fragment", "link"),
+            navigation("document", "auto_toplevel"),
+        ] {
+            let tx = db.transaction().unwrap();
+            tx.execute("INSERT INTO visits VALUES ('t', 'https://a.test/', '', '2026-11-06T12:00:00.000Z')", []).unwrap();
+            assert!(super::store_navigation(&tx, "t", "https://a.test/", &bad, None).is_err());
+            drop(tx);
+            let rows: i64 = db
+                .query_row("SELECT (SELECT count(*) FROM visits) + (SELECT count(*) FROM navigation_events)", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(rows, 0);
+        }
+        // The same insert with allowed values goes in, and again changes nothing.
+        let tx = db.transaction().unwrap();
+        tx.execute(
+            "INSERT INTO visits VALUES ('t', 'https://a.test/', '', '2026-11-06T12:00:00.000Z')",
+            [],
+        )
+        .unwrap();
+        let good = navigation("document", "link");
+        assert!(super::store_navigation(&tx, "t", "https://a.test/", &good, None).unwrap());
+        assert!(super::store_navigation(&tx, "t", "https://a.test/", &good, None).unwrap());
+        // Another URL under the same id is never "stored".
+        assert!(!super::store_navigation(&tx, "t", "https://b.test/", &good, None).unwrap());
+        tx.commit().unwrap();
+        let rows: i64 = db
+            .query_row("SELECT count(*) FROM navigation_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn the_write_keeps_a_source_only_as_it_was_judged() {
+        // The source was judged by id and URL before the transaction. If the vault written to has no
+        // visit with exactly that id and URL (another vault became active meanwhile), it is NULL:
+        // never another visit's id, and never a foreign-key failure.
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(&memocampus_native_host::schema::create_sql())
+            .unwrap();
+        db.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             INSERT INTO visits VALUES ('s', 'https://s.test/other', '', '2026-11-06T12:00:00.000Z');",
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        let stored = |target: &str, source: (&str, &str)| -> Option<String> {
+            tx.execute(
+                "INSERT INTO visits VALUES (?1, 'https://t.test/', '', '2026-11-06T12:00:00.000Z')",
+                [target],
+            )
+            .unwrap();
+            let judged = (source.0.to_owned(), source.1.to_owned());
+            let nav = navigation("document", "link");
+            assert!(
+                super::store_navigation(&tx, target, "https://t.test/", &nav, Some(&judged))
+                    .unwrap()
+            );
+            tx.query_row(
+                "SELECT source_visit_id FROM navigation_events WHERE target_visit_id = ?1",
+                [target],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(stored("t1", ("s", "https://s.test/judged")), None);
+        assert_eq!(stored("t2", ("gone", "https://s.test/other")), None);
+        assert_eq!(
+            stored("t3", ("s", "https://s.test/other")).as_deref(),
+            Some("s")
+        );
+    }
+
+    #[test]
+    fn a_source_the_policy_cannot_judge_stops_the_event_and_an_unknown_one_is_null() {
+        use crate::vault::{self, tests::TempDir, Environment, Session};
+        use memocampus_native_host::policy_store::PolicyStore;
+        let tmp = TempDir::new();
+        let path = tmp.0.join("vault.sqlite3");
+        vault::create_vault(&path).unwrap();
+        Connection::open(&path)
+            .unwrap()
+            .execute("INSERT INTO visits VALUES ('s', 'https://a.test/', '', '2026-11-06T12:00:00.000Z')", [])
+            .unwrap();
+        let mut session = Session::new(Environment {
+            app_dir: Some(tmp.0.join("app")),
+            db_override: Some(path),
+            exe_dir: None,
+        });
+        // A directory without a policy: no decision exists.
+        std::fs::create_dir_all(tmp.0.join("policy")).unwrap();
+        let gate = crate::policy_gate::PolicyGate::with_store(
+            PolicyStore::new(tmp.0.join("policy")).unwrap(),
+        );
+        assert_eq!(
+            super::allowed_source(&mut session, &gate, "s"),
+            Err("policy_not_initialized")
+        );
+        // A visit that is not stored has no URL to judge: NULL, whatever the policy.
+        assert_eq!(
+            super::allowed_source(&mut session, &gate, "missing"),
+            Ok(None)
+        );
     }
 }
