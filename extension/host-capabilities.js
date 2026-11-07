@@ -7,6 +7,8 @@
 // after any failure or doubtful acknowledgement; the acknowledgement of each event is checked anyway.
 
 export const CAPABILITY_NAVIGATION = "navigation_v1";
+/** `policy_item_*`, `url_delete*`, `image_delete*` (Issue #43): the side panel offers its item actions only then. */
+export const CAPABILITY_VAULT_ITEMS = "vault_items_v1";
 export const CAPABILITY_TIMEOUT_MS = 10_000;
 
 function withTimeout(promise, timeoutMs) {
@@ -18,8 +20,8 @@ function withTimeout(promise, timeoutMs) {
 }
 
 /**
- * `{ ok: true, navigation }` when the host answered (an old host answers `unknown_type`, which means
- * `navigation: false`), or `{ ok: false, code }`: "timeout" (no answer), "host_unavailable" (the host
+ * `{ ok: true, navigation, vaultItems }` when the host answered (an old host answers `unknown_type`, which
+ * means both false), or `{ ok: false, code }`: "timeout" (no answer), "host_unavailable" (the host
  * could not be started or stopped), "invalid_response" (an answer of no known form). Never throws.
  */
 export async function checkHostCapabilities({ send, createId = () => crypto.randomUUID(), timeoutMs = CAPABILITY_TIMEOUT_MS }) {
@@ -34,9 +36,9 @@ export async function checkHostCapabilities({ send, createId = () => crypto.rand
     return { ok: false, code: error?.code === "timeout" ? "timeout" : "host_unavailable" };
   }
   if (response?.ok === true && response.type === "host_capabilities_result" && response.requestId === requestId && Array.isArray(response.capabilities)) {
-    return { ok: true, navigation: response.capabilities.includes(CAPABILITY_NAVIGATION) };
+    return { ok: true, navigation: response.capabilities.includes(CAPABILITY_NAVIGATION), vaultItems: response.capabilities.includes(CAPABILITY_VAULT_ITEMS) };
   }
   // A host from before #41 does not know the message, and says so without an id.
-  if (response?.ok === false && response.error === "unknown_type" && response.eventId === null) return { ok: true, navigation: false };
+  if (response?.ok === false && response.error === "unknown_type" && response.eventId === null) return { ok: true, navigation: false, vaultItems: false };
   return { ok: false, code: "invalid_response" };
 }

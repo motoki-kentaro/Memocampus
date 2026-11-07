@@ -378,12 +378,13 @@ button.secondary { font-size: 12px; white-space: nowrap; }
 .results { list-style: none; margin: 0; padding: 0; }
 .results[aria-busy="true"] { opacity: 0.55; }
 
+.results > li { border-bottom: 1px solid var(--border); }
+
 .hit {
   display: block;
   padding: 7px 10px;
   color: inherit;
   text-decoration: none;
-  border-bottom: 1px solid var(--border);
 }
 
 .hit:hover { background: var(--hover); }
@@ -467,3 +468,73 @@ button.secondary { font-size: 12px; white-space: nowrap; }
 .vault-message { white-space: pre-wrap; }
 
 [hidden] { display: none !important; }
+
+/* Managing one item (Issue #43): a drop-down per URL result and in the image details, and one
+   confirmation dialog for both tabs. The drop-down stays on its own line so the URL keeps its width. */
+.hit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 6px;
+}
+.hit-actions[hidden] { display: none; }
+.hit-state {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.hit-state[data-decision="save_but_no_mcp"], .hit-state[data-decision="never_save"] { color: var(--fg); border-color: var(--muted); }
+select.item-action {
+  min-width: 0;
+  max-width: 100%;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+select.item-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gallery-manage { margin-top: 10px; }
+.gallery-manage h3 { margin: 0 0 4px; font-size: 13px; }
+.gallery-manage[hidden] { display: none; }
+
+.item-dialog {
+  position: fixed;
+  z-index: 20;
+  top: 48px;
+  left: 8px;
+  right: 8px;
+  max-height: calc(100% - 64px);
+  overflow: auto;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+.item-dialog[hidden] { display: none; }
+.item-dialog:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.item-dialog h2 { margin: 0 0 6px; font-size: 14px; }
+.item-dialog p { margin: 4px 0; overflow-wrap: anywhere; }
+.item-dialog-target { white-space: pre-line; color: var(--muted); font-size: 12px; }
+.item-dialog-choice { margin: 6px 0; padding: 4px 8px 6px; border: 1px solid var(--border); border-radius: 6px; }
+.item-dialog-choice legend { font-size: 12px; padding: 0 4px; }
+.item-dialog-choice label, .item-url-option { display: block; overflow-wrap: anywhere; font-size: 12px; margin: 2px 0; }
+.item-dialog-list { margin: 2px 0 4px; padding-left: 18px; overflow-wrap: anywhere; }
+.item-dialog-note { color: var(--muted); font-size: 12px; }
+.item-dialog-warning { color: var(--error-fg); font-weight: 600; }
+.item-dialog-ack { display: block; margin: 6px 0; font-size: 12px; }
+.item-dialog-ack[hidden] { display: none; }
+.item-dialog-error { color: var(--error-fg); }
+.item-dialog-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+button.danger { color: var(--error-fg); border-color: var(--error-fg); font-weight: 600; }
+@media (forced-colors: active) {
+  .item-dialog, .hit-state, select.item-action { border-color: CanvasText; }
+  button.danger { border-color: CanvasText; }
+}

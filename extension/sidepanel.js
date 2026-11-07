@@ -5,6 +5,9 @@ import { describePolicyStatus, describeQueueStatus, describeRecordResult } from 
 import { createTabs } from "./tabs.js";
 import { createImageGallery } from "./image-gallery.js";
 import { vaultNeedsAttention } from "./vault-client.js";
+import { checkHostCapabilities } from "./host-capabilities.js";
+import { ACTION_LABEL, DECISION_LABEL, SAME_STATE, createItemDialog, sameState } from "./item-dialog.js";
+import { evaluateUrls } from "./vault-items-client.js";
 
 const DEBOUNCE_MS = 200;
 
@@ -27,9 +30,17 @@ const policyRecheck = document.querySelector("#policy-recheck");
 const urlScroll = document.querySelector("#url-scroll");
 const settingsAttention = document.querySelector("#settings-attention");
 const settingsTab = document.querySelector("#tab-settings");
+const itemStatus = document.querySelector("#url-item-status");
 
 const send = chromeNativeTransport(chrome.runtime);
 const gate = createLatestGate();
+const openPrivacySettings = () => {
+  chrome.runtime.openOptionsPage().catch(() => {});
+};
+
+// Item actions (Issue #43) are offered only by a host that names `vault_items_v1`: null until known.
+let itemsSupported = null;
+const itemDialog = createItemDialog({ send, openPrivacySettings, onVaultUnavailable: () => void vaultPanel.refresh() });
 const tabs = createTabs(
   [
     { id: "url", tab: document.querySelector("#tab-url"), panel: document.querySelector("#panel-url"), scroller: urlScroll },
@@ -66,6 +77,9 @@ const gallery = createImageGallery({
   },
   openSettings: () => tabs.select("settings", { focus: true }),
   onVaultUnavailable: () => void vaultPanel.refresh(),
+  itemDialog,
+  itemsSupported: () => itemsSupported,
+  onPolicyChanged: () => void evaluateRows(rows()),
 });
 
 // Saves finish in the service worker; refresh the Image tab only when that does not disturb the user.
@@ -127,6 +141,7 @@ policyRecheck.addEventListener("click", () => void requestPolicy("policy-status"
 
 const state = {
   token: 0,
+  vaultToken: null, // the vault the shown results came from (null: a host that does not say)
   query: "",
   offset: 0,
   seenUrls: new Set(),
@@ -172,6 +187,148 @@ function timeLabel(prefix, iso) {
   return time;
 }
 
+// --- Item actions on a result (Issue #43) -----------------------------------------------------------
+
+const ROW_ACTIONS = ["never_save", "save_but_no_mcp", "delete", "publish"];
+let rowCounter = 0;
+let decisionStamp = 0;
+
+const rows = () => [...results.children];
+
+function actionsOf(li) {
+  const box = li.children[1];
+  return { box, badge: box.children[0], select: box.children[1] };
+}
+
+/** Shows the host's decision for a row, and disables what would not change it. */
+function applyDecision(li, decision, stamp) {
+  if (Number(li.dataset.decisionStamp ?? 0) > stamp) return;
+  li.dataset.decisionStamp = String(stamp);
+  const { badge, select } = actionsOf(li);
+  badge.dataset.decision = decision ?? "";
+  badge.textContent = decision ? DECISION_LABEL[decision] : "状態不明";
+  for (const option of select.children) {
+    if (!option.value) continue;
+    const same = decision ? sameState(option.value, decision) : false;
+    option.disabled = same;
+    option.textContent = same ? `${ACTION_LABEL[option.value]}（${SAME_STATE[option.value]}）` : ACTION_LABEL[option.value];
+  }
+}
+
+/** Asks the host how it judges the URLs of `lis`, in one batch; a later answer wins. */
+async function evaluateRows(lis) {
+  if (itemsSupported !== true || lis.length === 0) return;
+  const stamp = ++decisionStamp;
+  try {
+    const decisions = await evaluateUrls(lis.map((li) => li.dataset.url), { send });
+    for (const li of lis) if (results.contains(li)) applyDecision(li, decisions.get(li.dataset.url) ?? null, stamp);
+  } catch {
+    for (const li of lis) if (results.contains(li)) applyDecision(li, null, stamp);
+  }
+}
+
+function renderActions(item) {
+  rowCounter += 1;
+  const box = document.createElement("div");
+  box.className = "hit-actions";
+  box.hidden = itemsSupported !== true;
+  const badge = document.createElement("span");
+  badge.className = "hit-state";
+  badge.id = `hit-state-${rowCounter}`;
+  badge.textContent = "確認中…";
+  const select = document.createElement("select");
+  select.className = "item-action";
+  select.setAttribute("aria-label", `「${item.title || displayUrl(item.url)}」の操作`);
+  select.setAttribute("aria-describedby", badge.id);
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "操作を選択…";
+  select.append(placeholder);
+  for (const action of ROW_ACTIONS) {
+    const option = document.createElement("option");
+    option.value = action;
+    option.textContent = ACTION_LABEL[action];
+    select.append(option);
+  }
+  select.value = "";
+  box.append(badge, select);
+  return box;
+}
+
+function showItemStatus(text) {
+  itemStatus.textContent = text;
+  itemStatus.hidden = text === "";
+}
+
+/** The host deleted `url`: its row goes, and the next page starts one row earlier. */
+function removeRow(li, deleted) {
+  const index = rows().indexOf(li);
+  li.remove();
+  state.seenUrls.delete(li.dataset.url);
+  state.count = Math.max(0, state.count - 1);
+  state.offset = Math.max(0, state.offset - 1);
+  renderEmpty();
+  updateSummary(false);
+  showItemStatus(`Vaultから削除しました（閲覧記録${deleted.visits}件・スナップショット${deleted.tabSnapshots}件）。`);
+  const next = rows()[index] ?? rows()[index - 1];
+  (next?.querySelector("a.hit") ?? input).focus();
+}
+
+function chooseAction(select) {
+  const li = select.closest("li");
+  const action = select.value;
+  if (!li || !results.contains(li) || !ROW_ACTIONS.includes(action) || itemsSupported !== true) {
+    select.value = "";
+    return;
+  }
+  showItemStatus("");
+  const url = li.dataset.url;
+  const label = li.dataset.title || displayUrl(url);
+  const onClose = () => {
+    select.value = "";
+  };
+  if (action === "delete") {
+    itemDialog.openUrlDelete({
+      owner: "url",
+      url,
+      label,
+      vaultToken: state.vaultToken,
+      opener: select,
+      onClose,
+      onDeleted: (deleted) => removeRow(li, deleted),
+      onVaultMismatch: () => {
+        void runSearch();
+        showItemStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しています。");
+      },
+    });
+    return;
+  }
+  itemDialog.openPolicy({
+    owner: "url",
+    action,
+    targets: [{ url, label: "このページ" }],
+    targetText: `対象: ${label}\n${url}`,
+    opener: select,
+    onClose,
+    onApplied: (result) => {
+      showItemStatus(`「${ACTION_LABEL[action]}」を実行しました。現在の状態: ${DECISION_LABEL[result.decision]}`);
+      void evaluateRows(rows());
+      gallery.policyChanged();
+    },
+  });
+}
+
+/** Learns once whether the host offers item actions; asked again after a failure. */
+async function checkItems() {
+  if (itemsSupported !== null) return;
+  const answer = await checkHostCapabilities({ send });
+  if (!answer.ok || itemsSupported !== null) return;
+  itemsSupported = answer.vaultItems;
+  for (const li of rows()) actionsOf(li).box.hidden = !itemsSupported;
+  gallery.itemsChanged();
+  void evaluateRows(rows());
+}
+
 function renderItem(item) {
   const link = document.createElement("a");
   link.className = "hit";
@@ -194,24 +351,32 @@ function renderItem(item) {
 
   link.append(title, url, meta);
   const li = document.createElement("li");
-  li.append(link);
+  li.dataset.url = item.url;
+  li.dataset.title = item.title;
+  li.append(link, renderActions(item));
   return li;
 }
 
 function appendItems(items) {
   const fragment = document.createDocumentFragment();
+  const added = [];
   for (const item of items) {
     // Offsets can shift while new pages are recorded; never show a URL twice.
     if (state.seenUrls.has(item.url)) continue;
     state.seenUrls.add(item.url);
-    fragment.append(renderItem(item));
+    const li = renderItem(item);
+    added.push(li);
+    fragment.append(li);
     state.count += 1;
   }
   results.append(fragment);
+  void evaluateRows(added);
 }
 
 function clearResults() {
   gate.next(); // responses still in flight belong to the previous vault
+  itemDialog.cancel("url");
+  state.vaultToken = null;
   results.replaceChildren();
   state.seenUrls = new Set();
   state.count = 0;
@@ -244,6 +409,10 @@ async function runSearch() {
   try {
     const page = await searchPages({ query: state.query, offset: 0, limit: PAGE_SIZE }, { send });
     if (!gate.isCurrent(token)) return;
+    // The rows are replaced: a dialog about one of them would name a row that is gone.
+    itemDialog.cancel("url");
+    state.vaultToken = page.vaultToken;
+    void checkItems();
     results.replaceChildren();
     state.seenUrls = new Set();
     state.count = 0;
@@ -277,6 +446,11 @@ async function loadMore() {
   try {
     const page = await searchPages({ query: state.query, offset: state.offset, limit: PAGE_SIZE }, { send });
     if (!gate.isCurrent(token)) return;
+    if (page.vaultToken !== state.vaultToken) {
+      // Another vault became active (another window): its rows never join this list.
+      void runSearch();
+      return;
+    }
     state.offset += page.received;
     state.hasMore = page.hasMore;
     state.lastFailedAppend = false;
@@ -328,14 +502,16 @@ input.addEventListener("keydown", (event) => {
 });
 
 results.addEventListener("click", openResult);
+results.addEventListener("change", (event) => {
+  const select = event.target.closest?.("select.item-action");
+  if (select && results.contains(select)) chooseAction(select);
+});
 results.addEventListener("auxclick", openResult);
 retryButton.addEventListener("click", () => void (state.lastFailedAppend ? loadMore() : runSearch()));
 loadMoreButton.addEventListener("click", () => void loadMore());
 openVaultSettings.addEventListener("click", () => tabs.select("settings", { focus: true }));
 // The options page opens in a tab of its own (or the open one is focused).
-document.querySelector("#open-privacy-settings").addEventListener("click", () => {
-  chrome.runtime.openOptionsPage().catch(() => {});
-});
+document.querySelector("#open-privacy-settings").addEventListener("click", openPrivacySettings);
 
 // Load the next page automatically as the list end scrolls into view. The URL tab scrolls on its
 // own, so it is the observer root; while the tab is hidden nothing intersects.
@@ -369,6 +545,7 @@ recordButton.addEventListener("click", async () => {
 tabs.select("url");
 input.focus();
 void runSearch();
+void checkItems();
 void requestPolicy("policy-status");
 void vaultPanel.refresh().then((status) => {
   // Redirect (and move focus) only if the user has not started using the panel meanwhile; otherwise

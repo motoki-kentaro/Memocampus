@@ -27,6 +27,7 @@
         </div>
         <div id="record-status" class="record-status" role="status" hidden></div>
         <div id="queue-status" class="record-status" role="status" hidden></div>
+        <div id="url-item-status" class="record-status" role="status" aria-live="polite" hidden></div>
         <div id="policy-status" class="policy-status" role="alert" hidden>
           <p id="policy-message"></p>
           <button id="policy-initialize" type="button" hidden>プライバシー設定を初期化</button>
@@ -85,6 +86,17 @@
             <button id="gallery-tag-choose" type="button" class="secondary" aria-haspopup="dialog" aria-controls="gallery-tag-picker" disabled>既存のタグから選ぶ</button>
           </div>
           <p id="gallery-tags-message" class="gallery-tags-message" role="status" aria-live="polite"></p>
+        </section>
+        <section id="gallery-manage-section" class="gallery-manage" aria-labelledby="gallery-manage-title" hidden>
+          <h3 id="gallery-manage-title">管理</h3>
+          <select id="gallery-manage" class="item-action" aria-label="この画像の操作" aria-describedby="gallery-manage-note" disabled>
+            <option value="" selected>操作を選択…</option>
+            <option value="never_save">保存しないグループへ追加</option>
+            <option value="save_but_no_mcp">MCPサーバに見せないグループへ追加</option>
+            <option value="delete">Vaultから削除</option>
+            <option value="publish">公開</option>
+          </select>
+          <p id="gallery-manage-note" class="vault-meta" role="status" aria-live="polite"></p>
         </section>
         <h3 class="gallery-sources-title">保存履歴</h3>
         <ol id="gallery-sources" class="gallery-sources"></ol>
@@ -150,6 +162,28 @@
         <p class="vault-meta">保存しないグループ・MCPサーバに見せないグループ・基本保護を、別のタブで確認します。</p>
         <button id="open-privacy-settings" type="button">Privacy設定</button>
       </section>
+    </section>
+    <section id="item-dialog" class="item-dialog" role="dialog" aria-labelledby="item-dialog-title" aria-describedby="item-dialog-body" tabindex="-1" hidden>
+      <h2 id="item-dialog-title"></h2>
+      <p id="item-dialog-target" class="item-dialog-target"></p>
+      <fieldset id="item-dialog-urls" class="item-dialog-choice" hidden>
+        <legend>ルールを適用するURL</legend>
+        <div id="item-dialog-url-list" class="item-dialog-url-list"></div>
+      </fieldset>
+      <fieldset id="item-dialog-scope" class="item-dialog-choice" hidden>
+        <legend>適用範囲</legend>
+        <label><input id="item-scope-url" type="radio" name="item-scope" value="url" checked> このURLのみ</label>
+        <label><input id="item-scope-host" type="radio" name="item-scope" value="host"> 同じホスト全体（ほかのURLにも適用）</label>
+      </fieldset>
+      <div id="item-dialog-body" class="item-dialog-body" role="status" aria-live="polite"></div>
+      <label id="item-dialog-ack" class="item-dialog-ack" hidden><input id="item-dialog-ack-box" type="checkbox"> <span id="item-dialog-ack-text"></span></label>
+      <p id="item-dialog-error" class="item-dialog-error" role="alert" hidden></p>
+      <div class="item-dialog-actions">
+        <button id="item-dialog-confirm" type="button" disabled></button>
+        <button id="item-dialog-repreview" type="button" class="secondary" hidden>もう一度確認</button>
+        <button id="item-dialog-settings" type="button" class="secondary" hidden>Privacy設定を開く</button>
+        <button id="item-dialog-cancel" type="button" class="secondary">キャンセル</button>
+      </div>
     </section>
     <script type="module" src="sidepanel.js"></script>
   </body>

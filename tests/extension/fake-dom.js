@@ -154,6 +154,7 @@ export function createDocument() {
   });
   // Initial `hidden` state as written in sidepanel.html.
   for (const id of [
+    "url-item-status", "gallery-manage-section", "item-dialog", "item-dialog-urls", "item-dialog-scope", "item-dialog-ack", "item-dialog-error", "item-dialog-repreview", "item-dialog-settings",
     "panel-image", "panel-settings", "settings-attention", "error", "empty", "load-more", "open-vault-settings", "record-status", "queue-status", "policy-status", "policy-initialize", "vault-approval",
     "gallery-new-dot", "gallery-error", "gallery-open-settings", "gallery-empty", "gallery-more", "gallery-details", "gallery-sources-more", "gallery-menu",
     "gallery-filter", "gallery-tags-empty", "gallery-tag-picker", "gallery-tag-picker-more",
@@ -161,9 +162,18 @@ export function createDocument() {
     document.querySelector(`#${id}`).hidden = true;
   }
   // Initial `disabled` state as written in sidepanel.html.
-  for (const id of ["gallery-tag-filter", "gallery-tag-input", "gallery-tag-add", "gallery-tag-choose"]) {
+  for (const id of ["gallery-tag-filter", "gallery-tag-input", "gallery-tag-add", "gallery-tag-choose", "gallery-manage", "item-dialog-confirm"]) {
     document.querySelector(`#${id}`).disabled = true;
   }
+  // The options of the image's drop-down, and the checked scope, as written in sidepanel.html.
+  const manage = document.querySelector("#gallery-manage");
+  for (const [value, text] of [["", "操作を選択…"], ["never_save", "保存しないグループへ追加"], ["save_but_no_mcp", "MCPサーバに見せないグループへ追加"], ["delete", "Vaultから削除"], ["publish", "公開"]]) {
+    const option = new FakeElement(document, "option");
+    option.value = value;
+    option.textContent = text;
+    manage.append(option);
+  }
+  document.querySelector("#item-scope-url").checked = true;
   document.$ = (selector) => document.querySelector(selector);
   return document;
 }
@@ -198,14 +208,141 @@ export function imageSummary(blobId, lastSavedAt, extra = {}) {
   };
 }
 
+
+/** The vault token the fake host gives a vault (as for images). */
+export const tokenOf = (vault) => vault.charCodeAt(0).toString(16).padStart(2, "0").repeat(32);
+
+/**
+ * Item actions (Issue #43) in the fake host: a policy of exact URLs and hosts per layer, plus `broad`
+ * (URL -> layer) standing for rules or builtins that cover a URL and that publishing cannot remove.
+ */
+function createItemPolicy() {
+  return { revision: 1, never: [], private: [], neverHosts: [], privateHosts: [], broad: new Map() };
+}
+
+function itemDecision(policy, url) {
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return "never_save";
+  }
+  const broad = policy.broad.get(url);
+  if (broad === "neverSave" || policy.never.includes(url) || policy.neverHosts.includes(host)) return "never_save";
+  if (broad === "saveButNoMcp" || policy.private.includes(url) || policy.privateHosts.includes(host)) return "save_but_no_mcp";
+  return "allow";
+}
+
+/** The plan of one item action, as the real host shapes it. */
+function itemPlan(policy, { url, action, scope }) {
+  const current = itemDecision(policy, url);
+  const next = structuredClone({ ...policy, broad: [...policy.broad] });
+  next.broad = new Map(next.broad);
+  const changes = [];
+  let reason = null;
+  let blockers = [];
+  if (action === "publish") {
+    for (const [layer, key] of [["neverSave", "never"], ["saveButNoMcp", "private"]]) {
+      const index = next[key].indexOf(url);
+      if (index >= 0) {
+        changes.push({ op: "remove", layer, ruleIndex: index, rule: { kind: "exact", pattern: url } });
+        next[key].splice(index, 1);
+      }
+    }
+    if (current !== "allow" && itemDecision(next, url) !== "allow") {
+      reason = "publish_blocked";
+      const layer = policy.broad.get(url) ?? (itemDecision(next, url) === "never_save" ? "neverSave" : "saveButNoMcp");
+      blockers = [{ layer, ruleIndex: 0, kind: "pattern" }];
+    }
+    if (current === "allow") changes.length = 0;
+  } else {
+    const layer = action === "never_save" ? "neverSave" : "saveButNoMcp";
+    const key = scope === "host" ? (action === "never_save" ? "neverHosts" : "privateHosts") : action === "never_save" ? "never" : "private";
+    const value = scope === "host" ? new URL(url).hostname : url;
+    if (!next[key].includes(value)) {
+      next[key].push(value);
+      changes.push({ op: "add", layer, rule: { kind: scope === "host" ? "pattern" : "exact", pattern: value } });
+    }
+  }
+  const expected = reason ? current : itemDecision(next, url);
+  return { current, expected, changes, reason, blockers, next };
+}
+
+/** `capabilities` names what the fake host offers; item actions only with "vault_items_v1". */
+function handleItems(host, message) {
+  const type = `${message.type}_result`;
+  const fail = (error) => ({ ok: false, type, requestId: message.requestId, error });
+  const reply = (fields) => ({ ok: true, type, requestId: message.requestId, ...fields });
+  if (message.type === "host_capabilities") return reply({ capabilities: host.capabilities });
+  if (host.itemErrors[message.type]) {
+    const error = host.itemErrors[message.type];
+    delete host.itemErrors[message.type];
+    return fail(error);
+  }
+  const policy = host.itemPolicy;
+  const etag = `etag-${policy.revision}`;
+  if (message.type === "policy_evaluate_batch") {
+    return reply({ etag, revision: policy.revision, items: message.items.map((item) => ({ id: item.id, decision: itemDecision(policy, item.url) })) });
+  }
+  if (message.type === "policy_item_preview" || message.type === "policy_item_apply") {
+    const plan = itemPlan(policy, message);
+    const echo = { url: message.url, action: message.action, scope: message.scope };
+    if (message.type === "policy_item_preview") {
+      return reply({ etag, revision: policy.revision, ...echo, current: plan.current, expected: plan.expected, changes: plan.changes, affectsOtherUrls: message.scope === "host", executable: plan.reason === null, ...(plan.reason ? { reason: plan.reason, blockers: plan.blockers } : {}) });
+    }
+    if (message.expectedEtag !== etag) return fail("policy_conflict");
+    if (plan.reason) return fail(plan.reason);
+    if (plan.changes.length > 0) host.itemPolicy = { ...plan.next, revision: policy.revision + 1 };
+    host.policyWrites += plan.changes.length > 0 ? 1 : 0;
+    return reply({ etag: `etag-${host.itemPolicy.revision}`, revision: host.itemPolicy.revision, ...echo, previous: plan.current, decision: itemDecision(host.itemPolicy, message.url), changed: plan.changes.length > 0, changes: plan.changes });
+  }
+  if (!host.active) return fail("vault_not_configured");
+  const vault = host.active;
+  const vaultToken = tokenOf(vault);
+  if (message.type === "url_delete_preview" || message.type === "url_delete") {
+    const stored = host.vaults[vault].filter((page) => page.url === message.url).length;
+    const counts = { visits: stored, tabSnapshots: 0, pageMetadata: stored, navigations: 0, navigationSourcesCleared: host.navigationSources ?? 0, imageSavesKept: host.imageSavesKept ?? 0 };
+    if (message.type === "url_delete_preview") return reply({ vaultToken, url: message.url, counts, irreversible: true });
+    if (message.vaultToken !== vaultToken) return fail("vault_switched");
+    host.vaults[vault] = host.vaults[vault].filter((page) => page.url !== message.url);
+    host.deletedUrls.push(message.url);
+    return reply({ vaultToken, url: message.url, deleted: counts, irreversible: true });
+  }
+  if (message.type === "image_delete_preview" || message.type === "image_delete") {
+    const all = host.images[vault] ?? [];
+    const item = all.find((candidate) => candidate.blobId === message.blobId && candidate.sha256 === message.sha256);
+    if (message.type === "image_delete" && message.vaultToken !== vaultToken) return fail("vault_switched");
+    if (!item) return fail("blob_missing");
+    const tags = host.tags[vault]?.[item.blobId] ?? [];
+    const others = Object.entries(host.tags[vault] ?? {}).filter(([id]) => Number(id) !== item.blobId).flatMap(([, names]) => names);
+    const counts = { saves: item.sources?.length ?? item.saveCount, thumbnails: item.hasThumbnail ? 1 : 0, tagLinks: tags.length, tagsRemoved: tags.filter((name) => !others.includes(name)).length };
+    const fields = { vaultToken, blobId: item.blobId, sha256: item.sha256, irreversible: true };
+    if (message.type === "image_delete_preview") return reply({ ...fields, byteLength: item.byteLength, counts });
+    host.images[vault] = all.filter((candidate) => candidate !== item);
+    if (host.tags[vault]) delete host.tags[vault][item.blobId];
+    host.deletedImages.push(item.blobId);
+    return reply({ ...fields, deleted: counts });
+  }
+  return fail("unknown_type");
+}
+
+const ITEM_TYPES = new Set(["host_capabilities", "policy_evaluate_batch", "policy_item_preview", "policy_item_apply", "url_delete_preview", "url_delete", "image_delete_preview", "image_delete"]);
+
 const PNG_THUMBNAIL = Buffer.from("89504e470d0a1a0a0000000d4948445200000004000000020806000000000000000000000049454e44ae426082", "hex").toString("base64");
 
 /**
  * Native host stand-in: `vaults` maps a vault path to its pages; `active` is the open vault.
  * `images` maps a vault path to its image summaries (newest first) for the Image tab.
  */
-export function createHost({ vaults, active, statusDelay = 0, images = {}, policyStatus = null }) {
+export function createHost({ vaults, active, statusDelay = 0, images = {}, policyStatus = null, capabilities = ["navigation_v1"], forward = null }) {
   const host = {
+    capabilities,
+    itemPolicy: createItemPolicy(),
+    itemErrors: {}, // type -> error code, answered once
+    itemDelay: 0,
+    policyWrites: 0,
+    deletedUrls: [],
+    deletedImages: [],
     policyStatus,
     vaults,
     active,
@@ -289,12 +426,16 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
         const vault = host.active;
         const query = (message.query || "").toLowerCase();
         const hits = host.vaults[vault].filter((page) => !query || page.title.toLowerCase().includes(query) || page.url.includes(query));
-        const response = reply({ type: "search_pages_result", items: hits.slice(message.offset, message.offset + message.limit), hasMore: hits.length > message.offset + message.limit });
+        const response = reply({ type: "search_pages_result", vaultToken: tokenOf(vault), items: hits.slice(message.offset, message.offset + message.limit), hasMore: hits.length > message.offset + message.limit });
         return new Promise((resolve) => setTimeout(() => resolve(response), host.searchDelay[vault] ?? 0));
       }
       if (message.type === "vault_status") {
         const response = reply({ type: "vault_result", status: host.status() });
         return new Promise((resolve) => setTimeout(() => resolve(response), host.statusDelay));
+      }
+      if (ITEM_TYPES.has(message.type)) {
+        const response = handleItems(host, message);
+        return new Promise((resolve) => setTimeout(() => resolve(response), host.itemDelay));
       }
       if (message.type.startsWith("image_")) {
         const type = `${message.type}_result`;
@@ -353,6 +494,13 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
       return { ok: false, type: "vault_result", requestId: message.requestId, error: "unknown_type" };
     },
   };
+  // `forward`: every message goes to it instead (a real host), from the panel's first request on.
+  if (forward) {
+    host.handle = (message) => {
+      host.requests.push(message);
+      return forward(message);
+    };
+  }
   return host;
 }
 

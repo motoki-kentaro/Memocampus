@@ -17,8 +17,13 @@
 //   export, details) is shared. Tag writes carry the vault token of the list they were made from,
 //   so the host refuses them in any other vault. The filter, the picker and the details belong to
 //   the vault: a vault change drops all of them. Tag names are shown as the host normalized them.
+// - Managing (Issue #43): the details offer one drop-down of four actions. Deleting is the image
+//   itself (its id, bytes and the gallery's vault token); a policy change is for one URL of its save
+//   history, which the person picks. Both go through the shared confirmation dialog (item-dialog.js).
 
-import { SearchError, VAULT_UNAVAILABLE_CODES } from "./search-client.js";
+import { SearchError, VAULT_UNAVAILABLE_CODES, isWebUrl } from "./search-client.js";
+import { ACTION_LABEL, DECISION_LABEL, SAME_STATE, sameState } from "./item-dialog.js";
+import { evaluateUrls } from "./vault-items-client.js";
 import {
   THUMBNAIL_BATCH,
   changeImageTag,
@@ -55,7 +60,17 @@ const browserMedia = () => ({
   OffscreenCanvas: globalThis.OffscreenCanvas,
 });
 
-export function createImageGallery({ send, isActive, openUrl, openSettings, onVaultUnavailable, media = browserMedia }) {
+export function createImageGallery({
+  send,
+  isActive,
+  openUrl,
+  openSettings,
+  onVaultUnavailable,
+  media = browserMedia,
+  itemDialog = null,
+  itemsSupported = () => false,
+  onPolicyChanged = () => {},
+}) {
   const scroller = $("#panel-image");
   const grid = $("#gallery-grid");
   const summary = $("#gallery-summary");
@@ -94,6 +109,9 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
   const pickerList = $("#gallery-tag-picker-list");
   const pickerMore = $("#gallery-tag-picker-more");
   const pickerClose = $("#gallery-tag-picker-close");
+  const manageSection = $("#gallery-manage-section");
+  const manageSelect = $("#gallery-manage");
+  const manageNote = $("#gallery-manage-note");
 
   let generation = 0;
   let tiles = new Map(); // blobId -> { item, li, button, img, status, url }
@@ -104,7 +122,7 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
   let vaultToken = null;
   let queue = new Set();
   let batchTimer = null;
-  let selected = null; // { blobId, item, next, tags: string[] | null, busy }
+  let selected = null; // { blobId, item, next, tags: string[] | null, busy, sources, sourcesLoaded, decisions, managing }
   let filter = null; // { tag }: the grid shows the images with this tag (normalized once the host answered)
   let pickerState = null; // { mode: "filter" | "add", next, loading, opener }
   let hasNew = false;
@@ -167,6 +185,9 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     started = false;
     selected = null;
     details.hidden = true;
+    itemDialog?.cancel("image");
+    resetManage();
+    updateManage();
     tagsList.replaceChildren();
     setTagsMessage("");
     closePicker({ restoreFocus: false });
@@ -504,6 +525,207 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
   globalThis.addEventListener?.("blur", () => closeMenu({ restoreFocus: false }));
   globalThis.addEventListener?.("resize", () => closeMenu({ restoreFocus: false }));
 
+  // --- Managing the image (Issue #43) ----------------------------------------------------------
+  // A policy rule is for a URL, never for the image itself: the person picks which URL of the save
+  // history (image, page or frame URL) a rule is for. Deleting is the image itself.
+
+  const MANAGE_ACTIONS = ["never_save", "save_but_no_mcp", "delete", "publish"];
+  const MAX_SOURCE_PAGES = 50;
+  const URL_KIND = { imageUrl: "画像URL", pageUrl: "ページURL", frameUrl: "フレームURL" };
+
+  /** The URLs of `sources` a rule can be for, each with what it is and how many saves name it. */
+  function candidates(sources) {
+    const found = new Map();
+    for (const source of sources) {
+      for (const key of ["imageUrl", "pageUrl", "frameUrl"]) {
+        const url = source[key];
+        if (!isWebUrl(url)) continue;
+        const entry = found.get(url) ?? { url, kinds: new Set(), saves: 0 };
+        entry.kinds.add(URL_KIND[key]);
+        entry.saves += 1;
+        found.set(url, entry);
+      }
+    }
+    return [...found.values()].map((entry) => ({ url: entry.url, label: `${[...entry.kinds].join("・")}（保存${entry.saves}件）` }));
+  }
+
+  /** What MCP needs besides the policy: saves the person allowed, not incognito. */
+  function publicationNote(sources) {
+    const allowed = sources.filter((source) => source.mcpPublic && !source.incognito).length;
+    const base = "MCPサーバに画像が出るのは、保存履歴で「MCPへの公開を許可」がONで、その保存の画像URL・ページURL・フレームURLがすべて公開のときだけです。";
+    return allowed === 0
+      ? `${base}この画像には公開を許可した保存履歴がないため、URLを公開してもMCPサーバには出ません（公開の許可はここでは変更しません）。`
+      : `${base}この画像で公開を許可した保存履歴: ${allowed}/${sources.length}件。`;
+  }
+
+  function setManageNote(text) {
+    manageNote.textContent = text;
+  }
+
+  /** Shows what the host says of the image's URLs, and enables what can be chosen now. */
+  function updateManage() {
+    const supported = itemsSupported();
+    manageSection.hidden = supported === null;
+    const state = selected;
+    if (supported !== true) {
+      manageSelect.disabled = true;
+      if (supported === false) setManageNote("Native Hostを更新すると、ここから画像の管理（削除・ルールの追加・公開）ができます。");
+      return;
+    }
+    manageSelect.disabled = !state || !vaultToken || Boolean(state.managing);
+    if (!state) return;
+    const urls = candidates(state.sources);
+    const complete = state.next === null && state.sourcesLoaded;
+    for (const option of manageSelect.children) {
+      if (!option.value || option.value === "delete") continue;
+      let reason = null;
+      if (complete && urls.length === 0) reason = "対象にできるURLがありません";
+      else if (complete && urls.every((choice) => sameState(option.value, state.decisions.get(choice.url)))) reason = `すべてのURLが${SAME_STATE[option.value]}`;
+      option.disabled = reason !== null;
+      option.textContent = reason ? `${ACTION_LABEL[option.value]}（${reason}）` : ACTION_LABEL[option.value];
+    }
+    if (state.managing) return;
+    if (!state.sourcesLoaded) {
+      setManageNote("");
+      return;
+    }
+    const tally = { allow: 0, save_but_no_mcp: 0, never_save: 0 };
+    for (const choice of urls) {
+      const decision = state.decisions.get(choice.url);
+      if (decision) tally[decision] += 1;
+    }
+    const known = Object.values(tally).reduce((a, b) => a + b, 0);
+    const states = known === 0 && urls.length > 0 ? "状態を確認できません" : `公開 ${tally.allow}・MCPサーバに見せない ${tally.save_but_no_mcp}・保存しない ${tally.never_save}`;
+    setManageNote(urls.length === 0 ? "この画像の保存履歴には、ルールの対象にできるURLがありません。" : `この画像のURL（${state.next ? "読み込んだ保存履歴の範囲" : "保存履歴のすべて"}）: ${states}`);
+  }
+
+  /** Asks the host how it judges the URLs of the loaded save history. */
+  async function evaluateSources(state) {
+    const token = generation;
+    const urls = candidates(state.sources).map((choice) => choice.url);
+    if (urls.length === 0 || itemsSupported() !== true) return updateManage();
+    const stamp = (state.stamp = (state.stamp ?? 0) + 1);
+    try {
+      const decisions = await evaluateUrls(urls, { send });
+      if (token !== generation || selected !== state || state.stamp !== stamp) return;
+      state.decisions = decisions;
+    } catch {
+      if (token !== generation || selected !== state || state.stamp !== stamp) return;
+      state.decisions = new Map();
+    }
+    updateManage();
+  }
+
+  /** Every save of the image, for a choice of URL that names no save it did not see. */
+  async function allSources(state) {
+    const all = [];
+    let cursor = null;
+    for (let page = 0; page < MAX_SOURCE_PAGES; page += 1) {
+      const answer = await listSources(state.blobId, cursor, { send });
+      if (answer.vaultToken !== vaultToken) throw new SearchError("vault_switched");
+      all.push(...answer.items);
+      cursor = answer.next;
+      if (!cursor) return all;
+    }
+    return null;
+  }
+
+  function resetManage() {
+    manageSelect.value = "";
+  }
+
+  async function choosePolicy(state, action) {
+    const token = generation;
+    state.managing = true;
+    setManageNote("保存履歴のURLを確認しています…");
+    updateManage();
+    let sources;
+    let decisions;
+    try {
+      sources = await allSources(state);
+      if (token !== generation || selected !== state) return;
+      if (sources === null) {
+        setManageNote("保存履歴が多すぎるため、ここからはルールを追加できません。Privacy設定でURLを指定してください。");
+        return;
+      }
+      const urls = candidates(sources).map((choice) => choice.url);
+      decisions = urls.length > 0 ? await evaluateUrls(urls, { send }) : new Map();
+      if (token !== generation || selected !== state) return;
+    } catch (error) {
+      if (token !== generation || selected !== state) return;
+      if (error instanceof SearchError && error.code === "vault_switched") {
+        vaultMismatch();
+        return;
+      }
+      setManageNote(error instanceof SearchError ? error.message : "保存履歴を確認できませんでした。");
+      return;
+    } finally {
+      if (token === generation && selected === state) {
+        state.managing = false;
+        if (manageSelect.value === action && itemDialog.owner !== "image") resetManage();
+        updateManage();
+      }
+    }
+    const targets = candidates(sources).map((choice) => {
+      const decision = decisions.get(choice.url) ?? null;
+      return { ...choice, decision, unavailable: decision && sameState(action, decision) ? SAME_STATE[action] : null };
+    });
+    if (targets.length === 0 || targets.every((choice) => choice.unavailable)) {
+      setManageNote(targets.length === 0 ? "この画像の保存履歴には、ルールの対象にできるURLがありません。" : `この画像のURLはすべて${SAME_STATE[action]}です。`);
+      resetManage();
+      return;
+    }
+    itemDialog.openPolicy({
+      owner: "image",
+      action,
+      targets,
+      targetText: `対象: ${selected.item ? tileLabel(selected.item) : "画像"}\nルールは画像ではなく、選んだURLに適用されます。`,
+      note: publicationNote(sources),
+      opener: manageSelect,
+      onClose: resetManage,
+      onApplied: (result) => {
+        showStatus(`「${ACTION_LABEL[action]}」を実行しました（${result.url}）。現在の状態: ${DECISION_LABEL[result.decision]}`);
+        if (selected) void evaluateSources(selected);
+        onPolicyChanged();
+      },
+    });
+    manageSelect.value = action;
+  }
+
+  function chooseManage() {
+    const state = selected;
+    const action = manageSelect.value;
+    if (!state || !MANAGE_ACTIONS.includes(action) || itemsSupported() !== true || !vaultToken || state.managing) {
+      resetManage();
+      return;
+    }
+    if (action !== "delete") {
+      void choosePolicy(state, action);
+      return;
+    }
+    const { item, blobId } = state;
+    itemDialog.openImageDelete({
+      owner: "image",
+      item,
+      label: tileLabel(item),
+      vaultToken,
+      opener: manageSelect,
+      onClose: resetManage,
+      onDeleted: () => {
+        // Only now, after the host committed: the tile, the details and any list of tags go.
+        if (pickerState) closePicker({ restoreFocus: false });
+        if (selected?.blobId === blobId) closeDetails();
+        removeTile(blobId);
+        showStatus("画像をVaultから削除しました。");
+        focusTile(blobId);
+      },
+      onVaultMismatch: () => {
+        void vaultMismatch();
+        showStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しました。", true);
+      },
+    });
+  }
+
   // --- Details (save history) ----------------------------------------------------------------
 
   function sourceLine(label, url) {
@@ -590,7 +812,10 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
       }
       sourcesList.append(fragment);
       state.next = page.next;
+      state.sources.push(...page.items);
+      state.sourcesLoaded = true;
       sourcesMore.hidden = !page.next;
+      void evaluateSources(state);
     } catch (error) {
       if (token !== generation || selected !== state) return;
       const li = document.createElement("li");
@@ -605,7 +830,10 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     const tile = tiles.get(blobId);
     if (!tile) return;
     const { item } = tile;
-    selected = { blobId, item, next: null, tags: null, busy: false };
+    if (selected?.blobId !== blobId) itemDialog?.cancel("image");
+    selected = { blobId, item, next: null, tags: null, busy: false, sources: [], sourcesLoaded: false, decisions: new Map(), managing: false };
+    resetManage();
+    setManageNote("");
     detailsMeta.textContent = `${shortMime(item.mimeType)}（${item.mimeType}）・${item.width}×${item.height}・${Math.max(1, Math.round(item.byteLength / 1024))} KB・保存${item.saveCount}回・最終保存 ${formatFullDate(new Date(item.lastSavedAt).toISOString())}`;
     sourcesList.replaceChildren();
     sourcesMore.hidden = true;
@@ -616,6 +844,7 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     if (pickerState?.mode === "add") closePicker({ restoreFocus: false });
     details.hidden = false;
     updateTagControls();
+    updateManage();
     // Only now, never when the history arrives later: by then the user may be elsewhere.
     if (keyboard) details.focus();
     void loadTags(selected);
@@ -627,6 +856,8 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     const blobId = selected?.blobId;
     details.hidden = true;
     selected = null;
+    itemDialog?.cancel("image");
+    resetManage();
     if (pickerState?.mode === "add") closePicker({ restoreFocus: false });
     updateTagControls();
     if (hadFocus && blobId !== undefined) focusTile(blobId);
@@ -952,6 +1183,7 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     if (box) void changePublication(box);
   });
   sourcesMore.addEventListener("click", () => selected && void loadSources(selected));
+  manageSelect.addEventListener("change", () => chooseManage());
   detailsClose.addEventListener("click", () => closeDetails());
   details.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
@@ -1009,6 +1241,15 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
         return;
       }
       if (scroller.scrollTop === 0 && details.hidden && picker.hidden && !refreshing) void refresh();
+    },
+    /** Whether the host offers item actions became known. */
+    itemsChanged() {
+      updateManage();
+      if (selected) void evaluateSources(selected);
+    },
+    /** The policy changed (in the URL tab): the open image's URLs are judged again. */
+    policyChanged() {
+      if (selected) void evaluateSources(selected);
     },
     get size() {
       return tiles.size;

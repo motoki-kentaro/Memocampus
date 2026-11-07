@@ -135,7 +135,7 @@ export function validateAnswer(policy) {
   const errors = [];
   for (const layer of ["neverSave", "saveButNoMcp"]) {
     policy.layers[layer].rules.forEach((rule, ruleIndex) => {
-      if (rule.pattern.startsWith("bad")) errors.push({ layer, ruleIndex, code: rule.kind === "regex" ? "invalid_regex" : "invalid_pattern" });
+      if (rule.pattern.startsWith("bad")) errors.push({ layer, ruleIndex, code: { regex: "invalid_regex", exact: "invalid_exact_url" }[rule.kind] ?? "invalid_pattern" });
     });
   }
   return errors.length ? { ok: false, error: "policy_invalid", errors } : { ok: true, schemaVersion: 2, engineVersion: 2 };
@@ -185,7 +185,7 @@ export const flush = () => settle(0);
 
 /** Chooses the checker's kind as a browser does: one radio of the group checked, then "change". */
 export function chooseKind($, kind) {
-  for (const other of ["pattern", "regex", "domainWildcard"]) $(`checker-kind-${other}`).checked = other === kind;
+  for (const other of ["pattern", "regex", "domainWildcard", "exact"]) $(`checker-kind-${other}`).checked = other === kind;
   $(`checker-kind-${kind}`).dispatch("change");
 }
 /** Fills the checker and asks the host; the reply has arrived when this resolves. */
