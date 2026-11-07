@@ -21,7 +21,7 @@ rules for a tag, and native host messages. Slice 2 is the Image tab: editing tag
 | D2 | Migration | **None. Schema 7 exists only by creation.** A schema 6 vault is refused (`vault_schema_mismatch`) and left as it is, like every older one. Create a new vault after updating. |
 | D3 | Case | **Case-insensitive, stored lowercase.** "Cat", "CAT" and "cat" are one tag, shown as "cat". |
 | D4 | Unused tags | **Removed automatically**, by the vault itself (a trigger), in the same transaction as the last link. |
-| D5 | Removing an image | Its tags go with it (`ON DELETE CASCADE`), and through D4 every tag no other image has. There is no host command that removes an image yet; this is the vault's own guarantee for when there is. |
+| D5 | Removing an image | Its tags go with it (`ON DELETE CASCADE`), and through D4 every tag no other image has. `image_delete` (Issue #43) removes an image and relies on exactly this. |
 | D6 | Limits | 64 characters per tag, 64 tags per image. |
 | D7 | Incognito images | Can be tagged like any other: a tag is local, holds no URL and is never published. |
 
@@ -211,4 +211,4 @@ With the extension and host of this branch, in a **test vault** (Settings â†’ å 
 - Tags shown on tiles (would need tags in `image_list` items, to avoid one request per tile).
 - Search by several tags, an "untagged" filter, bulk editing.
 - MCP: only after a decision on whether and which tags may be published.
-- An image deletion command will rely on D5 as it is.
+- Image deletion (`image_delete`, Issue #43 Slice 1) relies on D5 as it is.

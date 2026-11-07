@@ -118,6 +118,13 @@ and shows a dot when new images were saved while you were scrolled down.
 - One tag at a time (no AND/OR), no tag input when saving, and **the MCP server does not read tags.** A tag no image
   has is removed automatically. See `docs/issue-044-image-tags.md`.
 
+**Managing one item (#43: native host only).** The host can add one URL to Never Save or Save but no MCP
+(by default exactly that URL, as an `exact` rule, which the settings page also offers as 「Exact URL」; its whole host
+only when asked), "publish" a URL again by removing only its URL-exact
+rules (refused while a broader rule or a builtin keeps it private), and permanently delete one URL or one image from
+the active vault, each after a preview. There is **no side panel UI for this yet.** See
+`docs/issue-043-vault-item-management.md`.
+
 Design and protocol: `docs/image-vault-design.md`. Manual test checklist: `docs/image-vault-dogfood-slice2.md`.
 
 ### Permissions

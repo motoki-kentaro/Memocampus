@@ -1,6 +1,7 @@
 //! URL/rule contract; see docs/issue-010-privacy-policy.md. Version 1 stores each rule as a string,
 //! version 2 as a typed rule (docs/issue-025-policy-engine.md). A pattern means the same in both;
-//! a regex, version 2 only, meets the whole URL; a domain wildcard, version 2 only, meets the host.
+//! a regex, version 2 only, meets the whole URL; a domain wildcard, version 2 only, meets the host;
+//! an exact rule, version 2 only, is one whole URL (`exact_url_key`).
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -71,6 +72,10 @@ pub enum TypedRule {
     DomainWildcard {
         pattern: String,
     },
+    /// One whole URL, compared as `exact_url_key` writes it: no wildcard, no regex, no prefix.
+    Exact {
+        pattern: String,
+    },
 }
 /// A pattern in the current form (version 2). A version 1 rule is written `RuleSpec::Text`.
 impl From<&str> for RuleSpec {
@@ -88,6 +93,7 @@ enum Form<'a> {
     Pattern(&'a str, Syntax),
     Regex(&'a str),
     Domain(&'a str),
+    Exact(&'a str),
 }
 impl RuleSpec {
     fn form(&self) -> Form<'_> {
@@ -96,6 +102,7 @@ impl RuleSpec {
             Self::Typed(TypedRule::Pattern { pattern }) => Form::Pattern(pattern, Syntax::Version2),
             Self::Typed(TypedRule::Regex { pattern }) => Form::Regex(pattern),
             Self::Typed(TypedRule::DomainWildcard { pattern }) => Form::Domain(pattern),
+            Self::Typed(TypedRule::Exact { pattern }) => Form::Exact(pattern),
         }
     }
     /// The code of `error` for this rule: what `problems` and the rule test say of it.
@@ -103,6 +110,7 @@ impl RuleSpec {
         match (self.form(), error) {
             (_, Error::InvalidUrl) => "invalid_url",
             (Form::Pattern(..), _) => "invalid_pattern",
+            (Form::Exact(_), _) => "invalid_exact_url",
             (Form::Domain(_), Error::UnapprovedDomain) => "domain_wildcard_not_approved",
             (Form::Domain(_), Error::SuffixListUnavailable) => "psl_unavailable",
             (Form::Domain(_), _) => "invalid_domain_wildcard",
@@ -317,6 +325,7 @@ impl Policy {
                     Form::Pattern(pattern, syntax) => Rule::parse_in(pattern, syntax).err(),
                     Form::Regex(pattern) => compile_regex(pattern, budget).err(),
                     Form::Domain(pattern) => domain_of(pattern, approvals).err(),
+                    Form::Exact(pattern) => exact_url_key(pattern).err(),
                 };
                 found.extend(error.map(|error| at(rule.error_code(error))));
             }
@@ -372,11 +381,13 @@ impl Policy {
 /// Patterns of one zone by host, so a URL meets only the patterns of its own host and parent
 /// domains. A `None` path covers the whole host. Regexes have no host and meet every URL. A domain
 /// wildcard is a wildcard host with no path: it is judged exactly as the pattern `*.domain` is.
+/// Exact rules are whole URLs (`exact_url_key`), looked up as one string: no regex, no budget.
 #[derive(Debug, Default)]
 struct Zone {
     exact: HashMap<String, Vec<Option<PathRule>>>,
     wildcard: HashMap<String, Vec<Option<PathRule>>>,
     regexes: Vec<Regex>,
+    urls: HashSet<String>,
 }
 impl Zone {
     fn add(&mut self, rule: &str, syntax: Syntax) -> Result<(), Error> {
@@ -413,12 +424,17 @@ impl Zone {
                     .push(None);
                 Ok(())
             }
+            Form::Exact(pattern) => {
+                self.urls.insert(exact_url_key(pattern)?);
+                Ok(())
+            }
         })
     }
     /// A pattern meets any of the views of the path, a regex any of the views of the URL. Where a
     /// rule of the zone matches decides nothing else: the zone matches.
-    fn matches(&self, host: &str, paths: &[&str], urls: &[&str]) -> bool {
-        self.matches_patterns(host, paths)
+    fn matches(&self, host: &str, paths: &[&str], urls: &[&str], key: &str) -> bool {
+        self.urls.contains(key)
+            || self.matches_patterns(host, paths)
             || self
                 .regexes
                 .iter()
@@ -499,11 +515,17 @@ impl CompiledPolicy {
         let Ok((url, parsed)) = parse_url(input) else {
             return Decision::NeverSave;
         };
-        let dotless = if self.blind.regexes.is_empty() && self.private.regexes.is_empty() {
-            None
-        } else {
+        let whole_url_rules = [&self.blind, &self.private]
+            .iter()
+            .any(|zone| !zone.regexes.is_empty() || !zone.urls.is_empty());
+        let dotless = if whole_url_rules {
             without_trailing_dots(&parsed)
+        } else {
+            None
         };
+        // What an exact rule is compared with: the URL as the parser writes it, without the
+        // trailing dots of its host (`exact_url_key`).
+        let key = dotless.as_deref().unwrap_or(parsed.as_str());
         let whole = [parsed.as_str(), dotless.as_deref().unwrap_or_default()];
         let urls = if dotless.is_some() {
             &whole[..]
@@ -517,7 +539,7 @@ impl CompiledPolicy {
         } else {
             &both[..1]
         };
-        if self.blind.matches(&url.host, paths, urls)
+        if self.blind.matches(&url.host, paths, urls, key)
             || (self.auth_paths
                 && BUILTINS
                     .auth_paths
@@ -527,7 +549,7 @@ impl CompiledPolicy {
         {
             return Decision::NeverSave;
         }
-        if self.private.matches(&url.host, paths, urls) {
+        if self.private.matches(&url.host, paths, urls, key) {
             return Decision::SaveButNoMcp;
         }
         Decision::None
@@ -655,6 +677,21 @@ fn parse_url(input: &str) -> Result<(NormalizedUrl, Url), Error> {
         fragment: url.fragment().unwrap_or("").into(),
     };
     Ok((normalized, url))
+}
+/// The form an exact rule and a judged URL are compared in: the URL as the parser writes it (the
+/// WHATWG serialization of the `url` crate, as a regex sees it: scheme and host in lower case, IDN
+/// as punycode, the default port dropped, dot segments resolved, path, query and fragment otherwise
+/// as written, percent-encoding not decoded), without the trailing dots of its host, which every
+/// rule ignores. Two URLs are one exact URL only if these strings are equal. A rule must be an
+/// `http(s)` URL the policy can judge (`normalize_url`); anything else is `InvalidPolicy`, which
+/// makes the whole policy unusable (fail closed), never an ignored rule.
+pub fn exact_url_key(raw: &str) -> Result<String, Error> {
+    let parsed = Url::parse(raw).map_err(|_| Error::InvalidPolicy)?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(Error::InvalidPolicy);
+    }
+    let (_, judged) = parse_url(raw).map_err(|_| Error::InvalidPolicy)?;
+    Ok(without_trailing_dots(&judged).unwrap_or_else(|| judged.as_str().to_owned()))
 }
 /// The URL with the trailing dots of its host removed, if it has any: `example.com.` is the
 /// host `example.com` to a pattern, and must not slip past a regex written for that.

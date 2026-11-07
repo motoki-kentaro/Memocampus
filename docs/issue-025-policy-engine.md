@@ -2,6 +2,7 @@
 
 Status: **Slices 1 to 5 merged; Slice 6 implemented, for review.** Version 2 has patterns with exact paths and a wildcard in the last path segment, path rules also meet the path with its slashes collapsed, and regex rules meet the whole URL. The host offers messages to validate, test and apply a draft and to start a new install; no settings UI exists.
 Since then: **Domain Wildcard rules** (`domainWildcard`), and the **PSL override** (approved domains), at the end of this file, for review.
+**Exact rules** (`exact`, one whole URL; Issue #43 Slice 2) are described in `docs/issue-043-vault-item-management.md`.
 Labels: **[verified]** was run, **[code]** was read in the source, **[inferred]** is reasoning not run.
 
 ## Slice 1: what changed

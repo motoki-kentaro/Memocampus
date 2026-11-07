@@ -2152,3 +2152,300 @@ fn the_engine_reads_no_store() {
         }
     }
 }
+
+// --- Exact rules (Issue #43, Slice 2) -------------------------------------------------------------
+
+fn exact_rule(url: &str) -> RuleSpec {
+    RuleSpec::Typed(TypedRule::Exact {
+        pattern: url.into(),
+    })
+}
+
+fn typed_policy(never: &[RuleSpec], private: &[RuleSpec]) -> Policy {
+    let mut policy = Policy::default();
+    policy.layers.never_save.rules = never.to_vec();
+    policy.layers.save_but_no_mcp.rules = private.to_vec();
+    policy
+}
+
+fn blind(rules: &[RuleSpec]) -> CompiledPolicy {
+    CompiledPolicy::compile(&typed_policy(rules, &[])).unwrap()
+}
+
+#[test]
+fn an_exact_rule_is_one_whole_url_as_the_parser_writes_it() {
+    let rule = "https://example.com/thread/123?page=3#c1";
+    let compiled = blind(&[exact_rule(rule)]);
+    // The same URL: as the parser writes it, or in a form it writes the same.
+    for same in [
+        rule,
+        "HTTPS://EXAMPLE.COM/thread/123?page=3#c1",
+        "https://example.com:443/thread/123?page=3#c1",
+        "https://example.com./thread/123?page=3#c1",
+        "https://example.com/thread/x/../123?page=3#c1",
+        "blob:https://example.com/thread/123?page=3#c1",
+    ] {
+        assert_eq!(compiled.evaluate(same), Decision::NeverSave, "{same}");
+    }
+    // Any other URL: no prefix, no wildcard, no case folding of path or query, no decoding.
+    for other in [
+        "https://example.com/thread/123",
+        "https://example.com/thread/123?page=3",
+        "https://example.com/thread/123?page=3#c2",
+        "https://example.com/thread/123?page=30#c1",
+        "https://example.com/thread/123?Page=3#c1",
+        "https://example.com/thread/123/?page=3#c1",
+        "https://example.com/Thread/123?page=3#c1",
+        "https://example.com/thread/12%33?page=3#c1",
+        "http://example.com/thread/123?page=3#c1",
+        "https://example.com:8443/thread/123?page=3#c1",
+        "https://www.example.com/thread/123?page=3#c1",
+        "https://example.com/thread/123?page=3&x=1#c1",
+        "https://example.com/thread/123?#c1",
+    ] {
+        assert_eq!(compiled.evaluate(other), Decision::None, "{other}");
+    }
+    // A trailing slash is another URL, as the parser keeps it.
+    let slash = blind(&[exact_rule("https://example.com/a/")]);
+    assert_eq!(
+        slash.evaluate("https://example.com/a/"),
+        Decision::NeverSave
+    );
+    assert_eq!(slash.evaluate("https://example.com/a"), Decision::None);
+    // The parser writes an empty path as "/": one URL.
+    let bare = blind(&[exact_rule("https://example.com")]);
+    assert_eq!(bare.evaluate("https://example.com/"), Decision::NeverSave);
+    // Percent-encoding as the parser writes it: a raw character it encodes is the same URL, an
+    // escape in other hex case is another one.
+    let encoded = blind(&[exact_rule("https://example.com/%E6%BC%AB")]);
+    assert_eq!(
+        encoded.evaluate("https://example.com/漫"),
+        Decision::NeverSave
+    );
+    assert_eq!(
+        encoded.evaluate("https://example.com/%e6%bc%ab"),
+        Decision::None
+    );
+}
+
+#[test]
+fn exact_url_key_is_the_compared_form() {
+    assert_eq!(
+        exact_url_key("HTTPS://Example.COM.:443/a/./b?q=1#f").unwrap(),
+        "https://example.com/a/b?q=1#f"
+    );
+    assert_eq!(
+        exact_url_key("https://bücher.test/").unwrap(),
+        "https://xn--bcher-kva.test/"
+    );
+    for bad in [
+        "",
+        "example.com/a",
+        "/a",
+        "ftp://example.com/",
+        "chrome://settings",
+        "blob:https://example.com/x",
+        "https://example.com/a b",
+        "https://example.com/%zz",
+        "https://example.com/\\a",
+        "https://",
+    ] {
+        assert_eq!(exact_url_key(bad), Err(Error::InvalidPolicy), "{bad:?}");
+    }
+    assert!(exact_url_key(&format!("https://e.com/{}", "a".repeat(32_768))).is_err());
+}
+
+#[test]
+fn a_bad_exact_rule_refuses_the_whole_policy_even_in_a_disabled_layer() {
+    for bad in [
+        "",
+        "not a url",
+        "ftp://example.com/",
+        "https://example.com/%zz",
+    ] {
+        let mut policy = typed_policy(&[], &[exact_rule(bad)]);
+        policy.layers.save_but_no_mcp.enabled = false;
+        assert!(CompiledPolicy::compile(&policy).is_err(), "{bad:?}");
+        assert_eq!(
+            policy.evaluate("https://example.com/"),
+            Decision::NeverSave,
+            "fail closed"
+        );
+        assert_eq!(
+            policy.problems(),
+            [Problem {
+                layer: Some("saveButNoMcp"),
+                rule_index: Some(0),
+                code: "invalid_exact_url"
+            }]
+        );
+    }
+    // Version 1 has no exact rule.
+    let mut old = policy(&[], &[]);
+    old.layers
+        .never_save
+        .rules
+        .push(exact_rule("https://example.com/"));
+    assert!(old.validate().is_err());
+    assert!(old.migrated().is_err());
+}
+
+#[test]
+fn exact_rules_keep_the_order_of_layers_and_the_builtins() {
+    let url = "https://example.com/a?b=1";
+    let both = typed_policy(&[exact_rule(url)], &[exact_rule(url)]);
+    assert_eq!(both.evaluate(url), Decision::NeverSave, "Never Save wins");
+    let private = typed_policy(&[], &[exact_rule(url)]);
+    assert_eq!(private.evaluate(url), Decision::SaveButNoMcp);
+    let mut off = private.clone();
+    off.layers.save_but_no_mcp.enabled = false;
+    assert_eq!(
+        off.evaluate(url),
+        Decision::None,
+        "a disabled layer decides nothing"
+    );
+    // Save but no MCP on a URL a builtin refuses: still refused.
+    for refused in [
+        "https://accounts.google.com/signin",
+        "https://example.com/a?token=x",
+        "https://u:p@example.com/",
+    ] {
+        let policy = typed_policy(&[], &[exact_rule(refused)]);
+        assert_eq!(policy.evaluate(refused), Decision::NeverSave, "{refused}");
+    }
+    // With patterns and regexes in the same layers.
+    let mixed = typed_policy(
+        &[RuleSpec::from("other.test"), exact_rule(url)],
+        &[
+            RuleSpec::Typed(TypedRule::Regex {
+                pattern: "secret".into(),
+            }),
+            exact_rule("https://example.com/c"),
+        ],
+    );
+    assert_eq!(mixed.evaluate(url), Decision::NeverSave);
+    assert_eq!(mixed.evaluate("https://other.test/x"), Decision::NeverSave);
+    assert_eq!(
+        mixed.evaluate("https://example.com/secret"),
+        Decision::SaveButNoMcp
+    );
+    assert_eq!(
+        mixed.evaluate("https://example.com/c"),
+        Decision::SaveButNoMcp
+    );
+    assert_eq!(mixed.evaluate("https://example.com/d"), Decision::None);
+}
+
+#[test]
+fn adding_an_exact_rule_never_loosens_a_decision() {
+    let corpus = urls();
+    let sample: Vec<&String> = corpus.iter().step_by(corpus.len() / 40 + 1).collect();
+    let bases = [
+        typed_policy(&[], &[]),
+        typed_policy(&[RuleSpec::from("example.com")], &[]),
+        typed_policy(&[], &[RuleSpec::from("*.example.com")]),
+    ];
+    let mut added = 0;
+    for base in &bases {
+        let before = CompiledPolicy::compile(base).unwrap();
+        for url in &sample {
+            let Ok(key) = exact_url_key(url) else {
+                continue;
+            };
+            for layer in 0..2 {
+                let mut more = base.clone();
+                let rules = if layer == 0 {
+                    &mut more.layers.never_save.rules
+                } else {
+                    &mut more.layers.save_but_no_mcp.rules
+                };
+                rules.push(exact_rule(&key));
+                let after = CompiledPolicy::compile(&more).unwrap();
+                assert_ne!(after.evaluate(url), Decision::None, "{url}");
+                for other in &sample {
+                    assert!(
+                        strictness(after.evaluate(other)) >= strictness(before.evaluate(other)),
+                        "{url} loosened {other}"
+                    );
+                }
+                added += 1;
+            }
+        }
+    }
+    assert!(added > 30, "{added}");
+}
+
+#[test]
+fn exact_rules_compile_no_regex_and_use_no_regex_budget() {
+    // 128 regexes and 1000 - 128 exact rules in one layer, 1000 exact rules in the other.
+    let mut never: Vec<RuleSpec> = (0..MAX_REGEX_RULES)
+        .map(|n| {
+            RuleSpec::Typed(TypedRule::Regex {
+                pattern: format!("^https://r{n}\\.test/"),
+            })
+        })
+        .collect();
+    never.extend((0..1000 - MAX_REGEX_RULES).map(|n| exact_rule(&format!("https://e.test/{n}"))));
+    let private: Vec<RuleSpec> = (0..1000)
+        .map(|n| exact_rule(&format!("https://p.test/{n}?x")))
+        .collect();
+    let policy = typed_policy(&never, &private);
+    assert_eq!(policy.regex_count(), MAX_REGEX_RULES);
+    let compiled = CompiledPolicy::compile(&policy).unwrap();
+    assert_eq!(
+        compiled.blind.regexes.len(),
+        MAX_REGEX_RULES,
+        "only regexes are compiled"
+    );
+    assert_eq!(
+        (compiled.blind.urls.len(), compiled.private.urls.len()),
+        (1000 - MAX_REGEX_RULES, 1000)
+    );
+    assert!(compiled.private.regexes.is_empty());
+    assert_eq!(compiled.evaluate("https://e.test/5"), Decision::NeverSave);
+    assert_eq!(
+        compiled.evaluate("https://p.test/999?x"),
+        Decision::SaveButNoMcp
+    );
+    assert_eq!(compiled.evaluate("https://p.test/999"), Decision::None);
+    // Each regex gets the budget of 128 regexes, as without the exact rules.
+    let alone = typed_policy(&never[..MAX_REGEX_RULES], &[]);
+    let (with, without) = (RegexBudget::of(&policy), RegexBudget::of(&alone));
+    assert_eq!((with.size, with.dfa), (without.size, without.dfa));
+    // The rule limit of a layer still holds.
+    let mut over = policy.clone();
+    over.layers
+        .save_but_no_mcp
+        .rules
+        .push(exact_rule("https://p.test/x"));
+    assert_eq!(
+        CompiledPolicy::compile(&over).err(),
+        Some(Error::InvalidPolicy)
+    );
+    // A 129th regex is still refused.
+    let mut regexes = policy.clone();
+    regexes.layers.save_but_no_mcp.rules[0] = RuleSpec::Typed(TypedRule::Regex {
+        pattern: "x".into(),
+    });
+    assert_eq!(
+        CompiledPolicy::compile(&regexes).err(),
+        Some(Error::RegexLimit)
+    );
+}
+
+#[test]
+fn an_exact_rule_round_trips_as_json() {
+    let json = r#"{"kind":"exact","pattern":"https://example.com/thread/123?page=3"}"#;
+    let rule: RuleSpec = serde_json::from_str(json).unwrap();
+    assert_eq!(rule, exact_rule("https://example.com/thread/123?page=3"));
+    assert_eq!(serde_json::to_string(&rule).unwrap(), json);
+    for bad in [
+        r#"{"kind":"exact"}"#,
+        r#"{"kind":"exact","pattern":1}"#,
+        r#"{"kind":"exact","pattern":"x","extra":1}"#,
+    ] {
+        assert!(serde_json::from_str::<TypedRule>(bad).is_err(), "{bad}");
+    }
+    assert!(rule_matches(&rule, "https://example.com/thread/123?page=3").unwrap());
+    assert!(!rule_matches(&rule, "https://example.com/thread/123").unwrap());
+}

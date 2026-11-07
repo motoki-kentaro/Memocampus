@@ -27,10 +27,10 @@ const domain = (text) => ({ kind: "domainWildcard", pattern: text });
 const URL = "https://www.example.com/page";
 const addButtons = ($) => [$("checker-add-never-save"), $("checker-add-save-but-no-mcp")];
 
-test("the kind is the third of one radio group, after Pattern and Regex", () => {
-  assert.deepEqual(RULE_KINDS, ["pattern", "regex", "domainWildcard"]);
+test("the kind is the third of one radio group, after Pattern and Regex, before Exact URL", () => {
+  assert.deepEqual(RULE_KINDS, ["pattern", "regex", "domainWildcard", "exact"]);
   const radios = [...html.matchAll(/<input id="checker-kind-(\w+)" type="radio" name="checker-kind" value="(\w+)"/g)].map((m) => [m[1], m[2]]);
-  assert.deepEqual(radios, [["pattern", "pattern"], ["regex", "regex"], ["domainWildcard", "domainWildcard"]]);
+  assert.deepEqual(radios, [["pattern", "pattern"], ["regex", "regex"], ["domainWildcard", "domainWildcard"], ["exact", "exact"]]);
   assert.match(html, /<label for="checker-kind-domainWildcard">Domain Wildcard<\/label>/);
   assert.match(html, /<input id="checker-rule" type="text"/, "one line of text");
   assert.match(htmlText("checker-kind-note"), /スキーム.*パスは含めず.*example\.com 自身にも一致します/);

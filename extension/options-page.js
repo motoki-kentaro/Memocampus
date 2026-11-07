@@ -32,9 +32,9 @@ import {
 const LAYER_ID = { neverSave: "never-save", saveButNoMcp: "save-but-no-mcp" };
 const LAYER_NAME = { neverSave: "保存しないグループ", saveButNoMcp: "MCPサーバに見せないグループ" };
 const CATEGORY_NAME = { authentication: "認証関連", credentials: "認証情報", government: "行政サイト", webmail: "Webメール", aiChats: "AIチャット" };
-const KIND_LABEL = { pattern: "Pattern", regex: "Regex", domainWildcard: "Domain Wildcard" };
+const KIND_LABEL = { pattern: "Pattern", regex: "Regex", domainWildcard: "Domain Wildcard", exact: "Exact URL" };
 /** What the rule field shows for each kind. The domain wildcard is the only kind with an example in it. */
-const RULE_PLACEHOLDER = { pattern: "", regex: "", domainWildcard: "*.example.com" };
+const RULE_PLACEHOLDER = { pattern: "", regex: "", domainWildcard: "*.example.com", exact: "" };
 /** Why the host restricts a domain wildcard, by its reason; the date is that of the bundled list. */
 const REASON_TEXT = {
   public_suffix: (domain, date) =>
@@ -85,6 +85,8 @@ const PROBLEM_TEXT = {
   domain_wildcard_not_approved:
     "このDomain Wildcardのドメインは、Public Suffix Listによる制限があり、承認されていません。URLチェッカーで確認して承認するか、ルールを変更してください。",
   psl_unavailable: "Public Suffix Listを読み込めないため、Domain Wildcardを判定できません。",
+  invalid_exact_url:
+    "Exact URLには、スキーム（httpまたはhttps）から始まるURL全体を1つ書いてください（空欄、空白や \\ を含むもの、不正なパーセントエンコードは使えません）。",
   invalid_rule_form: "ルールの形式が正しくありません。",
   invalid_rule: "ルールの形式が正しくありません。",
   too_many_rules: "このグループのルールが多すぎます（上限1,000件）。",

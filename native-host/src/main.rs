@@ -18,6 +18,7 @@ mod manage;
 mod policy_gate;
 mod search;
 mod vault;
+mod vault_items;
 
 #[derive(Debug, Deserialize)]
 struct VisitEvent {
@@ -283,12 +284,15 @@ fn store_navigation(
 
 /// Visits may carry `navigation` (`navigation.rs`) and are acknowledged with `navigation`.
 const CAPABILITY_NAVIGATION: &str = "navigation_v1";
+/// `policy_item_*`, `url_delete*` and `image_delete*` (Issue #43; `vault_items.rs`,
+/// `policy_gate/items.rs`).
+const CAPABILITY_VAULT_ITEMS: &str = "vault_items_v1";
 
 /// What this host can store, for an extension to ask before it sends anything new:
 ///
 /// ```text
 /// → { type: "host_capabilities", requestId }
-/// ← { ok: true, type: "host_capabilities_result", requestId, capabilities: ["navigation_v1"] }
+/// ← { ok: true, type: "host_capabilities_result", requestId, capabilities: ["navigation_v1", "vault_items_v1"] }
 /// ```
 ///
 /// A host from before Issue #41 answers this as an unknown event: `{ ok: false, eventId: null,
@@ -297,7 +301,7 @@ fn capabilities(message: &serde_json::Value) -> serde_json::Value {
     const RESULT: &str = "host_capabilities_result";
     match search::request_id(message) {
         Some(id) => serde_json::json!({
-            "ok": true, "type": RESULT, "requestId": id, "capabilities": [CAPABILITY_NAVIGATION],
+            "ok": true, "type": RESULT, "requestId": id, "capabilities": [CAPABILITY_NAVIGATION, CAPABILITY_VAULT_ITEMS],
         }),
         None => serde_json::json!({
             "ok": false, "type": RESULT, "requestId": null, "error": "invalid_request_id",
@@ -423,6 +427,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some("policy_domain_revoke") => write_message(&gate.domain_revoke(&value))?,
             Some("policy_preset") => write_message(&gate.preset(&value))?,
             Some("policy_apply") => write_message(&gate.apply(&value))?,
+            Some("policy_item_preview") => write_message(&gate.item_preview(&value))?,
+            Some("policy_item_apply") => write_message(&gate.item_apply(&value))?,
+            Some("url_delete_preview" | "url_delete" | "image_delete_preview" | "image_delete") => {
+                write_message(&vault_items::handle(&mut session, &value))?;
+            }
             Some("policy_start") => {
                 // Opening the active vault creates nothing; without one, recording cannot start.
                 let vault = session.read(|_| ()).map_err(vault::VaultError::code);

@@ -467,4 +467,9 @@ Slice 3 became the URL checker (above). Still open, for a later slice:
 6. From Slice 3: the match gate checks one rule against one URL; it says nothing of the URLs the rule meets besides that one. A checked rule that
    matches far more than intended is still added. The confirmation before applying compares rules, not what they match.
 
+**Exact URL (Issue #43, Slice 2).** A fourth kind in the checker, 「Exact URL」 (`value="exact"`), for the host's `exact`
+rule: one whole URL. Rows show 「Exact URL」 and the URL as stored, unescaped; adding, changing and removing go through
+the checker as for the other kinds, and `invalid_exact_url` has its own message. See
+`docs/issue-043-vault-item-management.md`.
+
 Later: CSV import and export per group (`regex,pattern`, RFC 4180, UTF-8), not in Slices 1–3.
