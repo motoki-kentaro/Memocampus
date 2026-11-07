@@ -12,7 +12,7 @@ Clicking the Memocampus toolbar action opens a side panel with three tabs: **URL
 
 ## Vault
 
-The vault (SQLite file) is independent of the host executable. Its path is stored in `%LOCALAPPDATA%\Memocampus\config.json`; the default vault is `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`. On first use, open the side panel's **Vault** section and create a vault explicitly (or open an existing one). Automatic recording also needs the privacy policy to be initialized (see [Privacy policy](#privacy-policy)). Only vaults created by this version (schema 6, which added navigation events in #41) can be used; a schema 5 vault is refused like any older one, so create a new vault after updating. An older vault is refused with an explanation and left unchanged: there is no conversion, and it cannot be backed up from the app, so copy the file if you want to keep it. Manual backups use the SQLite Backup API and copy the whole vault, including saved images, their save history and thumbnails. Switching or opening another vault switches the images too; nothing is copied between vaults. See `docs/issue-003-vault-location.md`.
+The vault (SQLite file) is independent of the host executable. Its path is stored in `%LOCALAPPDATA%\Memocampus\config.json`; the default vault is `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`. On first use, open the side panel's **Vault** section and create a vault explicitly (or open an existing one). Automatic recording also needs the privacy policy to be initialized (see [Privacy policy](#privacy-policy)). Only vaults created by this version (schema 7, which added image tags in #44) can be used; a schema 6 vault is refused like any older one, so create a new vault after updating. An older vault is refused with an explanation and left unchanged: there is no conversion, and it cannot be backed up from the app, so copy the file if you want to keep it. Manual backups use the SQLite Backup API and copy the whole vault, including saved images, their save history and thumbnails. Switching or opening another vault switches the images too; nothing is copied between vaults. See `docs/issue-003-vault-location.md`.
 
 The database previously stored next to the executable (`native-host/target/release/memocampus.sqlite3`) is no longer used and is left untouched.
 
@@ -107,6 +107,16 @@ and shows a dot when new images were saved while you were scrolled down.
     intact). The vault itself is never modified by copying or exporting.
 - Images saved without a thumbnail show their type label; the thumbnail is rebuilt from the original when the tile
   comes into view and added to the vault (the original and its history are not changed).
+
+**Image tags (#44).** Saved images can be tagged afterwards, in the Image tab:
+
+- Click a tile: its details show **タグ** above the save history. Type a tag and press Enter (or **追加**), or
+  **既存のタグから選ぶ**; × removes one. Tags are trimmed, lowercased and limited to 64 characters by the host; what
+  it stored is what is shown.
+- **タグで絞り込み** (toolbar): pick or type one tag to show only the images that have it; copy and export work as
+  usual from there. × on the "タグ: …" chip shows all images again.
+- One tag at a time (no AND/OR), no tag input when saving, and **the MCP server does not read tags.** A tag no image
+  has is removed automatically. See `docs/issue-044-image-tags.md`.
 
 Design and protocol: `docs/image-vault-design.md`. Manual test checklist: `docs/image-vault-dogfood-slice2.md`.
 

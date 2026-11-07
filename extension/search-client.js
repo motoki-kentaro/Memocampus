@@ -93,6 +93,9 @@ const ERROR_MESSAGES = {
   invalid_base64: "転送データが壊れています。もう一度保存してください。",
   upload_too_large: "画像データが申告より大きいため中止しました。",
   incomplete_upload: "画像データが揃わないまま確定しようとしました。保存されていません。",
+  // Image tags
+  invalid_tag: "タグ名が不正です。1〜64文字で、制御文字や見えない文字は使えません。",
+  too_many_tags: "1枚の画像に付けられるタグは64個までです。",
   // Copy, export and thumbnail rebuilding
   invalid_vault_token: "要求が不正です。一覧を更新してください。",
   invalid_blob_id: "画像の指定が不正です。",

@@ -2,6 +2,8 @@
 
 Status: Slice 0 approved by the PO (all recommendations in §9 accepted). Slice 1 (SQLite storage), Slice 2 (context-menu save over `connectNative`, see `native-host/src/image_protocol.rs` and `extension/image-*.js`) Slice 3 (Image tab, see `native-host/src/image_query.rs`, `extension/image-client.js`, `extension/image-gallery.js`) and Slice 4 (copy, export, thumbnail rebuilding, see `native-host/src/image_original.rs`, `extension/image-original.js`) are implemented; Slice 5 is not. Dogfood steps: `docs/image-vault-dogfood-slice2.md` (includes Slices 3 and 4).
 
+Image tags (Issue #44, schema 7): `docs/issue-044-image-tags.md`. Schema versions named below are those of the time.
+
 ### Vault identity across reconnects (Slice 2 review)
 
 `Session::ticket()` also yields a `vaultToken`: SHA-256 of the vault file's volume serial number and file index, so it

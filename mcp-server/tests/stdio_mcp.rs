@@ -564,11 +564,32 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
             " CREATE INDEX navigation_events_by_source ON navigation_events (source_visit_id);",
             "",
         )
-        .replace("PRAGMA user_version = 6;", "PRAGMA user_version = 5;");
-    assert!(!schema_5.contains("navigation_events"));
+        .replace("PRAGMA user_version = 7;", "PRAGMA user_version = 5;");
+    assert!(!schema_5.contains("navigation_events") && schema_5.contains("user_version = 5;"));
     Connection::open(&old)
         .unwrap()
         .execute_batch(&schema_5)
+        .unwrap();
+    let before = fs::read(&old).unwrap();
+    let (code, stdout, stderr) = run(&["--vault".as_ref(), old.as_os_str()]);
+    assert_eq!(
+        (code, stdout.as_str(), stderr.trim()),
+        (
+            Some(2),
+            "",
+            "memocampus-mcp: vault refused: vault_schema_mismatch"
+        )
+    );
+    assert_eq!(fs::read(&old).unwrap(), before);
+
+    // Schema 6: the shape before Issue #44 (no image tags, created last), refused the same way.
+    let old = env.dir.join("schema6.sqlite3");
+    let start = sql.find(" CREATE TABLE image_tags ").unwrap();
+    let schema_6 = sql[..start].replace("PRAGMA user_version = 7;", "PRAGMA user_version = 6;");
+    assert!(!schema_6.contains("image_tag") && schema_6.contains("user_version = 6;"));
+    Connection::open(&old)
+        .unwrap()
+        .execute_batch(&schema_6)
         .unwrap();
     let before = fs::read(&old).unwrap();
     let (code, stdout, stderr) = run(&["--vault".as_ref(), old.as_os_str()]);
@@ -629,6 +650,7 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
             "junk.sqlite3",
             "schema4.sqlite3",
             "schema5.sqlite3",
+            "schema6.sqlite3",
             "vault.sqlite3",
             "wal.sqlite3"
         ]

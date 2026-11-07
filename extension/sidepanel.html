@@ -47,7 +47,14 @@
 
     <section id="panel-image" class="tabpanel tabpanel-image" role="tabpanel" aria-labelledby="tab-image" tabindex="0" hidden>
       <div class="gallery-toolbar">
-        <span id="gallery-summary" class="summary" role="status" aria-live="polite"></span>
+        <span class="gallery-toolbar-start">
+          <button id="gallery-tag-filter" type="button" class="secondary" aria-haspopup="dialog" aria-controls="gallery-tag-picker" disabled>タグで絞り込み</button>
+          <span id="gallery-filter" class="tag-chip is-filter" hidden>
+            <span id="gallery-filter-name" class="tag-chip-name"></span>
+            <button id="gallery-filter-clear" type="button" class="tag-chip-remove" aria-label="絞り込みを解除" title="絞り込みを解除">×</button>
+          </span>
+          <span id="gallery-summary" class="summary" role="status" aria-live="polite"></span>
+        </span>
         <button id="gallery-refresh" type="button" class="icon-button" aria-label="画像一覧を更新" title="画像一覧を更新">
           <span class="button-icon icon-cached" aria-hidden="true"></span>
           <span id="gallery-new-dot" class="new-dot" aria-hidden="true" hidden></span>
@@ -64,12 +71,37 @@
       <button id="gallery-more" type="button" class="load-more" hidden>さらに読み込む</button>
       <section id="gallery-details" class="gallery-details" aria-labelledby="gallery-details-title" tabindex="-1" hidden>
         <div class="gallery-details-head">
-          <h2 id="gallery-details-title">保存履歴</h2>
+          <h2 id="gallery-details-title">画像の詳細</h2>
           <button id="gallery-details-close" type="button" class="secondary">閉じる</button>
         </div>
         <p id="gallery-details-meta" class="vault-meta"></p>
+        <section class="gallery-tags" aria-labelledby="gallery-tags-title">
+          <h3 id="gallery-tags-title">タグ</h3>
+          <ul id="gallery-tags" class="tag-list" aria-label="この画像のタグ"></ul>
+          <p id="gallery-tags-empty" class="vault-meta" hidden>タグはまだありません。</p>
+          <div class="tag-form">
+            <input id="gallery-tag-input" type="text" maxlength="200" placeholder="タグを入力" aria-label="追加するタグ" autocomplete="off" spellcheck="false" disabled>
+            <button id="gallery-tag-add" type="button" disabled>追加</button>
+            <button id="gallery-tag-choose" type="button" class="secondary" aria-haspopup="dialog" aria-controls="gallery-tag-picker" disabled>既存のタグから選ぶ</button>
+          </div>
+          <p id="gallery-tags-message" class="gallery-tags-message" role="status" aria-live="polite"></p>
+        </section>
+        <h3 class="gallery-sources-title">保存履歴</h3>
         <ol id="gallery-sources" class="gallery-sources"></ol>
         <button id="gallery-sources-more" type="button" class="secondary" hidden>さらに表示</button>
+      </section>
+      <section id="gallery-tag-picker" class="tag-picker" role="dialog" aria-labelledby="gallery-tag-picker-title" tabindex="-1" hidden>
+        <div class="gallery-details-head">
+          <h2 id="gallery-tag-picker-title">タグで絞り込み</h2>
+          <button id="gallery-tag-picker-close" type="button" class="secondary">閉じる</button>
+        </div>
+        <div id="gallery-tag-picker-form" class="tag-form">
+          <input id="gallery-tag-picker-input" type="text" maxlength="200" placeholder="タグ名を入力" aria-label="絞り込むタグ" autocomplete="off" spellcheck="false">
+          <button id="gallery-tag-picker-apply" type="button">絞り込む</button>
+        </div>
+        <p id="gallery-tag-picker-message" class="gallery-tags-message" role="status" aria-live="polite"></p>
+        <ul id="gallery-tag-picker-list" class="tag-list tag-options" aria-label="登録済みのタグ"></ul>
+        <button id="gallery-tag-picker-more" type="button" class="secondary" hidden>さらに表示</button>
       </section>
       <div id="gallery-menu" class="context-menu" role="menu" aria-label="画像の操作" hidden>
         <button id="gallery-menu-copy" type="button" role="menuitem" tabindex="-1">画像をコピー</button>

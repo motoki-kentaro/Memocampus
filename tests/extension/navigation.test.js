@@ -770,7 +770,7 @@ test("a host that stops before the capability answer keeps the visit queued with
 
 const HOST_BIN = process.env.MEMOCAMPUS_TEST_HOST;
 
-test("end to end with the real host: navigations stored in a fresh schema 6 vault, privacy kept", { skip: HOST_BIN ? false : "set MEMOCAMPUS_TEST_HOST to run" }, async () => {
+test("end to end with the real host: navigations stored in a fresh schema 7 vault, privacy kept", { skip: HOST_BIN ? false : "set MEMOCAMPUS_TEST_HOST to run" }, async () => {
   const { spawn } = await import("node:child_process");
   const { mkdtempSync, rmSync } = await import("node:fs");
   const os = await import("node:os");
@@ -814,7 +814,7 @@ test("end to end with the real host: navigations stored in a fresh schema 6 vaul
     assert.deepEqual([status.navigationInvalid, status.navigationNotStored, status.deadLetters], [0, 0, 0]);
     const db = new DatabaseSync(path.join(appDir, "memocampus.sqlite3"), { readOnly: true });
     try {
-      assert.equal(db.prepare("PRAGMA user_version").get().user_version, 6);
+      assert.equal(db.prepare("PRAGMA user_version").get().user_version, 7);
       const rows = db
         .prepare(
           `SELECT t.url AS target, s.url AS source, n.kind, n.transition_type, n.from_address_bar, n.new_tab, n.forward_back, n.occurred_at

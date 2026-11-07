@@ -69,12 +69,12 @@ fn is_hex64(value: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-struct Target {
-    blob_id: i64,
-    sha256: String,
+pub(crate) struct Target {
+    pub blob_id: i64,
+    pub sha256: String,
 }
 
-fn target(message: &Value) -> Result<Target, &'static str> {
+pub(crate) fn target(message: &Value) -> Result<Target, &'static str> {
     let blob_id = message
         .get("blobId")
         .and_then(Value::as_i64)

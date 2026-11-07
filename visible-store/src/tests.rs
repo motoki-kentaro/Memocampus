@@ -4007,9 +4007,69 @@ fn navigation_events_never_reach_a_reader_and_a_vault_without_them_is_refused() 
     let path = f.dir.join("schema-5-shape.sqlite3");
     Connection::open(&path)
         .unwrap()
-        .execute_batch(&sql.replace("PRAGMA user_version = 6;", "PRAGMA user_version = 5;"))
+        .execute_batch(&sql.replace("PRAGMA user_version = 7;", "PRAGMA user_version = 5;"))
         .unwrap();
     let store = VisibleStore::new(path, f.app.clone()).unwrap();
     assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
     assert_failed(store.check_vault(), VisibleError::VaultSchemaMismatch);
+
+    // Schema 6 (Issue #44: no image tags; the tag objects are the last ones created) is refused too.
+    let sql = schema::create_sql();
+    let start = sql.find(" CREATE TABLE image_tags ").unwrap();
+    let schema_6 = sql[..start].replace("PRAGMA user_version = 7;", "PRAGMA user_version = 6;");
+    assert!(!schema_6.contains("image_tag") && schema_6.contains("user_version = 6;"));
+    let path = f.dir.join("schema-6-shape.sqlite3");
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch(&schema_6)
+        .unwrap();
+    let store = VisibleStore::new(path, f.app.clone()).unwrap();
+    assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
+    assert_failed(store.check_vault(), VisibleError::VaultSchemaMismatch);
+}
+
+#[test]
+fn image_tags_never_reach_a_reader() {
+    // Issue #44 stores tags for local use only. Tags on a public and on a private image change no
+    // image answer, no total and no source, are never searchable, and never appear in any answer.
+    let f = Fixture::new();
+    let db = writer(&f.vault);
+    db.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+    let public = blob(&db, 1);
+    save(&db, public, &PUBLIC_SAVE);
+    let private = blob(&db, 2);
+    save(
+        &db,
+        private,
+        &Save {
+            id: "private-save",
+            public: 0,
+            ..PUBLIC_SAVE
+        },
+    );
+    let search = |query: &str| {
+        f.store
+            .search_images(&SearchImages {
+                query,
+                ..ALL_IMAGES
+            })
+            .unwrap()
+    };
+    let before = image_page(&f);
+    let sources_before = sources_of(&f, &before.items[0].id).unwrap();
+    db.execute_batch(&format!(
+        "INSERT INTO image_tags (id, name) VALUES (1, 'secret-tag'), (2, 'shared-tag');
+         INSERT INTO image_tag_links VALUES ({public}, 1), ({public}, 2), ({private}, 2);"
+    ))
+    .unwrap();
+    let after = image_page(&f);
+    assert_eq!(after, before);
+    assert_eq!((after.total, after.items.len()), (1, 1));
+    assert_eq!(sources_of(&f, &after.items[0].id).unwrap(), sources_before);
+    for query in ["secret-tag", "shared-tag", "tag"] {
+        assert!(search(query).items.is_empty(), "{query}");
+    }
+    let text = format!("{after:?}{sources_before:?}");
+    assert!(!text.contains("-tag"), "{text}");
+    assert_eq!(f.store.check_vault(), Ok(()));
 }

@@ -50,6 +50,8 @@ pub enum ImageError {
     BlobMissing,
     SavedImageNotFound,
     IncognitoNotPublishable,
+    InvalidTag,
+    TooManyTags,
     Db,
 }
 
@@ -75,6 +77,8 @@ impl ImageError {
             Self::BlobMissing => "blob_missing",
             Self::SavedImageNotFound => "saved_image_not_found",
             Self::IncognitoNotPublishable => "incognito_not_publishable",
+            Self::InvalidTag => "invalid_tag",
+            Self::TooManyTags => "too_many_tags",
             Self::Db => "db_error",
         }
     }
@@ -653,8 +657,40 @@ ORDER BY b.last_saved_at DESC, b.id DESC
 LIMIT ?3
 ";
 
-fn page_limit(limit: u32) -> u32 {
+pub(crate) fn page_limit(limit: u32) -> u32 {
     limit.clamp(1, MAX_PAGE_SIZE)
+}
+
+/// One row of `LIST_SQL` (or a query with the same columns, like the tag search).
+pub(crate) fn summary_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImageSummary> {
+    Ok(ImageSummary {
+        blob_id: row.get(0)?,
+        sha256: row.get(1)?,
+        mime_type: row.get(2)?,
+        byte_length: row.get(3)?,
+        width: row.get(4)?,
+        height: row.get(5)?,
+        created_at: row.get(6)?,
+        last_saved_at: row.get(7)?,
+        save_count: row.get(8)?,
+        has_thumbnail: row.get(9)?,
+        latest_image_url: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
+        latest_page_url: row.get(11)?,
+    })
+}
+
+/// Cuts a page read with `limit + 1` rows to `limit`, with the cursor of its last item.
+pub(crate) fn summary_page(mut items: Vec<ImageSummary>, limit: u32) -> Page<ImageSummary> {
+    let next = if items.len() > limit as usize {
+        items.truncate(limit as usize);
+        items.last().map(|last| ImageCursor {
+            last_saved_at: last.last_saved_at,
+            id: last.blob_id,
+        })
+    } else {
+        None
+    };
+    Page { items, next }
 }
 
 /// Distinct images, most recently saved first. Keyset paging keeps pages stable while new images
@@ -672,34 +708,10 @@ pub fn list_images(
             after.map(|c| c.id),
             limit + 1
         ],
-        |row| {
-            Ok(ImageSummary {
-                blob_id: row.get(0)?,
-                sha256: row.get(1)?,
-                mime_type: row.get(2)?,
-                byte_length: row.get(3)?,
-                width: row.get(4)?,
-                height: row.get(5)?,
-                created_at: row.get(6)?,
-                last_saved_at: row.get(7)?,
-                save_count: row.get(8)?,
-                has_thumbnail: row.get(9)?,
-                latest_image_url: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
-                latest_page_url: row.get(11)?,
-            })
-        },
+        summary_of,
     )?;
-    let mut items = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    let next = if items.len() > limit as usize {
-        items.truncate(limit as usize);
-        items.last().map(|last| ImageCursor {
-            last_saved_at: last.last_saved_at,
-            id: last.blob_id,
-        })
-    } else {
-        None
-    };
-    Ok(Page { items, next })
+    let items = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(summary_page(items, limit))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

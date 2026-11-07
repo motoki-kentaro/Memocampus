@@ -495,11 +495,14 @@ pub fn counts(db: &Connection) -> rusqlite::Result<Counts> {
     )
 }
 
-/// Rows of `navigation_events`, checked by backups only (`Counts` is what `vault_status` reports).
-fn navigation_count(db: &Connection) -> rusqlite::Result<i64> {
-    db.query_row("SELECT count(*) FROM navigation_events", [], |row| {
-        row.get(0)
-    })
+/// Rows of `navigation_events`, `image_tags` and `image_tag_links`, checked by backups only
+/// (`Counts` is what `vault_status` reports).
+fn backup_only_counts(db: &Connection) -> rusqlite::Result<(i64, i64, i64)> {
+    db.query_row(
+        "SELECT (SELECT count(*) FROM navigation_events), (SELECT count(*) FROM image_tags), (SELECT count(*) FROM image_tag_links)",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )
 }
 
 /// The vault an operation started against (see `Session::ticket` / `Session::write_for`).
@@ -797,7 +800,7 @@ fn copy_and_verify(source: &Connection, temp: &Path) -> Result<(), VaultError> {
         let expected = (
             counts(source).map_err(failed)?,
             images::table_counts(source).map_err(failed)?,
-            navigation_count(source).map_err(failed)?,
+            backup_only_counts(source).map_err(failed)?,
         );
         let backup = Backup::new(source, &mut target).map_err(failed)?;
         let deadline = Instant::now() + BUSY_TIMEOUT;
@@ -820,7 +823,7 @@ fn copy_and_verify(source: &Connection, temp: &Path) -> Result<(), VaultError> {
     let actual = (
         counts(&target).map_err(failed)?,
         images::table_counts(&target).map_err(failed)?,
-        navigation_count(&target).map_err(failed)?,
+        backup_only_counts(&target).map_err(failed)?,
     );
     if integrity != "ok" || actual != expected {
         return Err(VaultError::BackupFailed);

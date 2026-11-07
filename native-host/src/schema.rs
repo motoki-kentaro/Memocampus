@@ -1,8 +1,9 @@
-//! Vault schema 6: the one format this version reads and writes.
+//! Vault schema 7: the one format this version reads and writes.
 //!
-//! Schema 6 is schema 5 with `navigation_events` (Issue #41); schema 5 was schema 4 with
-//! `page_metadata` (Issue #22). Like schema 4 it exists only by creation: a schema 5 vault is refused
-//! as any other version, by PO decision, and nothing upgrades it. Nothing upgrades an older vault either, because `visits` has no column
+//! Schema 7 is schema 6 with image tags (`image_tags`, `image_tag_links` and the trigger that
+//! removes a tag no image uses; Issue #44). Schema 6 was schema 5 with `navigation_events` (Issue
+//! #41); schema 5 was schema 4 with `page_metadata` (Issue #22). Like schema 4 it exists only by
+//! creation: a schema 6 vault is refused as any other version, by PO decision, and nothing upgrades it. Nothing upgrades an older vault either, because `visits` has no column
 //! that tells whether a row predates the incognito fix (#9), so an upgraded vault could carry such rows
 //! under a number that later code trusts. `check` compares the stored definition of every object
 //! byte for byte with the ones below, which covers types, NOT NULL, keys, UNIQUE, CHECK, DEFAULT and
@@ -14,7 +15,7 @@ use rusqlite::Connection;
 
 /// `PRAGMA application_id` of vaults created by Memocampus ("MCMP").
 pub const APP_ID: i64 = 0x4D43_4D50;
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// Keep each `sql` as SQLite stores it: it keeps the text from `CREATE` on, without the final `;`.
 struct Object {
@@ -25,7 +26,7 @@ struct Object {
     sql: Option<&'static str>,
 }
 
-const OBJECTS: [Object; 16] = [
+const OBJECTS: [Object; 22] = [
     Object {
         kind: "table",
         name: "visits",
@@ -199,9 +200,69 @@ const OBJECTS: [Object; 16] = [
         table: "navigation_events",
         sql: Some("CREATE INDEX navigation_events_by_source ON navigation_events (source_visit_id)"),
     },
+    // Tags the user gives a stored image afterwards (Issue #44). A tag belongs to the image (the
+    // distinct bytes, `image_blobs`), not to one save action. `name` is the normalized form made
+    // by `image_tags::normalize_tag` (lowercase, trimmed, 1 to 64 characters); the CHECK repeats the
+    // parts SQLite can verify. Tags hold no URL and are not read by MCP.
+    Object {
+        kind: "table",
+        name: "image_tags",
+        table: "image_tags",
+        sql: Some(
+            "CREATE TABLE image_tags (
+  id    INTEGER PRIMARY KEY,
+  name  TEXT    NOT NULL UNIQUE CHECK (length(name) BETWEEN 1 AND 64 AND name = trim(name) AND name = lower(name))
+)",
+        ),
+    },
+    Object {
+        kind: "index",
+        name: "sqlite_autoindex_image_tags_1",
+        table: "image_tags",
+        sql: None,
+    },
+    // One row per tag on an image. Removing the image removes its tags (CASCADE); a tag still
+    // given to an image cannot be removed (RESTRICT).
+    Object {
+        kind: "table",
+        name: "image_tag_links",
+        table: "image_tag_links",
+        sql: Some(
+            "CREATE TABLE image_tag_links (
+  blob_id  INTEGER NOT NULL REFERENCES image_blobs (id) ON DELETE CASCADE,
+  tag_id   INTEGER NOT NULL REFERENCES image_tags (id) ON DELETE RESTRICT,
+  PRIMARY KEY (blob_id, tag_id)
+)",
+        ),
+    },
+    Object {
+        kind: "index",
+        name: "sqlite_autoindex_image_tag_links_1",
+        table: "image_tag_links",
+        sql: None,
+    },
+    Object {
+        kind: "index",
+        name: "image_tag_links_by_tag",
+        table: "image_tag_links",
+        sql: Some("CREATE INDEX image_tag_links_by_tag ON image_tag_links (tag_id, blob_id)"),
+    },
+    // A tag lives exactly as long as some image has it: removing its last link, by the host or by
+    // the CASCADE of a removed image, removes the tag in the same transaction.
+    Object {
+        kind: "trigger",
+        name: "image_tags_drop_unused",
+        table: "image_tag_links",
+        sql: Some(
+            "CREATE TRIGGER image_tags_drop_unused AFTER DELETE ON image_tag_links
+BEGIN
+  DELETE FROM image_tags WHERE id = old.tag_id AND NOT EXISTS (SELECT 1 FROM image_tag_links WHERE tag_id = old.tag_id);
+END",
+        ),
+    },
 ];
 
-/// Everything that makes an empty database a schema 6 vault, for one transaction. There is no form
+/// Everything that makes an empty database a schema 7 vault, for one transaction. There is no form
 /// of this that can run against an existing vault: `CREATE TABLE` fails if the table exists.
 pub fn create_sql() -> String {
     let mut sql =
@@ -426,6 +487,96 @@ mod tests {
     }
 
     #[test]
+    fn image_tags_hold_only_normalized_names_follow_their_images_and_never_outlive_their_last_link()
+    {
+        let db = vault("");
+        db.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             INSERT INTO image_blobs (id, sha256, mime_type, byte_length, width, height, created_at, last_saved_at, data)
+               VALUES (1, printf('%064d', 1), 'image/png', 1, 1, 1, 0, 0, x'00'),
+                      (2, printf('%064d', 2), 'image/png', 1, 1, 1, 0, 0, x'00');
+             INSERT INTO saved_images (id, save_id, blob_id, image_url, saved_at, incognito, mcp_public)
+               VALUES (1, 's1', 1, 'https://a.test/1.png', 0, 0, 0);",
+        )
+        .unwrap();
+        let mut keys = db
+            .prepare("SELECT \"from\" || '>' || \"table\" || '.' || \"to\" || ' ' || on_delete FROM pragma_foreign_key_list('image_tag_links')")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "blob_id>image_blobs.id CASCADE",
+                "tag_id>image_tags.id RESTRICT"
+            ]
+        );
+        for bad in [
+            "''",
+            "' cat'",
+            "'cat '",
+            "'Cat'",
+            "NULL",
+            "'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'", // 65
+        ] {
+            assert!(
+                db.execute(&format!("INSERT INTO image_tags (name) VALUES ({bad})"), [])
+                    .is_err(),
+                "{bad}"
+            );
+        }
+        let count = |sql: &str| -> i64 { db.query_row(sql, [], |row| row.get(0)).unwrap() };
+        db.execute_batch(
+            "INSERT INTO image_tags (id, name) VALUES (10, 'cat'), (11, 'reaction'), (12, '猫');
+             INSERT INTO image_tag_links VALUES (1, 10), (1, 11), (2, 10), (2, 12);",
+        )
+        .unwrap();
+        assert!(db
+            .execute("INSERT INTO image_tags (name) VALUES ('cat')", [])
+            .is_err());
+        assert!(db
+            .execute("INSERT INTO image_tag_links VALUES (1, 10)", [])
+            .is_err());
+        assert!(db
+            .execute("INSERT INTO image_tag_links VALUES (3, 10)", [])
+            .is_err());
+        assert!(db
+            .execute("INSERT INTO image_tag_links VALUES (1, 99)", [])
+            .is_err());
+        assert!(
+            db.execute("DELETE FROM image_tags WHERE id = 10", [])
+                .is_err(),
+            "a tag in use cannot be removed"
+        );
+        // The last link of a tag takes the tag with it; other links keep theirs.
+        db.execute(
+            "DELETE FROM image_tag_links WHERE blob_id = 2 AND tag_id = 12",
+            [],
+        )
+        .unwrap();
+        assert_eq!(count("SELECT count(*) FROM image_tags WHERE id = 12"), 0);
+        db.execute(
+            "DELETE FROM image_tag_links WHERE blob_id = 2 AND tag_id = 10",
+            [],
+        )
+        .unwrap();
+        assert_eq!(count("SELECT count(*) FROM image_tags WHERE id = 10"), 1);
+        // A removed image takes its links, and through them the tags no other image has.
+        db.execute_batch("DELETE FROM saved_images; DELETE FROM image_blobs WHERE id = 1;")
+            .unwrap();
+        assert_eq!(count("SELECT count(*) FROM image_tag_links"), 0);
+        assert_eq!(count("SELECT count(*) FROM image_tags"), 0);
+        assert_eq!(count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
+        let integrity: String = db
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok");
+    }
+
+    #[test]
     fn creating_over_an_existing_vault_fails_instead_of_filling_gaps() {
         let db = vault("");
         assert!(db.execute_batch(&create_sql()).is_err());
@@ -483,6 +634,21 @@ mod tests {
             check(&vault("DROP TABLE image_thumbnails;")).unwrap_err(),
             SchemaError::Shape("image_thumbnails")
         ));
+        assert!(matches!(
+            check(&vault("DROP TRIGGER image_tags_drop_unused;")).unwrap_err(),
+            SchemaError::Shape("image_tags_drop_unused")
+        ));
+        assert!(matches!(
+            replaced(
+                "REFERENCES image_blobs (id) ON DELETE CASCADE,\n  tag_id",
+                "REFERENCES image_blobs (id) ON DELETE RESTRICT,\n  tag_id"
+            ),
+            SchemaError::Shape("image_tag_links")
+        ));
+        assert!(matches!(
+            replaced(" AND name = lower(name))", ")"),
+            SchemaError::Shape("image_tags")
+        ));
     }
 
     #[test]
@@ -491,8 +657,9 @@ mod tests {
             ("PRAGMA user_version = 3;", 3),
             ("PRAGMA user_version = 4;", 4),
             ("PRAGMA user_version = 5;", 5),
-            ("PRAGMA user_version = 7;", 7),
-            ("PRAGMA application_id = 0;", 6),
+            ("PRAGMA user_version = 6;", 6),
+            ("PRAGMA user_version = 8;", 8),
+            ("PRAGMA application_id = 0;", 7),
         ] {
             assert!(
                 matches!(check(&vault(extra)).unwrap_err(), SchemaError::UnsupportedVersion(v) if v == expected),
