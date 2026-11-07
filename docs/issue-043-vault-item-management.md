@@ -1,9 +1,10 @@
-# Issue #43: managing one item of a search result — Slice 1 (native host), Slice 2 (exact rules)
+# Issue #43: managing one item of a search result — Slice 1 (native host), Slice 2 (exact rules), Slice 3 (side panel)
 
 From a URL or an image of the side panel's search results, four operations: **保存しないグループへ追加** (Never Save),
 **MCPサーバに見せないグループへ追加** (Save but no MCP), **Vaultから削除**, and **公開**. Slice 1 is the native host only:
 the messages, their checks and their tests. Slice 2 adds the policy rule kind `exact` (one whole URL) and uses it for
-scope `url` instead of Slice 1's escaped regex (see *Slice 2: exact rules*). There is no side panel UI yet (Slice 3).
+scope `url` instead of Slice 1's escaped regex (see *Slice 2: exact rules*). Slice 3 is the side panel (see *Slice 3:
+the side panel*).
 
 **Not in Slice 1:** the drop-down and the confirmation dialogs, bulk selection or deletion (Issue #7 plans deletion of
 single visits and in bulk; this is deletion of one URL), a trash or undo, a new per-item publication flag, a new policy
@@ -152,7 +153,7 @@ its confirmation, with the counts of the preview.
   follows each change at once — a URL hidden, published, hidden with its host; an image hidden through its page and
   published; a URL and an image deleted.
 
-## Slice 2 (side panel)
+## Notes for the side panel (written for Slice 1)
 
 - The drop-down on each URL and image result; `host_capabilities` names `vault_items_v1`.
 - Current state: one `policy_item_preview` per opened item (not per row). For an image, the URLs that judge it are its
@@ -206,3 +207,118 @@ checked URL, so the URL is typed twice); the host's `invalid_exact_url` has its 
 **Not changed:** the pattern, regex and domain wildcard rules, the builtins, the order of the layers, `policy_test_rule`
 and the other messages, VisibleStore and MCP (they use the same evaluator), the JavaScript reference evaluator of the
 tests (`extension/policy.js`, which judges patterns only and refuses every other kind, as for regexes).
+
+## Slice 3: the side panel
+
+The four actions in the URL tab and the Image tab, through the host messages above. One Rust change: a successful
+`search_pages` answer now names its vault (`vaultToken`, as `image_list` does), so a URL deletion can be bound to the
+vault the list came from.
+
+### Where
+
+- **URL tab.** Under each result, a small line: the host's decision for the URL (「公開」「MCPサーバに見せない」
+  「保存しない」, or 「状態不明」) and a drop-down 「操作を選択…」 with the four actions. The link above keeps its whole
+  width. The decisions come from one `policy_evaluate_batch` per page of results (the host's judgement, URLs only),
+  and are asked again after every policy change made here.
+- **Image tab.** In the image details, a section 「管理」 above the save history, with the same drop-down and a line
+  that says how the host judges the URLs of the loaded save history (and that more may follow).
+- Only a host that names `vault_items_v1` (`host_capabilities`) gets these. Before an answer nothing is shown; an older
+  host shows no drop-down in the URL tab, and the image details say the host must be updated.
+
+### Disabled choices
+
+The host's decision, never a judgement of the page's own:
+
+| Action | Disabled when the URL is | Why |
+|---|---|---|
+| 保存しないグループへ追加 | 保存しない | it cannot be stricter |
+| MCPサーバに見せないグループへ追加 | MCPサーバに見せない, 保存しない | it would not change the state |
+| 公開 | 公開 | nothing to remove |
+| Vaultから削除 | never | |
+
+An unknown state disables nothing: the preview decides. A Save but no MCP URL can still be added to Never Save (stricter).
+For an image an action is disabled only when the whole save history is loaded and every URL of it is in such a
+state, or it has no URL a rule can be for. Whether an action can be done at all (a broad rule, a disabled layer, a
+limit) is the preview's answer, shown in the dialog.
+
+### Preview, confirmation, apply
+
+Choosing an action does nothing but open the dialog (`item-dialog.js`, one for both tabs), which asks the host first:
+
+- **Policy:** `policy_item_preview` for the URL, scope 「このURLのみ」 (exact rule) by default. The dialog shows the URL,
+  the scope, the current and expected state as the host says, the rules added or removed (kind and text), and that a
+  rule deletes no stored data. 「同じホスト全体」 is a second radio; choosing it previews again, says in red that other
+  URLs are affected, and the confirm button stays disabled until a checkbox acknowledges it. `executable: false` is
+  explained in words (and `publish_blocked` lists the blocking layer and rule kind, or the builtins, never a rule's
+  text) with a button 「Privacy設定を開く」; nothing can be confirmed. A preview with no change (the same rule exists,
+  the URL is public already) cannot be confirmed either.
+- **Confirm** sends `policy_item_apply` with the preview's ETag. Only the host's success closes the dialog, resets the
+  drop-down and shows the new state. `policy_conflict` (the policy changed elsewhere) and every other failure keep the
+  dialog with the reason; the confirm button stays disabled until 「もう一度確認」 previews again. A failure is never
+  shown as done, and nothing is sent again by itself.
+- While a request runs, every control of the dialog is disabled (one request per confirmation), and Escape and
+  「キャンセル」 wait for the answer.
+
+### Images: which URL
+
+A rule is for a URL, never for the image. Choosing a policy action for an image loads its whole save history (at most
+1,000 saves; beyond that the action is refused and the settings page is the way), collects the `http(s)` URLs of it —
+image URL, page URL, frame URL; a `data:` image has none — once each, with what they are and how many saves name them,
+and has the host judge them. The dialog lists them as radios, **none chosen**: the person picks the URL, and only then
+is it previewed. A URL whose state the action would not change is shown but cannot be chosen.
+
+`mcp_public` is not changed. Every policy dialog for an image says that an image reaches MCP only when a save allows it
+(「MCPへの公開を許可」) and its image, page and frame URLs are all public, and how many saves allow it; with none,
+that publishing a URL will not make the image appear in MCP.
+
+### Deleting
+
+- **URL:** `url_delete_preview`, then a dialog with the host's counts (visits, tab snapshots, page metadata, the
+  navigations to it, the navigations from it that keep their row without a source), that image saves are kept, that a
+  backup keeps the data, that it cannot be undone, and that a later visit may be recorded again. 「削除する（取り消せません）」
+  sends `url_delete` with the vault token of the preview. If the preview's vault is not the one the list came from
+  (switched in another window), nothing is deleted: the dialog closes and the list reloads. After the host's success
+  the row goes, the count goes down by one, and the next page starts one row earlier (no URL skipped or repeated).
+- **Image:** `image_delete_preview` (with the gallery's vault token checked the same way), a dialog with the host's
+  counts (the original's size, every save, the thumbnail, tag links and tags that disappear with it), the backup and
+  undo notes; `image_delete` with id, hash and the preview's token. After the host's success the tile and the details
+  go (and an open tag picker closes); other images, their tags and thumbnails are not touched. An image the vault no
+  longer has is said to be gone, with nothing to retry.
+- `vault_switched` at deletion: nothing deleted, the dialog closes, the list starts again in the active vault.
+
+### Async rules
+
+The dialog belongs to one item. A new search, a new page of results replacing the rows, a vault change, another
+selected image or closed details close it; every answer carries the opening and step it was asked for and is dropped
+when they are no longer current. Decisions of rows carry a stamp, so an older batch never overwrites a newer one.
+
+### Tests
+
+`tests/extension/vault-items-ui.test.js` (fake DOM, a fake host with a small policy of exact URLs and hosts): states
+and disabled choices, preview before anything, exact rules, host scope only with acknowledgement, publishing and
+`publish_blocked` with the settings link, ETag conflict and preview again, failures not shown as done, Escape, double
+clicks, URL deletion with counts, paging after a deletion, a vault switched before the preview or before the
+confirmation, a new search or vault switch while a preview is pending, image actions with a chosen URL, `mcp_public`
+notes, image deletion with tags, a vault switched elsewhere, another selection dropping a late preview, an image gone,
+an older host. Opt-in (`MEMOCAMPUS_TEST_HOST`): the side panel against the real host — a URL hidden, published and
+deleted, an image deleted, then `integrity_check` and `foreign_key_check`.
+
+### Checking it in Chrome (for the PO)
+
+In a **test vault**, with this branch's extension and host:
+
+1. URL tab: each result shows a state and 「操作を選択…」. Choose 「保存しないグループへ追加」: the dialog shows the URL,
+   「このURLのみ（Exact URL）」 and the rule; nothing changes until 「保存しないグループへ追加する」. Afterwards the state reads
+   「保存しない」 and the Privacy settings page lists the rule as 「Exact URL」.
+2. The same with 「同じホスト全体」: the warning and the checkbox; the confirm button waits for it.
+3. 「公開」 on that URL: the rule goes. Add a host rule in the settings page, then 「公開」 on a URL of that host: refused
+   with the reason and 「Privacy設定を開く」.
+4. Keep a preview open, change the policy in the settings page, confirm: 「ほかの画面で変更されました」, then 「もう一度確認」.
+5. 「Vaultから削除」 on a URL: the counts, the warnings; after deleting, the row and the count go; scroll for more results.
+6. Image tab: open an image with several saves; 「MCPサーバに見せないグループへ追加」 lists its URLs, none chosen; pick one.
+   「公開」 shows the note about 「MCPへの公開を許可」.
+7. 「Vaultから削除」 on an image with tags: the counts; afterwards the tile and the details are gone, other images keep
+   their tags; copy and export of other images still work.
+8. With a dialog open, switch the vault in Settings: the dialog closes, nothing is deleted.
+9. Keyboard only: Tab to a drop-down, choose with the arrow keys, Escape closes the dialog and focus returns. Narrow
+   and wide side panel, light and dark mode.

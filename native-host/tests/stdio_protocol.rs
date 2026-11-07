@@ -209,10 +209,15 @@ fn created_vault_receives_writes_and_survives_host_restarts() {
         json!({ "ok": false, "eventId": null, "error": "unknown_type" })
     );
     let responses = &responses[2..];
+    // The page names its vault, as `image_list` does (Issue #43).
+    let token = exchange(&tmp, &[json!({ "type": "image_list", "requestId": "l" })])[0]
+        ["vaultToken"]
+        .clone();
+    assert_eq!(token.as_str().map(str::len), Some(64));
     assert_eq!(
         responses[0],
         json!({
-            "ok": true, "type": "search_pages_result", "requestId": "r1", "hasMore": false,
+            "ok": true, "type": "search_pages_result", "requestId": "r1", "hasMore": false, "vaultToken": token,
             "items": [{
                 "url": url, "title": "Rust Book",
                 "lastVisitedAt": "2026-10-29T10:00:00.000Z",

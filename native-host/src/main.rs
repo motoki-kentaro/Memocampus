@@ -369,8 +369,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         match value.get("type").and_then(|value| value.as_str()) {
             Some("search_pages") => {
+                // A successful page names its vault (`vaultToken`, as `image_list` does), so a later
+                // `url_delete` can only reach the vault the results came from (Issue #43).
                 let response = session
-                    .read(|db| search::handle(db, &value))
+                    .ticket()
+                    .and_then(|ticket| {
+                        session
+                            .read(|db| search::handle(db, &value))
+                            .map(|response| (ticket, response))
+                    })
+                    .map(|(ticket, mut response)| {
+                        if response["ok"] == true {
+                            response["vaultToken"] = ticket.token.into();
+                        }
+                        response
+                    })
                     .unwrap_or_else(|error| search::failure(&value, error.code()));
                 write_message(&response)?;
             }

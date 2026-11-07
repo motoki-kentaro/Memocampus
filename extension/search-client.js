@@ -96,6 +96,17 @@ const ERROR_MESSAGES = {
   // Image tags
   invalid_tag: "タグ名が不正です。1〜64文字で、制御文字や見えない文字は使えません。",
   too_many_tags: "1枚の画像に付けられるタグは64個までです。",
+  // Managing one item (Issue #43)
+  policy_conflict: "プライバシー設定がほかの画面で変更されました。内容を確認し直してください。",
+  publish_blocked: "ほかのルールまたは基本保護によって非公開になっているため、ここからは公開できません。Privacy設定で確認してください。",
+  policy_limit: "ルールの数が上限に達しているため追加できません（1グループ1,000件）。Privacy設定で整理してください。",
+  layer_disabled: "このグループは無効になっているため、ルールを追加しても効果がありません。Privacy設定でグループを有効にしてください。",
+  invalid_exact_url: "URLの形式が不正なため、Exact URLルールにできません。",
+  policy_migration_required: "プライバシー設定が旧形式（v1）のため、この操作はできません。",
+  unsupported_url: "このURLのホストはルールで指定できません。",
+  invalid_action: "要求が不正です。",
+  invalid_scope: "要求が不正です。",
+  invalid_etag: "要求が不正です。もう一度確認してください。",
   // Copy, export and thumbnail rebuilding
   invalid_vault_token: "要求が不正です。一覧を更新してください。",
   invalid_blob_id: "画像の指定が不正です。",
@@ -193,16 +204,19 @@ function normalizeItem(item) {
 }
 
 /**
- * Sends one search request. Resolves to { items, received, hasMore }, where `received` is the raw
+ * Sends one search request. Resolves to { items, received, hasMore, vaultToken }, where `received` is the raw
  * row count used to advance the offset.
  */
 export async function searchPages({ query, offset = 0, limit = PAGE_SIZE }, options) {
   const response = await callHost({ type: "search_pages", query, limit, offset }, { ...options, resultType: "search_pages_result" });
   if (!Array.isArray(response.items)) throw new SearchError("invalid_response");
+  // The vault the page came from (Issue #43); a host from before it sends none.
+  const vaultToken = typeof response.vaultToken === "string" && /^[0-9a-f]{64}$/.test(response.vaultToken) ? response.vaultToken : null;
   return {
     items: response.items.map(normalizeItem).filter(Boolean),
     received: response.items.length,
     hasMore: response.hasMore === true,
+    vaultToken,
   };
 }
 
