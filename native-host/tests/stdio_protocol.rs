@@ -4691,7 +4691,10 @@ fn a_failed_write_keeps_neither_the_visit_nor_its_navigation() {
     let lock = Connection::open(tmp.default_vault()).unwrap();
     lock.execute_batch("BEGIN EXCLUSIVE;").unwrap();
     let reply = exchange(&tmp, std::slice::from_ref(&event)).remove(0);
-    assert_eq!(reply["ok"], false, "{reply}");
+    assert_eq!(
+        reply,
+        json!({ "ok": false, "eventId": "t", "error": "vault_busy" })
+    );
     assert_eq!(reply.get("navigation"), None);
     lock.execute_batch("ROLLBACK;").unwrap();
     assert_eq!(navigation_rows(&tmp), Vec::<String>::new());
@@ -4727,14 +4730,38 @@ fn concurrent_hosts_store_every_navigation_once_and_keep_the_keys_sound() {
                         )
                     })
                     .collect();
-                for reply in exchange(tmp, &events) {
-                    assert_eq!(reply["navigation"], "stored", "{reply}");
+                for event in &events {
+                    // Like the durable queue, finish this event before sending its successor.
+                    // Vault contention is temporary; retry the identical payload, never a
+                    // whole batch whose successors could lose their not-yet-stored source.
+                    let id = event["id"].as_str().unwrap();
+                    for delivery in 0..2 {
+                        // The second delivery models a lost ACK and must also be idempotent.
+                        for attempt in 1..=10 {
+                            let replies = exchange(tmp, std::slice::from_ref(event));
+                            assert_eq!(replies.len(), 1);
+                            let reply = &replies[0];
+                            if reply == &nav_ack(id, "stored") {
+                                break;
+                            }
+                            assert_eq!(
+                                reply,
+                                &json!({ "ok": false, "eventId": id, "error": "vault_busy" }),
+                                "unexpected ACK for {id}, delivery {delivery}, attempt {attempt}"
+                            );
+                            assert!(attempt < 10, "vault_busy retry limit reached for {id}");
+                        }
+                    }
                 }
             });
         }
     });
     assert_eq!(navigation_rows(&tmp).len(), workers * per_worker);
     let db = Connection::open(tmp.default_vault()).unwrap();
+    let visits: i64 = db
+        .query_row("SELECT count(*) FROM visits", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(visits, (1 + workers * per_worker) as i64);
     let broken: i64 = db
         .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
             row.get(0)
