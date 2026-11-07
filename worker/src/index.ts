@@ -175,22 +175,29 @@ app.post('/oauth/token', async (c) => {
   }
 
   if (!code) {
+    console.log('[Token] Error: missing authorization code');
     return c.json({ error: 'invalid_request' }, 400);
   }
 
   const userSub = await c.env.OAUTH_KV.get(`auth_code:${code}`);
+  console.log(`[Token] Code: "${code}", Retrieved userSub: "${userSub}"`);
+
   if (!userSub) {
+    console.log('[Token] Error: code not found or expired');
     return c.json({ error: 'invalid_grant' }, 400);
   }
   await c.env.OAUTH_KV.delete(`auth_code:${code}`);
 
-  // JWT発行 (subクレームにGoogleのsubをセット)
+  // JWT発行 (.setSubject で確実に sub クレームを設定)
   const secret = new TextEncoder().encode(c.env.JWT_SECRET);
-  const jwt = await new SignJWT({ sub: userSub })
+  const jwt = await new SignJWT({})
     .setProtectedHeader({ alg: 'HS256' })
+    .setSubject(userSub) // ★ RFC 7519準拠の sub クレームを明示
     .setIssuedAt()
     .setExpirationTime('30d')
     .sign(secret);
+
+  console.log(`[Token] Issued JWT for sub: "${userSub}"`);
 
   return c.json({
     access_token: jwt,
@@ -204,22 +211,43 @@ app.post('/oauth/token', async (c) => {
 // ----------------------------------------------------
 app.all('/mcp', async (c) => {
   const authHeader = c.req.header('Authorization');
+  console.log('[MCP] Auth Header:', authHeader ? 'Present' : 'Missing');
+
   if (!authHeader?.startsWith('Bearer ')) {
+    console.log('[MCP] Reject: Missing or invalid Bearer prefix');
     return c.json({ error: 'Unauthorized' }, 401);
   }
 
   const token = authHeader.slice(7);
+  let payload: any;
+
   try {
     const secret = new TextEncoder().encode(c.env.JWT_SECRET);
-    const { payload } = await jwtVerify(token, secret);
-
-    // subの一致検証 (fail-closed)
-    if (!c.env.ALLOWED_SUB || payload.sub !== c.env.ALLOWED_SUB.trim()) {
-      return c.json({ error: 'Forbidden' }, 403);
-    }
-  } catch {
+    const result = await jwtVerify(token, secret);
+    payload = result.payload;
+    console.log('[MCP] JWT Verify Success. payload:', JSON.stringify(payload));
+  } catch (err: any) {
+    console.log('[MCP] JWT Verify Failed:', err?.message || err);
     return c.json({ error: 'Unauthorized' }, 401);
   }
+
+  // subの一致検証 (fail-closed)
+  const allowedSub = c.env.ALLOWED_SUB?.trim();
+  const tokenSub = payload?.sub;
+
+  console.log(`[MCP] Checking sub - Token: "${tokenSub}" vs Allowed: "${allowedSub}"`);
+
+  if (!allowedSub) {
+    console.log('[MCP] Reject (403): ALLOWED_SUB is not configured in env');
+    return c.json({ error: 'Forbidden: ALLOWED_SUB not configured' }, 403);
+  }
+
+  if (tokenSub !== allowedSub) {
+    console.log(`[MCP] Reject (403): sub mismatch. got "${tokenSub}", expected "${allowedSub}"`);
+    return c.json({ error: 'Forbidden: sub mismatch' }, 403);
+  }
+
+  console.log('[MCP] Auth passed. Forwarding to upstream VPC...');
 
   const targetUrl = new URL('http://127.0.0.1:8765/mcp');
   targetUrl.search = new URL(c.req.url).search;
@@ -236,11 +264,14 @@ app.all('/mcp', async (c) => {
       body: c.req.method !== 'GET' && c.req.method !== 'HEAD' ? c.req.raw.body : undefined,
     });
 
+    console.log('[MCP] Upstream status:', upstreamResponse.status);
+
     return new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       headers: upstreamResponse.headers,
     });
   } catch (err: any) {
+    console.log('[MCP] Upstream fetch error:', err?.message || err);
     return c.json({ error: 'Bad Gateway' }, 502);
   }
 });
