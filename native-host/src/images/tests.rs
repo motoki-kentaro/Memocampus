@@ -137,10 +137,10 @@ fn scalar(db: &Connection, sql: &str) -> i64 {
 }
 
 #[test]
-fn new_vaults_are_created_at_schema_6_with_image_tables() {
+fn new_vaults_are_created_at_schema_7_with_image_tables() {
     let f = fixture();
     let db = open_vault(&f.vault).unwrap();
-    assert_eq!(scalar(&db, "PRAGMA user_version"), 6);
+    assert_eq!(scalar(&db, "PRAGMA user_version"), 7);
     assert_eq!(table_counts(&db).unwrap(), (0, 0, 0));
 }
 
@@ -886,6 +886,9 @@ fn error_codes_are_stable_and_distinct() {
         ImageError::SaveIdConflict,
         ImageError::BlobMissing,
         ImageError::SavedImageNotFound,
+        ImageError::IncognitoNotPublishable,
+        ImageError::InvalidTag,
+        ImageError::TooManyTags,
         ImageError::Db,
     ];
     let codes: Vec<&str> = errors.iter().map(|error| error.code()).collect();
@@ -897,6 +900,8 @@ fn error_codes_are_stable_and_distinct() {
     );
     assert_eq!(ImageError::TooLarge.code(), "too_large");
     assert_eq!(ImageError::SvgNotSupported.code(), "svg_not_supported");
+    assert_eq!(ImageError::InvalidTag.code(), "invalid_tag");
+    assert_eq!(ImageError::TooManyTags.code(), "too_many_tags");
 }
 
 #[test]

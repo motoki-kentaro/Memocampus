@@ -509,7 +509,7 @@ fn image_tables(path: &Path) -> i64 {
 fn vaults_created_by_the_host_start_at_schema_4_with_image_tables() {
     let tmp = TempDir::new();
     create_default_vault(&tmp);
-    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 6);
+    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 7);
     assert_eq!(image_tables(&tmp.default_vault()), 3);
     // Existing operations work on it.
     assert_eq!(
@@ -561,7 +561,7 @@ fn backups_of_a_vault_with_images_are_complete_and_verified() {
     };
     assert_eq!(dump(&copy), dump(&tmp.default_vault()));
     assert_eq!(dump(&copy).len(), 4);
-    assert_eq!(pragma(&copy, "user_version"), 6);
+    assert_eq!(pragma(&copy, "user_version"), 7);
 }
 
 const SAVE_ID: &str = "4f1d2c3b-5a6e-4d7f-8091-a2b3c4d5e6f7";
@@ -1107,13 +1107,31 @@ fn without_table(sql: &str, table: &str) -> String {
     format!("{}{}", &sql[..start], &sql[end..])
 }
 
-/// Schema 5 as it was created before Issue #41: schema 6 without `navigation_events`.
-fn schema_5() -> String {
-    let sql = without_table(
+/// `sql` without the `CREATE TRIGGER` statement of `name`.
+fn without_trigger(sql: &str, name: &str) -> String {
+    let start = sql.find(&format!(" CREATE TRIGGER {name} ")).unwrap();
+    let end = start + sql[start..].find("END;").unwrap() + 4;
+    format!("{}{}", &sql[..start], &sql[end..])
+}
+
+/// Schema 6 as it was created before Issue #44: schema 7 without image tags.
+fn schema_6() -> String {
+    let sql = without_trigger(
         &memocampus_native_host::schema::create_sql(),
-        "navigation_events",
+        "image_tags_drop_unused",
     )
     .replace(
+        " CREATE INDEX image_tag_links_by_tag ON image_tag_links (tag_id, blob_id);",
+        "",
+    );
+    let sql = without_table(&without_table(&sql, "image_tag_links"), "image_tags");
+    assert!(!sql.contains("image_tag"));
+    sql.replace("PRAGMA user_version = 7;", "PRAGMA user_version = 6;")
+}
+
+/// Schema 5 as it was created before Issue #41: schema 6 without `navigation_events`.
+fn schema_5() -> String {
+    let sql = without_table(&schema_6(), "navigation_events").replace(
         " CREATE INDEX navigation_events_by_source ON navigation_events (source_visit_id);",
         "",
     );
@@ -1129,7 +1147,7 @@ fn schema_4() -> String {
 }
 
 #[test]
-fn every_vault_other_than_schema_6_is_refused_for_every_operation_and_left_untouched() {
+fn every_vault_other_than_schema_7_is_refused_for_every_operation_and_left_untouched() {
     use memocampus_native_host::schema::create_sql;
     let v3 = |app_id: i64, version: i64| {
         format!("{SCHEMA_3} PRAGMA application_id = {app_id}; PRAGMA user_version = {version};")
@@ -1145,9 +1163,25 @@ fn every_vault_other_than_schema_6_is_refused_for_every_operation_and_left_untou
         ("schema 4 relabelled 5", schema_4().replace("PRAGMA user_version = 4;", "PRAGMA user_version = 5;")),
         ("schema 5 (Issue #41: no navigation_events)", schema_5()),
         ("schema 5 relabelled 6", schema_5().replace("PRAGMA user_version = 5;", "PRAGMA user_version = 6;")),
-        ("schema 6 labelled 5", create_sql().replace("PRAGMA user_version = 6;", "PRAGMA user_version = 5;")),
-        ("future version", format!("{} PRAGMA user_version = 7;", create_sql())),
-        ("untagged schema 6", format!("{} PRAGMA application_id = 0;", create_sql())),
+        ("schema 6 labelled 5", schema_6().replace("PRAGMA user_version = 6;", "PRAGMA user_version = 5;")),
+        ("schema 6 (Issue #44: no image tags)", schema_6()),
+        ("schema 6 relabelled 7", schema_6().replace("PRAGMA user_version = 6;", "PRAGMA user_version = 7;")),
+        ("schema 7 labelled 6", create_sql().replace("PRAGMA user_version = 7;", "PRAGMA user_version = 6;")),
+        ("future version", format!("{} PRAGMA user_version = 8;", create_sql())),
+        ("untagged schema 7", format!("{} PRAGMA application_id = 0;", create_sql())),
+        ("tags without the trigger that drops unused ones", without_trigger(&create_sql(), "image_tags_drop_unused")),
+        ("tags without their search index", create_sql().replace(
+            " CREATE INDEX image_tag_links_by_tag ON image_tag_links (tag_id, blob_id);",
+            "",
+        )),
+        ("tag names without their CHECK", create_sql().replace(
+            "name  TEXT    NOT NULL UNIQUE CHECK (length(name) BETWEEN 1 AND 64 AND name = trim(name) AND name = lower(name))",
+            "name  TEXT    NOT NULL UNIQUE",
+        )),
+        ("tag links that outlive their image", create_sql().replace(
+            "blob_id  INTEGER NOT NULL REFERENCES image_blobs (id) ON DELETE CASCADE,",
+            "blob_id  INTEGER NOT NULL REFERENCES image_blobs (id),",
+        )),
         ("navigation without its source index", create_sql().replace(
             "CREATE INDEX navigation_events_by_source ON navigation_events (source_visit_id);",
             "",
@@ -1200,6 +1234,11 @@ fn every_vault_other_than_schema_6_is_refused_for_every_operation_and_left_untou
             json!({ "type": "image_sources", "requestId": "c", "blobId": 1 }),
             json!({ "type": "image_thumbnails", "requestId": "t", "blobIds": [1] }),
             json!({ "type": "image_mcp_public_set", "requestId": "m", "savedImageId": 1, "mcpPublic": true, "vaultToken": "0".repeat(64) }),
+            json!({ "type": "image_tags_get", "requestId": "tg", "blobId": 1 }),
+            json!({ "type": "image_tag_add", "requestId": "ta", "blobId": 1, "sha256": "0".repeat(64), "vaultToken": "0".repeat(64), "tag": "cat" }),
+            json!({ "type": "image_tag_remove", "requestId": "tr", "blobId": 1, "sha256": "0".repeat(64), "vaultToken": "0".repeat(64), "tag": "cat" }),
+            json!({ "type": "image_tag_list", "requestId": "tl" }),
+            json!({ "type": "image_tag_search", "requestId": "ts", "tag": "cat" }),
             json!({ "type": "vault_backup", "requestId": "b", "directory": dest }),
             json!({ "type": "vault_open", "requestId": "o", "path": vault }),
         ];
@@ -1265,7 +1304,7 @@ fn from_a_refused_vault_the_user_can_still_create_a_new_one_which_inherits_nothi
     assert_eq!(replies[1]["ok"], true, "{}", replies[1]);
     assert_eq!(replies[2]["items"].as_array().unwrap().len(), 1);
     assert!(!replies[2].to_string().contains("CANARY"));
-    assert_eq!(pragma(&new, "user_version"), 6);
+    assert_eq!(pragma(&new, "user_version"), 7);
     assert_eq!(std::fs::read(&old).unwrap(), before);
     // And the old file stays refused if it is opened again.
     let reopened = &exchange(
@@ -4817,7 +4856,7 @@ fn backups_carry_the_navigations_and_count_them() {
     };
     assert_eq!(dump(&copy), ["b|a", "c|NULL"]);
     assert_eq!(dump(&copy), dump(&tmp.default_vault()));
-    assert_eq!(pragma(&copy, "user_version"), 6);
+    assert_eq!(pragma(&copy, "user_version"), 7);
 }
 
 #[test]
@@ -4838,4 +4877,198 @@ fn the_host_names_its_capabilities_without_a_vault_or_a_policy() {
         ]
     );
     assert!(!tmp.app_dir().exists(), "nothing created");
+}
+
+/// Issue #44, Slice 1 end to end over the real host: images saved by the existing flow, tagged
+/// afterwards, read back, searched, untagged, backed up, and one image removed from the file. The
+/// vault stays consistent throughout and the image flow answers exactly as before.
+#[test]
+fn image_tags_over_the_real_host_are_stored_consistently_and_leave_images_unchanged() {
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    let vault = tmp.default_vault();
+    assert_eq!(pragma(&vault, "user_version"), 7);
+    let first = png_of_size(40, 30, 5000);
+    let second = png_of_size(40, 30, 6000);
+    let saved = exchange(&tmp, &upload_messages(&first, true));
+    let token = saved.last().unwrap()["vaultToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    exchange(
+        &tmp,
+        &upload_as(
+            &second,
+            "7c0e8f4a-1b2d-4e3f-9a5b-6c7d8e9f0a1b",
+            Some(&token),
+        ),
+    );
+    let listed = exchange(&tmp, &[json!({ "type": "image_list", "requestId": "l" })]).remove(0);
+    let items = listed["items"].as_array().unwrap().clone();
+    assert_eq!(items.len(), 2);
+    let (newer, older) = (&items[0], &items[1]);
+    let blobs_before = blob_state(&vault);
+    let tag = |kind: &str, image: &Value, name: &str| {
+        json!({ "type": kind, "requestId": format!("{kind}-{name}"), "blobId": image["blobId"],
+                "sha256": image["sha256"], "vaultToken": token, "tag": name })
+    };
+
+    // One process: tags given, one twice in another spelling, read back.
+    let replies = exchange(
+        &tmp,
+        &[
+            tag("image_tag_add", older, "Reaction"),
+            tag("image_tag_add", older, "漫画"),
+            tag("image_tag_add", newer, "漫画"),
+            tag("image_tag_add", newer, "  REACTION  "),
+            tag("image_tag_add", newer, "reaction"),
+            json!({ "type": "image_tags_get", "requestId": "g", "blobId": newer["blobId"] }),
+        ],
+    );
+    for reply in &replies {
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["vaultToken"], json!(token));
+    }
+    assert_eq!(
+        replies
+            .iter()
+            .take(5)
+            .map(|r| r["added"].clone())
+            .collect::<Vec<_>>(),
+        [
+            json!(true),
+            json!(true),
+            json!(true),
+            json!(true),
+            json!(false)
+        ]
+    );
+    assert_eq!(replies[3]["tag"], "reaction");
+    assert_eq!(replies[5]["tags"], json!(["reaction", "漫画"]));
+
+    // Another process: the tag list, search and refusals.
+    let replies = exchange(
+        &tmp,
+        &[
+            json!({ "type": "image_tag_list", "requestId": "l" }),
+            json!({ "type": "image_tag_search", "requestId": "s", "tag": "漫画" }),
+            json!({ "type": "image_tag_search", "requestId": "s2", "tag": "unknown" }),
+            tag("image_tag_add", older, "a\u{0007}b"),
+            tag("image_tag_add", older, &"x".repeat(65)),
+            json!({ "type": "image_tag_add", "requestId": "w", "blobId": older["blobId"], "sha256": newer["sha256"], "vaultToken": token, "tag": "x" }),
+            json!({ "type": "image_tag_add", "requestId": "v", "blobId": older["blobId"], "sha256": older["sha256"], "vaultToken": "0".repeat(64), "tag": "x" }),
+        ],
+    );
+    assert_eq!(
+        replies[0]["items"],
+        json!([{ "name": "reaction", "imageCount": 2 }, { "name": "漫画", "imageCount": 2 }])
+    );
+    assert_eq!(replies[1]["items"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        replies[1]["items"][0], *newer,
+        "search items are image_list items"
+    );
+    assert_eq!(replies[1]["items"][1], *older);
+    assert_eq!(replies[2]["items"], json!([]));
+    for (reply, code) in replies[3..].iter().zip([
+        "invalid_tag",
+        "invalid_tag",
+        "blob_missing",
+        "vault_switched",
+    ]) {
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert_eq!(reply["error"], code, "{reply}");
+    }
+
+    // Removal: absent is fine, the last link takes the tag.
+    let replies = exchange(
+        &tmp,
+        &[
+            tag("image_tag_remove", older, "never"),
+            tag("image_tag_remove", older, "REACTION"),
+            tag("image_tag_remove", newer, "reaction"),
+            json!({ "type": "image_tag_list", "requestId": "l" }),
+        ],
+    );
+    assert_eq!(replies[0]["removed"], false);
+    assert_eq!(replies[1]["removed"], true);
+    assert_eq!(replies[1]["tags"], json!(["漫画"]));
+    assert_eq!(replies[2]["removed"], true);
+    assert_eq!(
+        replies[3]["items"],
+        json!([{ "name": "漫画", "imageCount": 2 }])
+    );
+
+    // The images and the existing image flow are exactly as before.
+    assert_eq!(blob_state(&vault), blobs_before);
+    let listed_again =
+        exchange(&tmp, &[json!({ "type": "image_list", "requestId": "l" })]).remove(0);
+    assert_eq!(listed_again["items"], listed["items"]);
+    assert_eq!(
+        read_back(
+            &tmp,
+            &older["blobId"],
+            older["sha256"].as_str().unwrap(),
+            &token
+        )
+        .unwrap(),
+        first
+    );
+
+    // A backup carries the tags and is verified.
+    let dest = tmp.0.join("backups");
+    std::fs::create_dir(&dest).unwrap();
+    let response = &exchange(
+        &tmp,
+        &[json!({ "type": "vault_backup", "requestId": "b", "directory": dest })],
+    )[0];
+    assert_eq!(response["ok"], true, "{response}");
+    let copy = PathBuf::from(response["backupPath"].as_str().unwrap());
+    let tags = |path: &Path| -> Vec<String> {
+        let db =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let mut statement = db
+            .prepare("SELECT t.name || '|' || l.blob_id FROM image_tag_links l JOIN image_tags t ON t.id = l.tag_id ORDER BY 1")
+            .unwrap();
+        let rows = statement.query_map([], |row| row.get(0)).unwrap();
+        rows.collect::<Result<_, _>>().unwrap()
+    };
+    assert_eq!(tags(&copy), tags(&vault));
+    assert_eq!(tags(&copy).len(), 2);
+
+    // An image removed from the file takes its tags; the vault stays consistent and usable.
+    {
+        let db = Connection::open(&vault).unwrap();
+        db.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        let id = older["blobId"].as_i64().unwrap();
+        db.execute_batch(&format!(
+            "BEGIN; DELETE FROM saved_images WHERE blob_id = {id}; DELETE FROM image_blobs WHERE id = {id}; COMMIT;"
+        ))
+        .unwrap();
+        let integrity: String = db
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok");
+        let broken: i64 = db
+            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(broken, 0);
+    }
+    let replies = exchange(
+        &tmp,
+        &[
+            json!({ "type": "image_tag_list", "requestId": "l" }),
+            json!({ "type": "image_tags_get", "requestId": "g", "blobId": older["blobId"] }),
+            json!({ "type": "image_tag_search", "requestId": "s", "tag": "漫画" }),
+        ],
+    );
+    assert_eq!(
+        replies[0]["items"],
+        json!([{ "name": "漫画", "imageCount": 1 }])
+    );
+    assert_eq!(replies[1]["error"], "blob_missing");
+    assert_eq!(replies[2]["items"].as_array().unwrap().len(), 1);
+    assert_eq!(replies[2]["items"][0]["blobId"], newer["blobId"]);
 }

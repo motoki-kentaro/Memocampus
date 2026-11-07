@@ -10,6 +10,7 @@ mod image_original;
 mod image_protocol;
 mod image_publication;
 mod image_query;
+mod image_tags;
 mod images;
 mod launch;
 mod location;
@@ -376,6 +377,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Some("image_list" | "image_thumbnails" | "image_sources") => {
                 write_message(&image_query::handle(&mut session, &value))?;
+            }
+            Some(
+                "image_tags_get" | "image_tag_add" | "image_tag_remove" | "image_tag_list"
+                | "image_tag_search",
+            ) => {
+                write_message(&image_tags::handle(&mut session, &value))?;
             }
             Some("image_mcp_public_set") => {
                 write_message(&image_publication::handle(&mut session, &value))?;

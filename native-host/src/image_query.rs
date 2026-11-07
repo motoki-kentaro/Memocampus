@@ -26,7 +26,7 @@ fn result_type(kind: &str) -> &'static str {
     }
 }
 
-fn cursor(message: &Value) -> Result<Option<ImageCursor>, &'static str> {
+pub(crate) fn cursor(message: &Value) -> Result<Option<ImageCursor>, &'static str> {
     match message.get("cursor") {
         None | Some(Value::Null) => Ok(None),
         Some(value) => {
@@ -40,7 +40,7 @@ fn cursor(message: &Value) -> Result<Option<ImageCursor>, &'static str> {
     }
 }
 
-fn limit(message: &Value, max: u32) -> Result<u32, &'static str> {
+pub(crate) fn limit(message: &Value, max: u32) -> Result<u32, &'static str> {
     match message.get("limit") {
         None | Some(Value::Null) => Ok(max),
         Some(value) => value
@@ -66,7 +66,7 @@ fn size_of(value: &impl Serialize) -> usize {
 
 /// Takes items in order until the budget is spent (always at least one). Returns them and
 /// whether the list was cut short.
-fn within_budget<T: Serialize>(items: Vec<T>, budget: usize) -> (Vec<T>, bool) {
+pub(crate) fn within_budget<T: Serialize>(items: Vec<T>, budget: usize) -> (Vec<T>, bool) {
     let mut used = 0;
     let mut kept = Vec::new();
     let total = items.len();
