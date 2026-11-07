@@ -11,9 +11,27 @@
 // - Right-click (or the context-menu key) on a tile offers copying and exporting the original.
 // - Focus: the history panel takes focus only when opened from the keyboard, the menu whenever it
 //   opens; both give it back to their tile when closed, and async results never move it.
+// - Tags (Issue #44): the details of a selected image show its tags and let the user add one (typed
+//   or picked from the tags in use) or remove one. A tag filter replaces `image_list` by
+//   `image_tag_search` as the source of the same grid; everything else (thumbnails, paging, copy,
+//   export, details) is shared. Tag writes carry the vault token of the list they were made from,
+//   so the host refuses them in any other vault. The filter, the picker and the details belong to
+//   the vault: a vault change drops all of them. Tag names are shown as the host normalized them.
 
 import { SearchError, VAULT_UNAVAILABLE_CODES } from "./search-client.js";
-import { THUMBNAIL_BATCH, describeSourceUrl, fetchThumbnails, listImages, listSources, setMcpPublic, shortMime } from "./image-client.js";
+import {
+  THUMBNAIL_BATCH,
+  changeImageTag,
+  describeSourceUrl,
+  fetchThumbnails,
+  getImageTags,
+  listImages,
+  listSources,
+  listTags,
+  searchImagesByTag,
+  setMcpPublic,
+  shortMime,
+} from "./image-client.js";
 import { formatFullDate } from "./format.js";
 import { copyImage, exportImage, rebuildThumbnail } from "./image-original.js";
 
@@ -21,6 +39,11 @@ const LOAD_MARGIN = "400px";
 const KEEP_MARGIN = "2500px";
 const BATCH_DELAY_MS = 30;
 const MENU_MARGIN = 4;
+const EMPTY_TEXT = "保存された画像はまだありません。ページ上の画像を右クリックして「Memocampusへ保存」を選ぶと、ここに表示されます。";
+/** Messages for tag requests where the general one would point the wrong way. */
+const TAG_MESSAGES = {
+  blob_missing: "この画像がVaultに見つかりません。一覧を更新してください。",
+};
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -52,6 +75,25 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
   const statusLine = $("#gallery-status");
   const menu = $("#gallery-menu");
   const menuItems = [$("#gallery-menu-copy"), $("#gallery-menu-export")];
+  const filterButton = $("#gallery-tag-filter");
+  const filterChip = $("#gallery-filter");
+  const filterName = $("#gallery-filter-name");
+  const filterClear = $("#gallery-filter-clear");
+  const tagsList = $("#gallery-tags");
+  const tagsEmpty = $("#gallery-tags-empty");
+  const tagInput = $("#gallery-tag-input");
+  const tagAdd = $("#gallery-tag-add");
+  const tagChoose = $("#gallery-tag-choose");
+  const tagsMessage = $("#gallery-tags-message");
+  const picker = $("#gallery-tag-picker");
+  const pickerTitle = $("#gallery-tag-picker-title");
+  const pickerForm = $("#gallery-tag-picker-form");
+  const pickerInput = $("#gallery-tag-picker-input");
+  const pickerApply = $("#gallery-tag-picker-apply");
+  const pickerMessage = $("#gallery-tag-picker-message");
+  const pickerList = $("#gallery-tag-picker-list");
+  const pickerMore = $("#gallery-tag-picker-more");
+  const pickerClose = $("#gallery-tag-picker-close");
 
   let generation = 0;
   let tiles = new Map(); // blobId -> { item, li, button, img, status, url }
@@ -62,7 +104,9 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
   let vaultToken = null;
   let queue = new Set();
   let batchTimer = null;
-  let selected = null; // { blobId, next, generation }
+  let selected = null; // { blobId, item, next, tags: string[] | null, busy }
+  let filter = null; // { tag }: the grid shows the images with this tag (normalized once the host answered)
+  let pickerState = null; // { mode: "filter" | "add", next, loading, opener }
   let hasNew = false;
   let refreshing = false;
   let rebuildQueue = [];
@@ -102,7 +146,7 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
   /** Drops everything of the current generation: tiles, object URLs, pending work, details. */
   function reset() {
     // Focus inside what is removed would fall to the document; keep it in the Image tab instead.
-    const focusLost = [grid, details, menu].some((element) => element.contains(document.activeElement));
+    const focusLost = [grid, details, menu, picker].some((element) => element.contains(document.activeElement));
     generation += 1;
     for (const tile of tiles.values()) {
       loadObserver.unobserve?.(tile.li);
@@ -123,11 +167,21 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     started = false;
     selected = null;
     details.hidden = true;
+    tagsList.replaceChildren();
+    setTagsMessage("");
+    closePicker({ restoreFocus: false });
     errorBox.hidden = true;
     empty.hidden = true;
     moreButton.hidden = true;
     summary.textContent = "";
+    updateTagControls();
     if (focusLost) scroller.focus();
+  }
+
+  /** The vault changed under the list (another window): its filter means nothing in the new one. */
+  function vaultMismatch() {
+    setFilter(null);
+    return reload();
   }
 
   function showStatus(text, isError = false) {
@@ -180,13 +234,17 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     started = true;
     errorBox.hidden = true;
     try {
-      const page = await listImages(next, { send });
+      const page = filter ? await searchImagesByTag(filter.tag, next, { send }) : await listImages(next, { send });
       if (token !== generation) return false;
       if (vaultToken && page.vaultToken !== vaultToken) {
         // The vault changed between pages (e.g. from another window): start over in the new one.
-        return reload();
+        return vaultMismatch();
       }
       vaultToken = page.vaultToken;
+      if (filter && page.tag !== filter.tag) {
+        filter = { tag: page.tag }; // the host's normalized name, used for the next pages too
+        renderFilter();
+      }
       const fragment = document.createDocumentFragment();
       for (const item of page.items) {
         if (tiles.has(item.blobId)) continue;
@@ -198,12 +256,21 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
       }
       grid.append(fragment);
       next = page.next;
+      empty.textContent = emptyText();
       empty.hidden = tiles.size !== 0;
       // A fresh first page is the newest state; anything announced before is now shown.
       if (firstPage) setNew(false);
       return true;
     } catch (error) {
       if (token !== generation) return false;
+      if (filter && error instanceof SearchError && error.code === "invalid_tag") {
+        // A typed filter the host does not accept as a tag: back to all images, and say why.
+        loadingPage = false;
+        setFilter(null);
+        const loaded = reload();
+        showStatus(error.message, true);
+        return loaded;
+      }
       started = tiles.size > 0;
       showError(error);
       return false;
@@ -212,6 +279,7 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
         loadingPage = false;
         moreButton.hidden = !next;
         updateSummary();
+        updateTagControls();
       }
     }
   }
@@ -262,7 +330,7 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
       const result = await fetchThumbnails(ids, { send });
       if (token !== generation) return; // answer for a vault or list that is gone
       if (result.vaultToken !== vaultToken) {
-        reload();
+        vaultMismatch();
         return;
       }
       for (const id of ids) {
@@ -500,7 +568,7 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
       const page = await listSources(state.blobId, state.next, { send });
       if (token !== generation || selected !== state) return;
       if (page.vaultToken !== vaultToken) {
-        reload();
+        vaultMismatch();
         return;
       }
       const fragment = document.createDocumentFragment();
@@ -537,13 +605,20 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     const tile = tiles.get(blobId);
     if (!tile) return;
     const { item } = tile;
-    selected = { blobId, next: null };
+    selected = { blobId, item, next: null, tags: null, busy: false };
     detailsMeta.textContent = `${shortMime(item.mimeType)}（${item.mimeType}）・${item.width}×${item.height}・${Math.max(1, Math.round(item.byteLength / 1024))} KB・保存${item.saveCount}回・最終保存 ${formatFullDate(new Date(item.lastSavedAt).toISOString())}`;
     sourcesList.replaceChildren();
     sourcesMore.hidden = true;
+    tagsList.replaceChildren();
+    tagsEmpty.hidden = true;
+    tagInput.value = "";
+    setTagsMessage("タグを読み込んでいます…");
+    if (pickerState?.mode === "add") closePicker({ restoreFocus: false });
     details.hidden = false;
+    updateTagControls();
     // Only now, never when the history arrives later: by then the user may be elsewhere.
     if (keyboard) details.focus();
+    void loadTags(selected);
     void loadSources(selected);
   }
 
@@ -552,8 +627,314 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     const blobId = selected?.blobId;
     details.hidden = true;
     selected = null;
+    if (pickerState?.mode === "add") closePicker({ restoreFocus: false });
+    updateTagControls();
     if (hadFocus && blobId !== undefined) focusTile(blobId);
   }
+
+  // --- Tags of the selected image ------------------------------------------------------------
+
+  function setTagsMessage(text, isError = false) {
+    tagsMessage.textContent = text;
+    tagsMessage.className = isError ? "gallery-tags-message is-error" : "gallery-tags-message";
+  }
+
+  function tagErrorText(error, fallback) {
+    if (!(error instanceof SearchError)) return fallback;
+    return TAG_MESSAGES[error.code] ?? error.message;
+  }
+
+  /** Tag controls work only for a loaded image of a known vault, one request at a time. */
+  function updateTagControls() {
+    filterButton.disabled = !vaultToken;
+    const usable = Boolean(selected && vaultToken && selected.tags && !selected.busy);
+    tagInput.disabled = !usable;
+    tagAdd.disabled = !usable;
+    tagChoose.disabled = !usable;
+    for (const li of tagsList.children) {
+      const remove = li.querySelector("button.tag-chip-remove");
+      if (remove) remove.disabled = !usable;
+    }
+  }
+
+  function renderTags(state) {
+    const fragment = document.createDocumentFragment();
+    for (const name of state.tags) {
+      const li = document.createElement("li");
+      li.className = "tag-chip";
+      const text = document.createElement("span");
+      text.className = "tag-chip-name";
+      text.textContent = name;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "tag-chip-remove";
+      remove.dataset.tag = name;
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", `タグ「${name}」を外す`);
+      remove.title = `タグ「${name}」を外す`;
+      li.append(text, remove);
+      fragment.append(li);
+    }
+    tagsList.replaceChildren(fragment);
+    tagsEmpty.hidden = state.tags.length !== 0;
+    updateTagControls();
+  }
+
+  async function loadTags(state) {
+    const token = generation;
+    try {
+      const result = await getImageTags(state.blobId, { send });
+      if (token !== generation || selected !== state) return;
+      if (result.vaultToken !== vaultToken) {
+        vaultMismatch();
+        return;
+      }
+      state.tags = result.tags;
+      setTagsMessage("");
+      renderTags(state);
+    } catch (error) {
+      if (token !== generation || selected !== state) return;
+      setTagsMessage(tagErrorText(error, "タグを読み込めませんでした。"), true);
+      if (error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code)) onVaultUnavailable();
+    }
+  }
+
+  /**
+   * Adds or removes one tag of the selected image. Nothing is shown as done before the host
+   * confirmed it; on failure the shown tags stay as they were. One request at a time per image.
+   */
+  async function changeTag(kind, raw) {
+    const state = selected;
+    if (!state || state.busy || !state.tags || !vaultToken) return;
+    if (typeof raw !== "string" || raw.trim() === "") {
+      setTagsMessage("タグを入力してください。", true);
+      return;
+    }
+    const token = generation;
+    state.busy = true;
+    updateTagControls();
+    setTagsMessage(kind === "add" ? "タグを追加しています…" : "タグを外しています…");
+    try {
+      const result = await changeImageTag(kind, state.item, raw, vaultToken, { send });
+      if (token !== generation || selected !== state) return;
+      state.tags = result.tags;
+      renderTags(state);
+      if (kind === "add") {
+        tagInput.value = "";
+        setTagsMessage(result.changed ? `タグ「${result.tag}」を付けました。` : `タグ「${result.tag}」は既に付いています。`);
+      } else {
+        setTagsMessage(result.changed ? `タグ「${result.tag}」を外しました。` : `タグ「${result.tag}」は付いていません。`);
+      }
+      followFilter(state);
+    } catch (error) {
+      if (token !== generation || selected !== state) return;
+      if (error instanceof SearchError && error.code === "vault_switched") {
+        // The list belongs to a vault that is no longer active; the host wrote nothing anywhere.
+        vaultMismatch();
+        showStatus(error.message, true);
+        return;
+      }
+      setTagsMessage(tagErrorText(error, "タグを変更できませんでした。"), true);
+      if (error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code)) onVaultUnavailable();
+    } finally {
+      if (selected === state) {
+        state.busy = false;
+        updateTagControls();
+      }
+    }
+  }
+
+  /** Under a tag filter, the grid follows the confirmed tags of the edited image. */
+  function followFilter(state) {
+    if (!filter) return;
+    const has = state.tags.includes(filter.tag);
+    if (!has && tiles.has(state.blobId)) removeTile(state.blobId);
+    else if (has && !tiles.has(state.blobId)) insertTile(state.item);
+  }
+
+  function emptyText() {
+    return filter ? `タグ「${filter.tag}」の付いた画像はありません。` : EMPTY_TEXT;
+  }
+
+  function removeTile(blobId) {
+    const tile = tiles.get(blobId);
+    if (!tile) return;
+    loadObserver.unobserve?.(tile.li);
+    keepObserver.unobserve?.(tile.li);
+    if (tile.url) URL.revokeObjectURL(tile.url);
+    tiles.delete(blobId);
+    queue.delete(blobId);
+    rebuildQueue = rebuildQueue.filter((id) => id !== blobId);
+    if (menuFor === blobId) closeMenu({ restoreFocus: false });
+    tile.li.remove();
+    empty.hidden = tiles.size !== 0 || Boolean(next);
+    updateSummary();
+  }
+
+  /**
+   * Puts an image back at its place in the list order. It was shown before, so it is never older
+   * than the next page's cursor: if no loaded tile is older, it belongs at the end (the next page
+   * starts after the cursor and would never bring it).
+   */
+  function insertTile(item) {
+    const newer = (a, b) => a.lastSavedAt > b.lastSavedAt || (a.lastSavedAt === b.lastSavedAt && a.blobId > b.blobId);
+    // In grid order: tiles put back earlier are no longer in insertion order.
+    const before = [...grid.children].map((li) => tiles.get(Number(li.dataset.blobId))).find((tile) => tile && newer(item, tile.item));
+    const tile = renderTile(item);
+    tiles.set(item.blobId, tile);
+    if (before) grid.insertBefore(tile.li, before.li);
+    else grid.append(tile.li);
+    loadObserver.observe(tile.li);
+    keepObserver.observe(tile.li);
+    empty.hidden = true;
+    updateSummary();
+  }
+
+  // --- Tag filter and the picker of tags in use ------------------------------------------------
+
+  function renderFilter() {
+    filterChip.hidden = !filter;
+    filterName.textContent = filter ? `タグ: ${filter.tag}` : "";
+  }
+
+  /** Sets the filter (null: all images); the caller reloads the list. */
+  function setFilter(tag) {
+    filter = tag === null ? null : { tag };
+    renderFilter();
+  }
+
+  /** Shows the images with `tag` (null: all images again), from the top of a new list. */
+  function applyFilter(tag) {
+    closePicker({ restoreFocus: false });
+    setFilter(tag);
+    scroller.scrollTop = 0;
+    void reload();
+  }
+
+  function openPicker(mode, opener) {
+    if (!vaultToken || (mode === "add" && (!selected?.tags || selected.busy))) return;
+    pickerState = { mode, next: null, loading: false, opener };
+    pickerTitle.textContent = mode === "filter" ? "タグで絞り込み" : "既存のタグから選ぶ";
+    pickerForm.hidden = mode !== "filter";
+    pickerInput.value = "";
+    pickerList.replaceChildren();
+    pickerMore.hidden = true;
+    pickerMessage.textContent = "タグを読み込んでいます…";
+    picker.hidden = false;
+    if (mode === "filter") pickerInput.focus();
+    else picker.focus();
+    void loadTagPage(pickerState);
+  }
+
+  function closePicker({ restoreFocus }) {
+    picker.hidden = true;
+    if (!pickerState) return;
+    const opener = pickerState.opener;
+    pickerState = null;
+    if (restoreFocus && opener && !opener.disabled) opener.focus();
+  }
+
+  /** One page of the tags in use (at most 200); more only when the user asks for them. */
+  async function loadTagPage(state) {
+    if (state.loading) return;
+    state.loading = true;
+    pickerMore.disabled = true;
+    const token = generation;
+    try {
+      const page = await listTags(state.next, { send });
+      if (token !== generation || pickerState !== state) return;
+      if (page.vaultToken !== vaultToken) {
+        vaultMismatch();
+        return;
+      }
+      const fragment = document.createDocumentFragment();
+      for (const tag of page.items) {
+        const li = document.createElement("li");
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "tag-option";
+        option.dataset.tag = tag.name;
+        const name = document.createElement("span");
+        name.textContent = tag.name;
+        const count = document.createElement("span");
+        count.className = "tag-option-count";
+        count.textContent = `${tag.imageCount}`;
+        option.append(name, count);
+        const owned = state.mode === "add" && Boolean(selected?.tags?.includes(tag.name));
+        option.setAttribute("aria-disabled", String(owned));
+        option.setAttribute("aria-label", owned ? `${tag.name}（付与済み）` : `${tag.name}、${tag.imageCount}件`);
+        li.append(option);
+        fragment.append(li);
+      }
+      pickerList.append(fragment);
+      state.next = page.next;
+      pickerMore.hidden = !page.next;
+      pickerMessage.textContent = pickerList.children.length === 0 ? "登録済みのタグはまだありません。" : "";
+    } catch (error) {
+      if (token !== generation || pickerState !== state) return;
+      pickerMessage.textContent = tagErrorText(error, "タグの一覧を読み込めませんでした。");
+      if (error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code)) onVaultUnavailable();
+    } finally {
+      if (pickerState === state) {
+        state.loading = false;
+        pickerMore.disabled = false;
+      }
+    }
+  }
+
+  function choose(name) {
+    const state = pickerState;
+    if (!state) return;
+    if (state.mode === "filter") {
+      applyFilter(name);
+      return;
+    }
+    closePicker({ restoreFocus: true });
+    void changeTag("add", name);
+  }
+
+  function applyTyped() {
+    if (pickerInput.value.trim() === "") {
+      pickerMessage.textContent = "タグを入力してください。";
+      return;
+    }
+    applyFilter(pickerInput.value);
+  }
+
+  filterButton.addEventListener("click", () => openPicker("filter", filterButton));
+  filterClear.addEventListener("click", () => {
+    if (!filter) return;
+    applyFilter(null);
+    filterButton.focus();
+  });
+  tagChoose.addEventListener("click", () => openPicker("add", tagChoose));
+  tagAdd.addEventListener("click", () => void changeTag("add", tagInput.value));
+  tagInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.isComposing) return;
+    event.preventDefault();
+    void changeTag("add", tagInput.value);
+  });
+  tagsList.addEventListener("click", (event) => {
+    const remove = event.target.closest?.("button.tag-chip-remove");
+    if (remove && !remove.disabled) void changeTag("remove", remove.dataset.tag);
+  });
+  pickerList.addEventListener("click", (event) => {
+    const option = event.target.closest?.("button.tag-option");
+    if (option && option.getAttribute("aria-disabled") !== "true") choose(option.dataset.tag);
+  });
+  pickerApply.addEventListener("click", applyTyped);
+  pickerInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.isComposing) return;
+    event.preventDefault();
+    applyTyped();
+  });
+  pickerMore.addEventListener("click", () => pickerState && void loadTagPage(pickerState));
+  pickerClose.addEventListener("click", () => closePicker({ restoreFocus: true }));
+  picker.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    closePicker({ restoreFocus: true });
+  });
 
   grid.addEventListener("click", (event) => {
     const button = event.target.closest?.("button.tile");
@@ -614,6 +995,7 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
     /** The active vault changed: never show the old vault's images, even for a moment. */
     vaultChanged() {
       setNew(false); // "new" referred to the previous vault
+      setFilter(null); // the filter, picker and details belong to the old vault
       reset();
       stale = true;
       if (isActive()) reload();
@@ -626,7 +1008,7 @@ export function createImageGallery({ send, isActive, openUrl, openSettings, onVa
         stale = true;
         return;
       }
-      if (scroller.scrollTop === 0 && details.hidden && !refreshing) void refresh();
+      if (scroller.scrollTop === 0 && details.hidden && picker.hidden && !refreshing) void refresh();
     },
     get size() {
       return tiles.size;

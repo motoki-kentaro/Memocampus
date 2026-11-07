@@ -108,11 +108,15 @@ and shows a dot when new images were saved while you were scrolled down.
 - Images saved without a thumbnail show their type label; the thumbnail is rebuilt from the original when the tile
   comes into view and added to the vault (the original and its history are not changed).
 
-**Image tags (#44, Slice 1: storage and native host only).** Saved images can be tagged afterwards through native
-host messages (`image_tag_add`, `image_tag_remove`, `image_tags_get`, `image_tag_list`, `image_tag_search`). Tags are
-trimmed, lowercased and limited to 64 characters; a tag no image has is removed automatically. There is **no tag UI in
-the side panel yet, no tag input when saving, and the MCP server does not read tags.** See
-`docs/issue-044-image-tags.md`.
+**Image tags (#44).** Saved images can be tagged afterwards, in the Image tab:
+
+- Click a tile: its details show **タグ** above the save history. Type a tag and press Enter (or **追加**), or
+  **既存のタグから選ぶ**; × removes one. Tags are trimmed, lowercased and limited to 64 characters by the host; what
+  it stored is what is shown.
+- **タグで絞り込み** (toolbar): pick or type one tag to show only the images that have it; copy and export work as
+  usual from there. × on the "タグ: …" chip shows all images again.
+- One tag at a time (no AND/OR), no tag input when saving, and **the MCP server does not read tags.** A tag no image
+  has is removed automatically. See `docs/issue-044-image-tags.md`.
 
 Design and protocol: `docs/image-vault-design.md`. Manual test checklist: `docs/image-vault-dogfood-slice2.md`.
 

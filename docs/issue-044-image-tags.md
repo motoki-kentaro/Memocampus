@@ -1,12 +1,14 @@
-# Issue #44: image tags — Slice 1 (schema 7, vault, native host)
+# Issue #44: image tags — Slice 1 (schema 7, vault, native host) and Slice 2 (Image tab)
 
 Tags the user gives saved images **afterwards**, to find them again (for example reaction images or comic panels kept
-from a forum). Slice 1 is the base only: the vault format, the rules for a tag, and native host messages.
+from a forum). Collecting stays effortless; sorting and finding come later. Slice 1 is the base: the vault format, the
+rules for a tag, and native host messages. Slice 2 is the Image tab: editing tags and filtering by one tag
+(see *Slice 2: the Image tab*).
 
-**Not in Slice 1:**
+**Not in Slices 1 and 2:**
 
 - No tag input when saving: right-click saving is unchanged.
-- No tag editing, tag display or tag search in the side panel (Slice 2 and later).
+- No search by several tags, fuzzy or full-text search, no "untagged" filter, no bulk editing.
 - **No MCP exposure**: the MCP server reads no tag (see *Privacy*).
 - No tags on visited pages, no hierarchy, colours, synonyms or automatic tags.
 - No conversion of schema 6 vaults.
@@ -141,10 +143,72 @@ plus `_result`) and `requestId`. A failure is `{ ok: false, type, requestId, err
   flow, tagged, searched, untagged, backed up, one image removed, `integrity_check`, `foreign_key_check`).
 - `visible-store`, `mcp-server`: schema 6 refused; tags never reach a reader.
 
-## Slice 2 and later
+## Slice 2: the Image tab
 
-- Side panel: tag editing on a tile (`image_tags_get` / `image_tag_add` / `image_tag_remove`), the tag list, search.
-- Possibly tags in `image_list` items, to avoid one request per tile.
+No host or schema change: the five messages of Slice 1 are used as they are, and `image_list` is unchanged.
+
+**Editing (in the details of an image).** Clicking a tile opens its details as before (now titled 画像の詳細); above
+the save history (保存履歴, unchanged: image URL, page URL, frame URL, dates) a **タグ** section shows the image's tags
+as small chips, each with a × to remove it, and a one-line form: a text field with **追加**, and **既存のタグから選ぶ**.
+
+- The tags are read when the image is opened (`image_tags_get`), not for every tile: no request per tile.
+- What the user typed goes to the host unchanged; the extension never normalizes. The chips, messages and the filter
+  show the host's answer (`tag`, `tags`): "  Reaction  " becomes the chip "reaction".
+- Nothing is shown as done before the host confirmed it. While a request runs, every tag control of the image is
+  disabled (no double sends; Enter while composing Japanese text does not submit); on failure the shown tags and the
+  typed text stay, with the reason (`invalid_tag`, `too_many_tags`, `blob_missing` — "一覧を更新してください" —,
+  vault errors). Whitespace alone is not sent.
+- **既存のタグから選ぶ** opens the tag picker: the tags in use, by name with their image count, 200 per page
+  (`image_tag_list`), **さらに表示** for the next page; a tag the image already has is shown but not selectable.
+- Copying and exporting stay in the tile's right-click menu, unchanged; the tag editor is only in the details.
+
+**Filtering (toolbar).** **タグで絞り込み** opens the same picker: pick a tag, or type one and press **絞り込む**.
+The grid then shows the images with that tag, newest first, through `image_tag_search` — the same grid, thumbnails,
+paging, details, copy and export as the unfiltered list (one code path, only the request differs). The toolbar shows a
+chip "タグ: <name>" (the host's normalized name) with × to go back to all images. No match: "タグ「<name>」の付いた画像は
+ありません。". A typed name the host refuses: back to all images, with the reason in the status line.
+
+Under a filter, removing that tag from the open image takes its tile out of the grid at once; giving it back puts the
+tile back at its place in the list order (the details stay open, so a mistake can be undone).
+
+**Vault and async rules.** These extend the existing generation rule of the Image tab: every answer belongs to the list
+it was asked for, and is dropped if the list was reset since.
+
+- A vault change (in this panel or detected through a `vaultToken` that differs, e.g. switched from another window)
+  drops the filter, the open picker, the details and every late answer of the old vault; the list restarts unfiltered.
+- Tag writes name the image (`blobId`, `sha256`) and the vault of the list (`vaultToken`). If the host answers
+  `vault_switched`, nothing was written anywhere; the panel says so and restarts in the active vault.
+- Without a usable vault (no list loaded) the filter button and all tag controls are disabled.
+
+**Tests** (`tests/extension/image-tags.test.js`, fake host that keeps tags per vault): editing, reuse through the picker
+with paging, refusals, double sends, filtering with paging, typed and refused filters, answers overtaken by a newer
+filter, the grid following tag edits, copy and export from a filtered grid, vault switches with late answers, a write
+refused for another vault, no usable vault. An opt-in end-to-end test drives the same side panel code against the real
+host binary in a temporary vault (`MEMOCAMPUS_TEST_HOST`): tag, find by tag, copy the original, untag, a write for
+another vault refused, then `integrity_check` and `foreign_key_check`.
+
+### Checking it in Chrome (for the PO)
+
+With the extension and host of this branch, in a **test vault** (Settings → 場所を選んで新規作成…):
+
+1. Save two or three images by right-click → **Memocampusへ保存**, as before (no tag prompt appears).
+2. Image tab → click an image: the details show **タグ** ("タグはまだありません。") above **保存履歴** (image and page URLs).
+3. Type `  Reaction  ` and press Enter: the chip **reaction** appears. Type `REACTION`: "既に付いています".
+4. Add `ツッコミ` with IME: Enter that confirms the conversion must not add the tag; the next Enter does.
+5. Another image → **既存のタグから選ぶ**: the tags with counts; pick one; a tag the image has is greyed out.
+6. Remove a tag with ×.
+7. Toolbar **タグで絞り込み** → pick a tag: only those images; the chip "タグ: …" is shown. Right-click a tile →
+   **画像をコピー**, paste into a text field elsewhere (e.g. a reply box): the image is pasted.
+8. Under the filter, remove that tag from an image: its tile disappears; add it again: it comes back in place.
+9. × on the filter chip: all images again. Filter by a typed tag nobody has: the empty message names it.
+10. With a filter active, switch to another vault in Settings, back to the Image tab: no filter, only that vault's images.
+11. Check the layout at the side panel's narrow and wide widths, in light and dark mode, and with the keyboard
+    (Tab to the controls, Escape closes the picker and returns focus).
+
+## Later
+
 - Tag input when saving, if still wanted.
+- Tags shown on tiles (would need tags in `image_list` items, to avoid one request per tile).
+- Search by several tags, an "untagged" filter, bulk editing.
 - MCP: only after a decision on whether and which tags may be published.
 - An image deletion command will rely on D5 as it is.

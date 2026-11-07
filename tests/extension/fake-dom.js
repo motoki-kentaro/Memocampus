@@ -71,8 +71,21 @@ class FakeElement {
     }
   }
   replaceChildren(...nodes) {
+    for (const child of this.children) child.parent = null;
     this.children = [];
     this.append(...nodes);
+  }
+  insertBefore(node, reference) {
+    const index = this.children.indexOf(reference);
+    if (index < 0) throw new Error("reference is not a child");
+    node.parent = this;
+    this.children.splice(index, 0, node);
+    return node;
+  }
+  remove() {
+    if (!this.parent) return;
+    this.parent.children = this.parent.children.filter((child) => child !== this);
+    this.parent = null;
   }
 
   matches(selector) {
@@ -143,8 +156,13 @@ export function createDocument() {
   for (const id of [
     "panel-image", "panel-settings", "settings-attention", "error", "empty", "load-more", "open-vault-settings", "record-status", "queue-status", "policy-status", "policy-initialize", "vault-approval",
     "gallery-new-dot", "gallery-error", "gallery-open-settings", "gallery-empty", "gallery-more", "gallery-details", "gallery-sources-more", "gallery-menu",
+    "gallery-filter", "gallery-tags-empty", "gallery-tag-picker", "gallery-tag-picker-more",
   ]) {
     document.querySelector(`#${id}`).hidden = true;
+  }
+  // Initial `disabled` state as written in sidepanel.html.
+  for (const id of ["gallery-tag-filter", "gallery-tag-input", "gallery-tag-add", "gallery-tag-choose"]) {
+    document.querySelector(`#${id}`).disabled = true;
   }
   document.$ = (selector) => document.querySelector(selector);
   return document;
@@ -207,6 +225,62 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
       if (!host.active) return { ...base, state: "not_configured", vaultPath: null, counts: null, location: null };
       return { ...base, state: "ready", vaultPath: host.active, counts: { visits: host.vaults[host.active].length, snapshots: 0 }, location: { verdict: "no_issue_detected", reasons: [] } };
     },
+    /** `tags[vault]` maps a blob id to its tag names; `tagError` makes the next tag write fail. */
+    tags: {},
+    tagError: null,
+    tagWriteDelay: 0,
+    /** A stand-in for the host's normalization: trim, single spaces, lowercase, 1..64 characters. */
+    normalizeTag(raw) {
+      if (typeof raw !== "string" || /[\u0000-\u001f\u200b]/.test(raw)) return null;
+      const name = raw.split(/\s+/).filter(Boolean).join(" ").toLowerCase();
+      return name.length >= 1 && [...name].length <= 64 ? name : null;
+    },
+    handleTag(message, vault, vaultToken, all) {
+      const type = `${message.type}_result`;
+      const fail = (error) => ({ ok: false, type, requestId: message.requestId, error });
+      const reply = (fields) => ({ ok: true, type, requestId: message.requestId, vaultToken, ...fields });
+      const tags = (host.tags[vault] ??= {});
+      const of = (blobId) => [...(tags[blobId] ?? [])].sort();
+      if (message.type === "image_tags_get") {
+        if (!all.some((item) => item.blobId === message.blobId)) return fail("blob_missing");
+        return reply({ blobId: message.blobId, tags: of(message.blobId) });
+      }
+      if (message.type === "image_tag_list") {
+        const counts = new Map();
+        for (const names of Object.values(tags)) for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
+        const names = [...counts.keys()].sort().filter((name) => message.cursor === null || name > message.cursor);
+        const page = names.slice(0, message.limit);
+        return reply({ items: page.map((name) => ({ name, imageCount: counts.get(name) })), next: names.length > message.limit ? page.at(-1) : null });
+      }
+      const name = host.normalizeTag(message.tag);
+      if (name === null) return fail("invalid_tag");
+      if (message.type === "image_tag_search") {
+        const found = all.filter((item) => (tags[item.blobId] ?? []).includes(name));
+        const start = message.cursor ? found.findIndex((item) => item.blobId === message.cursor.id) + 1 : 0;
+        const page = found.slice(start, start + message.limit);
+        const more = start + message.limit < found.length;
+        return reply({ tag: name, items: page, next: more ? { lastSavedAt: page.at(-1).lastSavedAt, id: page.at(-1).blobId } : null });
+      }
+      // image_tag_add / image_tag_remove
+      if (message.vaultToken !== vaultToken) return fail("vault_switched");
+      if (host.tagError) {
+        const error = host.tagError;
+        host.tagError = null;
+        return fail(error);
+      }
+      if (!all.some((item) => item.blobId === message.blobId && item.sha256 === message.sha256)) return fail("blob_missing");
+      const current = new Set(tags[message.blobId] ?? []);
+      let changed;
+      if (message.type === "image_tag_add") {
+        changed = !current.has(name);
+        if (changed && current.size >= 64) return fail("too_many_tags");
+        current.add(name);
+      } else {
+        changed = current.delete(name);
+      }
+      tags[message.blobId] = [...current];
+      return reply({ blobId: message.blobId, tag: name, [message.type === "image_tag_add" ? "added" : "removed"]: changed, tags: of(message.blobId) });
+    },
     handle(message) {
       host.requests.push(message);
       const reply = (fields) => ({ ok: true, requestId: message.requestId, ...fields });
@@ -243,6 +317,8 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
             return { blobId, mimeType: "image/png", width: 4, height: 2, data: PNG_THUMBNAIL };
           });
           response = reply({ type, vaultToken, items, deferred: [] });
+        } else if (message.type.startsWith("image_tag")) {
+          response = host.handleTag(message, vault, vaultToken, all);
         } else if (message.type === "image_mcp_public_set") {
           if (host.publicationError) response = { ok: false, type, requestId: message.requestId, error: host.publicationError };
           else response = reply({ type, vaultToken, savedImageId: message.savedImageId, mcpPublic: message.mcpPublic });

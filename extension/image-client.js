@@ -100,6 +100,61 @@ export async function setMcpPublic(savedImageId, mcpPublic, token, { send }) {
   return mcpPublic;
 }
 
+// --- Tags (Issue #44) ---------------------------------------------------------------------------
+// The host normalizes every tag (trim, spacing, lowercase, limits); nothing here repeats those
+// rules. What the host answers is the name shown and used afterwards.
+
+export const TAG_PAGE_SIZE = 200;
+
+function tagName(value) {
+  if (typeof value !== "string" || value === "") throw new SearchError("invalid_response");
+  return value;
+}
+
+function tagNames(value) {
+  if (!Array.isArray(value)) throw new SearchError("invalid_response");
+  return value.map(tagName);
+}
+
+/** The tags of one image, ordered by name. */
+export async function getImageTags(blobId, { send }) {
+  const response = await callHost({ type: "image_tags_get", blobId }, { send, resultType: "image_tags_get_result" });
+  if (response.blobId !== blobId) throw new SearchError("invalid_response");
+  return { tags: tagNames(response.tags), vaultToken: vaultToken(response) };
+}
+
+/**
+ * Adds (`kind: "add"`) or removes a tag of `item` in the vault named by `token`. The image is named
+ * by its id and bytes, so a request can only ever change that image of that vault; the host refuses
+ * anything else (`vault_switched`, `blob_missing`). Resolves with the image's tags after the change.
+ */
+export async function changeImageTag(kind, item, tag, token, { send }) {
+  const type = kind === "add" ? "image_tag_add" : "image_tag_remove";
+  const response = await callHost({ type, blobId: item.blobId, sha256: item.sha256, vaultToken: token, tag }, { send, resultType: `${type}_result` });
+  const changed = kind === "add" ? response.added : response.removed;
+  if (response.blobId !== item.blobId || response.vaultToken !== token || typeof changed !== "boolean") throw new SearchError("invalid_response");
+  return { tag: tagName(response.tag), changed, tags: tagNames(response.tags) };
+}
+
+/** One page of the tags in use, by name, with how many images have each. */
+export async function listTags(cursor, { send }) {
+  const response = await callHost({ type: "image_tag_list", cursor: cursor ?? null, limit: TAG_PAGE_SIZE }, { send, resultType: "image_tag_list_result" });
+  if (!Array.isArray(response.items)) throw new SearchError("invalid_response");
+  const next = response.next ?? null;
+  if (next !== null && (typeof next !== "string" || next === "")) throw new SearchError("invalid_response");
+  const items = response.items
+    .filter((item) => typeof item?.name === "string" && item.name !== "" && positiveInt(item.imageCount))
+    .map((item) => ({ name: item.name, imageCount: item.imageCount }));
+  return { items, next, vaultToken: vaultToken(response) };
+}
+
+/** The images with one tag (exact, after the host's normalization), in `listImages` form and order. */
+export async function searchImagesByTag(tag, cursor, { send }) {
+  const response = await callHost({ type: "image_tag_search", tag, cursor: cursor ?? null, limit: LIST_PAGE_SIZE }, { send, resultType: "image_tag_search_result" });
+  if (!Array.isArray(response.items)) throw new SearchError("invalid_response");
+  return { tag: tagName(response.tag), items: response.items.map(summary).filter(Boolean), next: cursorOf(response.next), vaultToken: vaultToken(response) };
+}
+
 /** How a recorded URL is shown: only http(s) URLs become openable links; the rest stay text. */
 export function describeSourceUrl(url) {
   if (typeof url !== "string" || url === "") return { text: "（記録なし）", href: null };
