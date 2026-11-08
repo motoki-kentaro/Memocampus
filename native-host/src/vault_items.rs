@@ -229,12 +229,12 @@ fn answer(
     match kind {
         "url_delete_preview" => {
             let url = url_of(message)?;
-            let ticket = session.ticket().map_err(|error| error.code())?;
-            let counts = session
-                .read(|db| url_counts(db, url))
-                .map_err(|error| error.code())?
-                .map_err(|_| "db_error")?;
-            fields.insert("vaultToken".into(), ticket.token.into());
+            // The counts and the token that a delete must name come from one vault (one resolution).
+            let (token, counts) = session
+                .read_with_token(|db| url_counts(db, url))
+                .map_err(|error| error.code())?;
+            let counts = counts.map_err(|_| "db_error")?;
+            fields.insert("vaultToken".into(), token.into());
             fields.insert("url".into(), url.into());
             fields.insert("counts".into(), json!(counts));
         }
@@ -250,12 +250,11 @@ fn answer(
         }
         "image_delete_preview" => {
             let target = target(message)?;
-            let ticket = session.ticket().map_err(|error| error.code())?;
-            let (byte_length, counts) = session
-                .read(|db| image_counts(db, target.blob_id, &target.sha256))
-                .map_err(|error| error.code())?
-                .map_err(ImageError::code)?;
-            fields.insert("vaultToken".into(), ticket.token.into());
+            let (token, preview) = session
+                .read_with_token(|db| image_counts(db, target.blob_id, &target.sha256))
+                .map_err(|error| error.code())?;
+            let (byte_length, counts) = preview.map_err(ImageError::code)?;
+            fields.insert("vaultToken".into(), token.into());
             fields.insert("blobId".into(), target.blob_id.into());
             fields.insert("sha256".into(), target.sha256.into());
             fields.insert("byteLength".into(), byte_length.into());

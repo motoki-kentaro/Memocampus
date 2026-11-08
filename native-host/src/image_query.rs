@@ -6,6 +6,7 @@
 //! sent from here. Each reply names the vault it came from (`vaultToken`) so the panel can drop
 //! answers from a vault that is no longer active.
 
+use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
@@ -106,18 +107,28 @@ fn answer(
     kind: &str,
     message: &Value,
 ) -> Result<Map<String, Value>, &'static str> {
-    let ticket = session.ticket().map_err(|error| error.code())?;
+    // One resolution of the active vault for the whole reply: its token and every item (also each
+    // thumbnail of a batch) come from that one connection, so a switch meanwhile cannot mix vaults.
+    let (token, fields) = session
+        .read_with_token(|db| read_reply(db, kind, message))
+        .map_err(|error| error.code())?;
+    let mut fields = fields?;
+    fields.insert("vaultToken".into(), token.into());
+    Ok(fields)
+}
+
+fn read_reply(
+    db: &Connection,
+    kind: &str,
+    message: &Value,
+) -> Result<Map<String, Value>, &'static str> {
     let budget = RESPONSE_BUDGET - 4096; // room for the envelope
     let mut fields = Map::new();
-    fields.insert("vaultToken".into(), ticket.token.into());
     match kind {
         "image_list" => {
             let after = cursor(message)?;
             let limit = limit(message, MAX_PAGE_SIZE)?;
-            let page = session
-                .read(|db| images::list_images(db, after, limit))
-                .map_err(|error| error.code())?
-                .map_err(ImageError::code)?;
+            let page = images::list_images(db, after, limit).map_err(ImageError::code)?;
             let (items, cut) = within_budget(page.items, budget);
             let next = if cut {
                 items.last().map(|last| ImageCursor {
@@ -147,10 +158,7 @@ fn answer(
                     deferred.push(id);
                     continue;
                 }
-                let thumbnail = session
-                    .read(|db| images::thumbnail(db, id))
-                    .map_err(|error| error.code())?
-                    .map_err(ImageError::code)?;
+                let thumbnail = images::thumbnail(db, id).map_err(ImageError::code)?;
                 let item = match thumbnail {
                     Some(t) => {
                         json!({ "blobId": id, "mimeType": t.mime_type, "width": t.width, "height": t.height, "data": base64_encode(&t.data) })
@@ -172,10 +180,7 @@ fn answer(
             let id = blob_id(message.get("blobId"))?;
             let after = cursor(message)?;
             let limit = limit(message, MAX_SOURCES_PAGE)?;
-            let page = session
-                .read(|db| images::image_sources(db, id, after, limit))
-                .map_err(|error| error.code())?
-                .map_err(ImageError::code)?;
+            let page = images::image_sources(db, id, after, limit).map_err(ImageError::code)?;
             let (items, cut) = within_budget(page.items, budget);
             let next = if cut {
                 items.last().map(|last| ImageCursor {

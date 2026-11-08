@@ -91,16 +91,21 @@ pub(crate) fn target(message: &Value) -> Result<Target, &'static str> {
     })
 }
 
+/// The vault the request was made for (its `vaultToken`), checked for form only.
+fn expected_token(message: &Value) -> Result<&str, &'static str> {
+    message
+        .get("vaultToken")
+        .and_then(Value::as_str)
+        .filter(|token| is_hex64(token))
+        .ok_or("invalid_vault_token")
+}
+
 /// The active vault, provided it is the one the request was made for.
 pub(crate) fn ticket_for(
     session: &mut Session,
     message: &Value,
 ) -> Result<VaultTicket, &'static str> {
-    let expected = message
-        .get("vaultToken")
-        .and_then(Value::as_str)
-        .filter(|token| is_hex64(token))
-        .ok_or("invalid_vault_token")?;
+    let expected = expected_token(message)?;
     let ticket = session.ticket().map_err(|error| error.code())?;
     if ticket.token != expected {
         return Err("vault_switched");
@@ -128,9 +133,11 @@ fn read(session: &mut Session, message: &Value) -> Result<Map<String, Value>, &'
         .get("offset")
         .and_then(Value::as_u64)
         .ok_or("invalid_offset")?;
-    let ticket = ticket_for(session, message)?;
-    let (info, bytes) = session
-        .read(|db| {
+    let expected = expected_token(message)?;
+    // One resolution: the bytes come from the vault whose token is checked against the request's,
+    // so bytes of another vault are never answered under the requested token.
+    let (token, chunk) = session
+        .read_with_token(|db| {
             let info = images::original_info(db, target.blob_id, &target.sha256)?;
             let total = info.byte_length as u64;
             if offset >= total {
@@ -140,13 +147,16 @@ fn read(session: &mut Session, message: &Value) -> Result<Map<String, Value>, &'
             let bytes = images::read_original_range(db, target.blob_id, offset as usize, length)?;
             Ok((info, bytes))
         })
-        .map_err(|error| error.code())?
-        .map_err(|error| match error {
-            ImageError::LengthMismatch => "invalid_offset",
-            other => other.code(),
-        })?;
+        .map_err(|error| error.code())?;
+    if token != expected {
+        return Err("vault_switched");
+    }
+    let (info, bytes) = chunk.map_err(|error| match error {
+        ImageError::LengthMismatch => "invalid_offset",
+        other => other.code(),
+    })?;
     let mut fields = Map::new();
-    fields.insert("vaultToken".into(), ticket.token.into());
+    fields.insert("vaultToken".into(), token.into());
     fields.insert("blobId".into(), target.blob_id.into());
     fields.insert("sha256".into(), info.sha256.into());
     fields.insert("mimeType".into(), info.mime_type.into());
@@ -208,25 +218,25 @@ fn export(
     message: &Value,
 ) -> Result<Map<String, Value>, &'static str> {
     let target = target(message)?;
-    let ticket = ticket_for(session, message)?;
+    let expected = expected_token(message)?;
     // The bytes are read and verified before the dialog opens, so a vault switch while the dialog
-    // is open cannot change what is written.
-    let (info, bytes) = session
-        .read(|db| {
+    // is open cannot change what is written. They come from one resolution of the active vault,
+    // whose token must be the one the request named.
+    let (token, original) = session
+        .read_with_token(|db| {
             let info = images::original_info(db, target.blob_id, &target.sha256)?;
             let bytes = images::read_original(db, target.blob_id, &info)?;
             Ok::<_, ImageError>((info, bytes))
         })
-        .map_err(|error| error.code())?
-        .map_err(ImageError::code)?;
-    // The read must have come from the vault the request named.
-    if session.ticket().map_err(|error| error.code())?.token != ticket.token {
+        .map_err(|error| error.code())?;
+    if token != expected {
         return Err("vault_switched");
     }
+    let (info, bytes) = original.map_err(ImageError::code)?;
     let format = images::sniff(&bytes).map_err(ImageError::code)?;
     let file_name = export_file_name(info.last_saved_at, format.extension());
     let mut fields = Map::new();
-    fields.insert("vaultToken".into(), ticket.token.into());
+    fields.insert("vaultToken".into(), token.into());
     fields.insert("blobId".into(), target.blob_id.into());
     let Some(path) = dialogs.choose_export_file(&file_name, format.extension()) else {
         fields.insert("cancelled".into(), true.into());
