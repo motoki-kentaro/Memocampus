@@ -161,6 +161,24 @@ fn token_of(path: &Path) -> String {
     vault::vault_token(path).unwrap()
 }
 
+/// The answer names `vault` as its source: `vaultPath` is that file (compared by file identity, not
+/// by spelling: the host stores the canonical long path, a test's temp path may be an 8.3 short
+/// name such as `RUNNER~1`), `vaultToken` is its token, and the path is the one the panel shows.
+fn names_source(f: &Fixture, answer: &Value, vault: &Path) {
+    let reported = answer["vaultPath"].as_str().expect("vaultPath");
+    assert_eq!(token_of(Path::new(reported)), token_of(vault), "{answer}");
+    assert_eq!(answer["vaultToken"], token_of(vault), "{answer}");
+    let status = handle(
+        &mut Session::new(f.env.clone()),
+        &NoDialogs,
+        &json!({ "type": "vault_status", "requestId": "s" }),
+    );
+    assert_eq!(
+        answer["vaultPath"], status["status"]["vaultPath"],
+        "{answer}"
+    );
+}
+
 /// `expected`: the `expectedVaultToken` to send (null: none).
 fn backup(
     session: &mut Session,
@@ -217,8 +235,7 @@ fn case_a_the_vault_shown_is_backed_up_and_named_in_the_answer() {
         json!(shown(&f)),
     );
     assert_eq!(backed_up(&answer), "A");
-    assert_eq!(answer["vaultPath"], display(&f.a));
-    assert_eq!(answer["vaultToken"], token_of(&f.a));
+    names_source(&f, &answer, &f.a);
     switch_by_another_host(&f, &f.b);
     let answer = backup(
         &mut Session::new(f.env.clone()),
@@ -227,8 +244,7 @@ fn case_a_the_vault_shown_is_backed_up_and_named_in_the_answer() {
         json!(shown(&f)),
     );
     assert_eq!(backed_up(&answer), "B");
-    assert_eq!(answer["vaultPath"], display(&f.b));
-    assert_eq!(answer["vaultToken"], token_of(&f.b));
+    names_source(&f, &answer, &f.b);
 }
 
 #[test]
