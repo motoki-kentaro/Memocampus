@@ -158,11 +158,12 @@ export function createDocument() {
     "panel-image", "panel-settings", "settings-attention", "error", "empty", "load-more", "open-vault-settings", "record-status", "queue-status", "policy-status", "policy-initialize", "vault-approval",
     "gallery-new-dot", "gallery-error", "gallery-open-settings", "gallery-empty", "gallery-more", "gallery-details", "gallery-sources-more", "gallery-menu",
     "gallery-filter", "gallery-tags-empty", "gallery-tag-picker", "gallery-tag-picker-more",
+    "visit-calendar", "visit-date-chip",
   ]) {
     document.querySelector(`#${id}`).hidden = true;
   }
   // Initial `disabled` state as written in sidepanel.html.
-  for (const id of ["gallery-tag-filter", "gallery-tag-input", "gallery-tag-add", "gallery-tag-choose", "gallery-manage", "item-dialog-confirm"]) {
+  for (const id of ["visit-calendar-open", "gallery-tag-filter", "gallery-tag-input", "gallery-tag-add", "gallery-tag-choose", "gallery-manage", "item-dialog-confirm"]) {
     document.querySelector(`#${id}`).disabled = true;
   }
   // The options of the image's drop-down, and the checked scope, as written in sidepanel.html.
@@ -353,6 +354,11 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
     storedThumbnails: [], // what image_thumbnail_put added
     exportAnswer: { fileName: "1000.png" }, // image_export's answer ({ cancelled: true } to cancel)
     searchDelay: {},
+    /** visit_days (Issue #5): delay per vault, and `daysOverride(message, reply)` to answer otherwise. */
+    daysDelay: {},
+    daysOverride: null,
+    /** While true, every native message fails as when the host cannot be started (lastError). */
+    disconnected: false,
     statusDelay,
     requests: [],
     openedTabs: [],
@@ -425,9 +431,24 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
         if (!host.active) return { ok: false, type: "search_pages_result", requestId: message.requestId, error: "vault_not_configured" };
         const vault = host.active;
         const query = (message.query || "").toLowerCase();
-        const hits = host.vaults[vault].filter((page) => !query || page.title.toLowerCase().includes(query) || page.url.includes(query));
+        // A date range (Issue #5) only where the host knows it; an older host ignores the fields.
+        const ranged = host.capabilities.includes("visit_calendar_v1") && "visitedFrom" in message;
+        const inRange = (page) => !ranged || (page.lastVisitedAt !== null && page.lastVisitedAt >= message.visitedFrom && page.lastVisitedAt < message.visitedTo);
+        const hits = host.vaults[vault].filter((page) => (!query || page.title.toLowerCase().includes(query) || page.url.includes(query)) && inRange(page));
         const response = reply({ type: "search_pages_result", vaultToken: tokenOf(vault), items: hits.slice(message.offset, message.offset + message.limit), hasMore: hits.length > message.offset + message.limit });
         return new Promise((resolve) => setTimeout(() => resolve(response), host.searchDelay[vault] ?? 0));
+      }
+      if (message.type === "visit_days") {
+        const fail = (error) => ({ ok: false, type: "visit_days_result", requestId: message.requestId, error });
+        if (!host.capabilities.includes("visit_calendar_v1")) return { ok: false, eventId: null, error: "unknown_type" };
+        if (!host.active) return fail("vault_not_configured");
+        const vault = host.active;
+        const bounds = message.bounds;
+        // Each page stands for one visit at its lastVisitedAt, counted in the day that holds it.
+        const counts = bounds.slice(1).map((end, i) => host.vaults[vault].filter((page) => page.lastVisitedAt !== null && page.lastVisitedAt >= bounds[i] && page.lastVisitedAt < end).length);
+        let response = reply({ type: "visit_days_result", vaultToken: tokenOf(vault), counts });
+        if (host.daysOverride) response = host.daysOverride(message, response);
+        return new Promise((resolve) => setTimeout(() => resolve(response), host.daysDelay[vault] ?? 0));
       }
       if (message.type === "vault_status") {
         const response = reply({ type: "vault_result", status: host.status() });
@@ -512,6 +533,15 @@ function createChrome(host) {
     },
     onMessage: { addListener: (listener) => host.runtimeListeners.push(listener) },
     sendNativeMessage(_name, message, callback) {
+      if (host.disconnected) {
+        host.requests.push(structuredClone(message));
+        setTimeout(() => {
+          runtime.lastError = { message: "Native host has exited." };
+          callback(undefined);
+          runtime.lastError = undefined;
+        }, 0);
+        return;
+      }
       Promise.resolve(host.handle(structuredClone(message))).then((response) => {
         runtime.lastError = undefined;
         callback(response);

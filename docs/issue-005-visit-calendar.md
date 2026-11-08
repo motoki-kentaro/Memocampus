@@ -1,9 +1,9 @@
-# Issue #5: a calendar of visit days in the URL tab — Slice 1 (native host)
+# Issue #5: a calendar of visit days in the URL tab — Slice 1 (native host), Slice 2 (side panel)
 
 Find a page by **when it was visited**: a month calendar above the URL tab's list; days with visits are selectable;
 choosing one narrows the existing list to the visits of that local day. Slice 0 settled the design (PO approved);
 Slice 1 is the native host only: one new message, a date range for `search_pages`, and a capability. The calendar
-itself is Slice 2.
+itself is Slice 2 (at the end).
 
 **Unchanged:** the vault schema (no table, index or version), the privacy policy and its gate, VisibleStore and the
 MCP server, how visits are recorded, and `search_pages` without a date range.
@@ -122,11 +122,57 @@ visits, the SQL alone). No index was added: one on `visited_at` would be a new s
   check, `vault_not_configured`, no `requestId`; counts and the same token as `search_pages`; a day search and the
   unfiltered list through the host; counts and token of the new vault after a switch.
 
-## For Slice 2 (the calendar)
+## Slice 2: the calendar in the side panel
 
-- Ask `host_capabilities` for `visit_calendar_v1` first; without it, show no calendar and never send a range.
-- Bounds of a month: `Array.from({ length: days + 1 }, (_, i) => new Date(y, m, i + 1).toISOString())`; a day:
-  `new Date(y, m, d)` and `new Date(y, m, d + 1)`. Never add 24 hours.
-- Drop a month's answer when another month was asked since, or when its `vaultToken` is not the list's.
-- Keep the chosen date when the query changes, send both; clear it on a vault switch (PO decision).
-- With a date, the list shows the day's title and time; the summary should name the date.
+`extension/visit-calendar.js` (date logic and the popover), wired in `sidepanel.js`; `visitDays` and the range of
+`searchPages` in `search-client.js`; `visitCalendar` in `host-capabilities.js`. The host is unchanged.
+
+**Layout.** The URL tab's count row is `[calendar][YYYY/MM/DD ×][count …][全タブを記録]`. The calendar button
+(「閲覧日で絞り込み」, `aria-expanded`, an inline SVG drawn for this, no asset) is disabled until the host named
+`visit_calendar_v1` and a list was read from a known vault (its tooltip says why). The popover is a non-modal
+`role="dialog"` inside the toolbar, `position: absolute` below it, so it covers the list without moving it; at most
+300 px wide, never past the panel's bottom (it scrolls). Light and dark colors for Sunday, Saturday, today and the
+chosen day; forced colors handled.
+
+**Popover.** Header `◀ 2026 ▼ 11月 ▶`: the arrows move a month (across years), the middle opens the year-month
+picker (`◀ 2026 ▶` and 1月–12月; choosing a month returns to the days, closing it changes nothing). Years from 1970
+to next year. Opens on the chosen day's month, else this month. Moving months never changes the filter. The grid
+starts on Sunday (日 月 火 水 木 金 土, Sunday red, Saturday blue, with `abbr` names), 4 to 6 weeks; only days with
+visits are enabled, with one dot of the same size whatever the count; today has a ring and `aria-current="date"`;
+the chosen day is filled. A day's name is 「11月8日（日）閲覧12件」 (+「、今日」「、選択中」). No holidays.
+
+**Closing.** Escape (focus back on the button), a press outside (focus stays where it went), focus moving out
+(Tab), another tab, choosing a day (focus back on the button), a vault switch.
+
+**Keyboard.** One tab stop in the grid (roving `tabindex`): the chosen day, else today, else the first day with
+visits. Left/Right go to the previous/next day with visits, Up/Down to the same weekday in other weeks (skipping
+weeks without a visit that day), Home/End to the week's first/last day with visits. The month's edge is not
+crossed (◀ ▶ change months); where no day qualifies, focus stays. Enter and Space are the buttons' own click.
+
+**Search.** The chosen day is state of its own (`state.date`), apart from the query. Choosing it searches from the
+top with `visitedFrom`/`visitedTo` of that local day (AND the query); the query changing keeps it; × searches the
+same query without the range (no extra fields at all). The next page asks with the same range. `seenUrls`, offset
+and `hasMore` start over with each new list (also `hasMore` is cleared as a search starts, so no next page of the
+previous terms can be asked meanwhile). The count reads `N件（2026/11/08）` (also 0), the empty text names the day.
+
+**Host and vaults.** `visit_days` is sent only with the capability, with the month's bounds; the answer must be of
+its `requestId` and type, have exactly one non-negative integer per day and a valid `vaultToken` (else
+`invalid_response`). It is kept only when it is the latest request of the open popover (a generation counter that
+moving months, closing and switching vaults all advance) and its `vaultToken` is the token of the list shown. No
+token known (no list, or the last search failed) disables the calendar. Counts of another vault are never shown:
+the calendar closes, the day is dropped (with a note) and the list is searched again in the active vault. A day is
+kept with the vault it was chosen in; a search whose answer comes from another vault drops the day and searches
+again without it. A vault switch in the panel drops the day, the popover and its counts at once, before anything
+is asked of the new vault. No cache: each month shown is asked for; a failed request (the host stopped, an error)
+leaves no days enabled and offers 再読み込み, so counts seen before never come back. New visits: reopening the
+calendar, or the panel becoming visible while it is open, counts the month again (there is no visit event to
+follow, and no polling was added).
+
+**Tests.** `tests/extension/visit-calendar.test.js`: days per month, leap years, year crossing, Sunday-first weeks
+(4, 5 and 6), `YYYY/MM/DD`, names, keyboard moves; bounds in Tokyo (a local day starting the UTC day before), New
+York (23 and 25 hours), Lord Howe (23.5 and 24.5), Santiago and Havana (a day starting at 01:00), every month's 29
+to 32 exact increasing bounds in five zones, the time zone restored after each; `visit_days` and range messages
+and every malformed answer. `tests/extension/visit-calendar-ui.test.js`: the side panel with the fake host
+(capability, markup, popover, picker, grid, choosing, AND, ×, paging, keyboard, late answers, vault switches,
+counts of another vault, a stopped host, malformed answers, new visits) and, opt-in, with the real host binary.
+Both pass under New York, Lord Howe, Santiago, Kiritimati and UTC as well as the machine's zone.

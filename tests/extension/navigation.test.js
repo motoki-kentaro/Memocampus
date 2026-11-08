@@ -360,10 +360,12 @@ test("events of one tab keep their order while another tab is waiting", async ()
 test("the host's capabilities: navigation_v1 only when named; an old host is told apart from a stopped one", async () => {
   const id = () => "r1";
   const answer = (response) => checkHostCapabilities({ send: async () => response, createId: id });
-  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION] }), { ok: true, navigation: true, vaultItems: false });
-  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION, "vault_items_v1"] }), { ok: true, navigation: true, vaultItems: true });
-  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: ["something_else"] }), { ok: true, navigation: false, vaultItems: false });
-  assert.deepEqual(await answer({ ok: false, eventId: null, error: "unknown_type" }), { ok: true, navigation: false, vaultItems: false }, "a host from before #41");
+  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION] }), { ok: true, navigation: true, vaultItems: false, visitCalendar: false });
+  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION, "vault_items_v1"] }), { ok: true, navigation: true, vaultItems: true, visitCalendar: false });
+  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION, "vault_items_v1", "visit_calendar_v1"] }), { ok: true, navigation: true, vaultItems: true, visitCalendar: true });
+  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: ["visit_calendar_v1"] }), { ok: true, navigation: false, vaultItems: false, visitCalendar: true });
+  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: ["something_else"] }), { ok: true, navigation: false, vaultItems: false, visitCalendar: false });
+  assert.deepEqual(await answer({ ok: false, eventId: null, error: "unknown_type" }), { ok: true, navigation: false, vaultItems: false, visitCalendar: false }, "a host from before #41");
   for (const response of [
     { ok: true, type: "host_capabilities_result", requestId: "other", capabilities: [CAPABILITY_NAVIGATION] },
     { ok: true, type: "policy_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION] },

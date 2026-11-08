@@ -20,7 +20,16 @@
       <header class="toolbar">
         <input id="query" type="search" maxlength="200" placeholder="タイトル・URLで検索" aria-label="閲覧履歴を検索" autocomplete="off" spellcheck="false">
         <div class="toolbar-row">
-          <span id="summary" class="summary" role="status" aria-live="polite"></span>
+          <span class="toolbar-start">
+            <button id="visit-calendar-open" type="button" class="calendar-button" aria-label="閲覧日で絞り込み" title="閲覧日で絞り込み" aria-haspopup="dialog" aria-expanded="false" aria-controls="visit-calendar" disabled>
+              <svg class="calendar-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5" fill="none" stroke="currentColor"/><path d="M1.5 6h13M5 1v3M11 1v3" stroke="currentColor"/><rect x="4" y="8" width="2" height="2" fill="currentColor"/><rect x="7" y="8" width="2" height="2" fill="currentColor"/><rect x="10" y="8" width="2" height="2" fill="currentColor"/><rect x="4" y="11" width="2" height="2" fill="currentColor"/></svg>
+            </button>
+            <span id="visit-date-chip" class="tag-chip is-filter date-chip" hidden>
+              <span id="visit-date-chip-text" class="tag-chip-name"></span>
+              <button id="visit-date-clear" type="button" class="tag-chip-remove" aria-label="日付の絞り込みを解除" title="日付の絞り込みを解除">×</button>
+            </span>
+            <span id="summary" class="summary" role="status" aria-live="polite"></span>
+          </span>
           <span class="toolbar-buttons">
             <button id="record-tabs" type="button" class="secondary">全タブを記録</button>
           </span>
@@ -33,6 +42,7 @@
           <button id="policy-initialize" type="button" hidden>プライバシー設定を初期化</button>
           <button id="policy-recheck" type="button" class="secondary">再確認</button>
         </div>
+        <section id="visit-calendar" class="visit-calendar" role="dialog" aria-label="閲覧日で絞り込み" tabindex="-1" hidden></section>
       </header>
       <main id="url-scroll" class="url-scroll">
         <div id="error" class="error" role="alert" hidden>

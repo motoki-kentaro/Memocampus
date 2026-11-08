@@ -15,6 +15,7 @@ const ERROR_MESSAGES = {
   invalid_limit: "検索条件が不正です。",
   invalid_offset: "これ以上読み込めません。",
   invalid_request_id: "要求が不正です。",
+  invalid_bounds: "日付の指定が不正です。",
   unknown_type: "Native Hostがこの操作に対応していません。Hostを更新してください。",
   app_dir_unavailable: "%LOCALAPPDATA% を特定できないため、Vaultの設定を読み書きできません。",
   vault_not_configured: "Vaultが未設定です。Vault設定から新規作成するか、既存のVaultを開いてください。",
@@ -203,21 +204,46 @@ function normalizeItem(item) {
   };
 }
 
+/** A vault token as the host writes it (SHA-256, lowercase hex), or null. */
+const validVaultToken = (value) => (typeof value === "string" && /^[0-9a-f]{64}$/.test(value) ? value : null);
+
 /**
  * Sends one search request. Resolves to { items, received, hasMore, vaultToken }, where `received` is the raw
- * row count used to advance the offset.
+ * row count used to advance the offset. `visitedFrom` and `visitedTo` (Issue #5) narrow it to the visits of a
+ * local day: both or neither are sent, and only to a host that names `visit_calendar_v1` (an older host would
+ * ignore them and answer the unfiltered list).
  */
-export async function searchPages({ query, offset = 0, limit = PAGE_SIZE }, options) {
-  const response = await callHost({ type: "search_pages", query, limit, offset }, { ...options, resultType: "search_pages_result" });
+export async function searchPages({ query, offset = 0, limit = PAGE_SIZE, visitedFrom = null, visitedTo = null }, options) {
+  const message = { type: "search_pages", query, limit, offset };
+  if (visitedFrom !== null || visitedTo !== null) {
+    if (typeof visitedFrom !== "string" || typeof visitedTo !== "string") throw new SearchError("invalid_bounds");
+    Object.assign(message, { visitedFrom, visitedTo });
+  }
+  const response = await callHost(message, { ...options, resultType: "search_pages_result" });
   if (!Array.isArray(response.items)) throw new SearchError("invalid_response");
   // The vault the page came from (Issue #43); a host from before it sends none.
-  const vaultToken = typeof response.vaultToken === "string" && /^[0-9a-f]{64}$/.test(response.vaultToken) ? response.vaultToken : null;
+  const vaultToken = validVaultToken(response.vaultToken);
   return {
     items: response.items.map(normalizeItem).filter(Boolean),
     received: response.items.length,
     hasMore: response.hasMore === true,
     vaultToken,
   };
+}
+
+/**
+ * Visits per local day of a month (Issue #5): `bounds` are the starts of the days and of the day after the
+ * last (29 to 32 instants, see visit-calendar.js). Resolves to { counts, vaultToken }: one non-negative
+ * integer per day, and the vault they were counted in. Anything else is `invalid_response`.
+ */
+export async function visitDays(bounds, options) {
+  const response = await callHost({ type: "visit_days", bounds }, { ...options, resultType: "visit_days_result" });
+  const counts = response.counts;
+  const vaultToken = validVaultToken(response.vaultToken);
+  if (!Array.isArray(counts) || counts.length !== bounds.length - 1 || !counts.every((count) => Number.isSafeInteger(count) && count >= 0) || vaultToken === null) {
+    throw new SearchError("invalid_response");
+  }
+  return { counts: [...counts], vaultToken };
 }
 
 /** Hands out tokens so that only the most recently started search may update the UI. */

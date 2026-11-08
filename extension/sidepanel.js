@@ -8,6 +8,7 @@ import { vaultNeedsAttention } from "./vault-client.js";
 import { checkHostCapabilities } from "./host-capabilities.js";
 import { ACTION_LABEL, DECISION_LABEL, SAME_STATE, createItemDialog, sameState } from "./item-dialog.js";
 import { evaluateUrls } from "./vault-items-client.js";
+import { createVisitCalendar, formatDate, localDayBounds } from "./visit-calendar.js";
 
 const DEBOUNCE_MS = 200;
 
@@ -31,6 +32,10 @@ const urlScroll = document.querySelector("#url-scroll");
 const settingsAttention = document.querySelector("#settings-attention");
 const settingsTab = document.querySelector("#tab-settings");
 const itemStatus = document.querySelector("#url-item-status");
+const calendarButton = document.querySelector("#visit-calendar-open");
+const dateChip = document.querySelector("#visit-date-chip");
+const dateChipText = document.querySelector("#visit-date-chip-text");
+const dateClear = document.querySelector("#visit-date-clear");
 
 const send = chromeNativeTransport(chrome.runtime);
 const gate = createLatestGate();
@@ -40,6 +45,9 @@ const openPrivacySettings = () => {
 
 // Item actions (Issue #43) are offered only by a host that names `vault_items_v1`: null until known.
 let itemsSupported = null;
+// The calendar (Issue #5) only with a host that names `visit_calendar_v1`: an older host would ignore a
+// date range and answer the unfiltered list. null until known.
+let calendarSupported = null;
 const itemDialog = createItemDialog({ send, openPrivacySettings, onVaultUnavailable: () => void vaultPanel.refresh() });
 const tabs = createTabs(
   [
@@ -49,6 +57,7 @@ const tabs = createTabs(
   ],
   {
     onChange: (id, previous) => {
+      if (id !== "url") calendar.close({ restoreFocus: false });
       if (id === "settings" && previous !== null) void vaultPanel.refresh();
       if (id === "image") gallery.activate();
     },
@@ -94,6 +103,9 @@ const vaultPanel = createVaultPanel({
   onVaultChanged: () => {
     // Drop the previous vault's results at once so they are never shown as the new vault's.
     clearResults();
+    // The chosen day, the open calendar and its counts were the old vault's (PO decision: cleared).
+    dropDate();
+    calendar.vaultChanged();
     gallery.vaultChanged();
     void runSearch();
     // Visits queued while no vault was usable can now be delivered.
@@ -143,6 +155,10 @@ const state = {
   token: 0,
   vaultToken: null, // the vault the shown results came from (null: a host that does not say)
   query: "",
+  // The chosen local day (Issue #5), apart from the query: { year, monthIndex, day, label, visitedFrom,
+  // visitedTo, vaultToken } or null. `vaultToken` is the vault whose calendar offered it.
+  date: null,
+  visited: null, // the range the shown list was searched with ({ visitedFrom, visitedTo }) or null
   offset: 0,
   seenUrls: new Set(),
   count: 0,
@@ -175,9 +191,74 @@ function updateSummary(loading) {
     summary.textContent = "検索中…";
     return;
   }
+  if (state.visited && state.date) {
+    // A day filter is always named, also with no result.
+    summary.textContent = `${state.count}${state.hasMore ? "件以上" : "件"}（${state.date.label}）`;
+    return;
+  }
   const label = state.query ? "件" : "件（最近の順）";
   summary.textContent = state.count === 0 ? "" : `${state.count}${state.hasMore ? "件以上" : label}`;
 }
+
+// --- The day filter (Issue #5) ------------------------------------------------------------------------
+
+const calendar = createVisitCalendar({
+  launcher: calendarButton,
+  popover: document.querySelector("#visit-calendar"),
+  send,
+  getVaultToken: () => state.vaultToken,
+  getSelected: () => state.date,
+  onSelect: ({ year, monthIndex, day, vaultToken }) => {
+    state.date = { year, monthIndex, day, label: formatDate(year, monthIndex, day), ...localDayBounds(year, monthIndex, day), vaultToken };
+    renderDateChip();
+    void runSearch();
+  },
+  onVaultMismatch: () => {
+    // The host counted in another vault than the list's: another window switched it.
+    vaultMismatch();
+  },
+  onVaultUnavailable: () => void vaultPanel.refresh(),
+  fallbackFocus: () => input.focus(),
+});
+
+function renderDateChip() {
+  dateChip.hidden = state.date === null;
+  dateChipText.textContent = state.date?.label ?? "";
+  const label = state.date ? `日付の絞り込みを解除（${state.date.label}）` : "日付の絞り込みを解除";
+  dateClear.setAttribute("aria-label", label);
+  dateClear.title = label;
+}
+
+/** Forgets the chosen day (the caller searches again if needed). */
+function dropDate() {
+  state.date = null;
+  renderDateChip();
+}
+
+/** The list or the counts came from another vault than expected: start over in the active one. */
+function vaultMismatch() {
+  calendar.close({ restoreFocus: false });
+  if (state.date) {
+    dropDate();
+    showItemStatus("Vaultが切り替えられたため、日付の絞り込みを解除しました。");
+  }
+  void runSearch();
+}
+
+/** The calendar can be opened with a host that offers it and a list read from a known vault. */
+function updateCalendarAvailability() {
+  if (calendarSupported === false) calendar.setAvailable(false, "Native Hostが閲覧日カレンダーに対応していません。Hostを更新してください。");
+  else if (calendarSupported === null) calendar.setAvailable(false, "Native Hostの対応状況を確認しています。");
+  else if (state.vaultToken === null) calendar.setAvailable(false, "Vaultを読み込めないため、閲覧日で絞り込めません。");
+  else calendar.setAvailable(true);
+}
+
+dateClear.addEventListener("click", () => {
+  if (!state.date) return;
+  dropDate();
+  (calendarButton.disabled ? input : calendarButton).focus();
+  void runSearch();
+});
 
 function timeLabel(prefix, iso) {
   const time = document.createElement("time");
@@ -324,6 +405,8 @@ async function checkItems() {
   const answer = await checkHostCapabilities({ send });
   if (!answer.ok || itemsSupported !== null) return;
   itemsSupported = answer.vaultItems;
+  calendarSupported = answer.visitCalendar;
+  updateCalendarAvailability();
   for (const li of rows()) actionsOf(li).box.hidden = !itemsSupported;
   gallery.itemsChanged();
   void evaluateRows(rows());
@@ -377,6 +460,8 @@ function clearResults() {
   gate.next(); // responses still in flight belong to the previous vault
   itemDialog.cancel("url");
   state.vaultToken = null;
+  state.visited = null;
+  updateCalendarAvailability();
   results.replaceChildren();
   state.seenUrls = new Set();
   state.count = 0;
@@ -392,7 +477,9 @@ function clearResults() {
 
 function renderEmpty() {
   empty.hidden = state.count !== 0;
-  empty.textContent = state.query ? `「${state.query}」に一致するページはありません。` : "まだ記録されたページがありません。";
+  const day = state.visited && state.date ? state.date.label : null;
+  if (day) empty.textContent = state.query ? `「${state.query}」に一致する、${day}に閲覧したページはありません。` : `${day}に閲覧したページはありません。`;
+  else empty.textContent = state.query ? `「${state.query}」に一致するページはありません。` : "まだ記録されたページがありません。";
 }
 
 async function runSearch() {
@@ -400,18 +487,29 @@ async function runSearch() {
   const token = gate.next();
   state.token = token;
   state.query = currentQuery();
+  // The chosen day narrows the search (AND the query), and only with a host that offers it.
+  const date = state.date;
+  const visited = date && calendarSupported === true ? { visitedFrom: date.visitedFrom, visitedTo: date.visitedTo } : null;
+  state.visited = visited;
   state.loadingMore = false;
   state.lastFailedAppend = false;
+  state.hasMore = false; // the next page of the previous list must not be asked with the new terms
   errorBox.hidden = true;
   results.setAttribute("aria-busy", "true");
   loadMoreButton.hidden = true;
   updateSummary(true);
   try {
-    const page = await searchPages({ query: state.query, offset: 0, limit: PAGE_SIZE }, { send });
+    const page = await searchPages({ query: state.query, offset: 0, limit: PAGE_SIZE, ...visited }, { send });
     if (!gate.isCurrent(token)) return;
+    if (date && page.vaultToken !== date.vaultToken) {
+      // The day was chosen in another vault's calendar: it is not applied to this one.
+      vaultMismatch();
+      return;
+    }
     // The rows are replaced: a dialog about one of them would name a row that is gone.
     itemDialog.cancel("url");
     state.vaultToken = page.vaultToken;
+    updateCalendarAvailability();
     void checkItems();
     results.replaceChildren();
     state.seenUrls = new Set();
@@ -426,6 +524,9 @@ async function runSearch() {
     results.replaceChildren();
     state.count = 0;
     state.hasMore = false;
+    // Which vault is active is not known now: the calendar waits for a list again.
+    state.vaultToken = null;
+    updateCalendarAvailability();
     empty.hidden = true;
     showError(error);
   } finally {
@@ -444,11 +545,11 @@ async function loadMore() {
   loadMoreButton.disabled = true;
   loadMoreButton.textContent = "読み込み中…";
   try {
-    const page = await searchPages({ query: state.query, offset: state.offset, limit: PAGE_SIZE }, { send });
+    const page = await searchPages({ query: state.query, offset: state.offset, limit: PAGE_SIZE, ...state.visited }, { send });
     if (!gate.isCurrent(token)) return;
     if (page.vaultToken !== state.vaultToken) {
       // Another vault became active (another window): its rows never join this list.
-      void runSearch();
+      vaultMismatch();
       return;
     }
     state.offset += page.received;
@@ -524,6 +625,8 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
   void requestPolicy("policy-status");
   if (!state.loadingMore && tabs.getScroll("url") === 0) void runSearch();
+  // Visits recorded meanwhile: the open month is counted again (no polling, no cache).
+  calendar.refresh();
 });
 
 recordButton.addEventListener("click", async () => {
