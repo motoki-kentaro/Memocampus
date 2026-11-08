@@ -33,6 +33,12 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
 
   const actionButtons = [createDefault, createPick, openPick, backupPick, ...document.querySelectorAll("[data-manual]")];
   let status = null;
+  // Each status asked for; only the latest answer is shown (an older one arriving late never
+  // replaces it, so the vault shown and the token a backup sends always come from one answer).
+  let statusRequest = 0;
+  // Resolves with the status shown once the latest request is answered: the caller of a superseded
+  // request gets the newer status, never the older one it asked for.
+  let latestStatus = Promise.resolve(null);
   let busy = false;
   let pendingApproval = null;
 
@@ -45,9 +51,15 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     for (const button of actionButtons) button.disabled = busy || !manageable;
     if (!busy && manageable) {
       createDefault.disabled = status.defaultExists === true;
-      backupPick.disabled = status.state !== "ready";
-      document.querySelector('[data-manual="vault_backup"]').disabled = status.state !== "ready";
+      backupPick.disabled = !backupSource();
+      document.querySelector('[data-manual="vault_backup"]').disabled = !backupSource();
     }
+  }
+
+  /** The vault a backup would be of: the one shown, if it is ready and named by a token. */
+  function backupSource() {
+    if (status?.state !== "ready" || typeof status.vaultToken !== "string" || !/^[0-9a-f]{64}$/.test(status.vaultToken)) return null;
+    return { vaultPath: status.vaultPath, vaultToken: status.vaultToken };
   }
 
   function render() {
@@ -82,16 +94,31 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     messageText.textContent = text;
   }
 
-  async function refresh() {
-    try {
-      const response = await vaultRequest("vault_status", {}, { send });
-      status = response.status || null;
-    } catch (error) {
-      status = null;
-      setMessage(error instanceof SearchError ? error.message : "Vaultの状態を取得できませんでした。");
-    }
+  /** Shows `value` as the status now; anything asked for before is older than it. */
+  function showStatus(value) {
+    statusRequest += 1;
+    latestStatus = Promise.resolve(value);
+    status = value;
     render();
-    return status;
+  }
+
+  function refresh() {
+    const request = ++statusRequest;
+    const answered = (async () => {
+      try {
+        const response = await vaultRequest("vault_status", {}, { send });
+        if (request !== statusRequest) return latestStatus;
+        status = response.status || null;
+      } catch (error) {
+        if (request !== statusRequest) return latestStatus;
+        status = null;
+        setMessage(error instanceof SearchError ? error.message : "Vaultの状態を取得できませんでした。");
+      }
+      render();
+      return status;
+    })();
+    latestStatus = answered;
+    return answered;
   }
 
   function showApproval(type, params, response) {
@@ -103,13 +130,21 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   }
 
   function successMessage(type, response) {
-    if (type === "vault_backup") return `バックアップを作成しました:\n${response.backupPath}`;
+    if (type === "vault_backup") return `バックアップを作成しました。\nバックアップ元: ${response.vaultPath}\n保存先: ${response.backupPath}`;
     if (type === "vault_create") return `新しいVaultを作成し、使用を開始しました:\n${response.path}`;
     return `Vaultを開きました:\n${response.path}`;
   }
 
   async function run(type, params = {}) {
     if (busy) return;
+    // A backup names the vault shown (Issue #48): the host refuses it if another vault is active.
+    const source = type === "vault_backup" ? backupSource() : null;
+    if (type === "vault_backup" && !source) {
+      setMessage("バックアップするVaultを確認できないため、開始しませんでした。表示を更新します。");
+      await refresh();
+      return;
+    }
+    if (source) params = { ...params, expectedVaultToken: source.vaultToken };
     busy = true;
     approvalBox.hidden = true;
     pendingApproval = null;
@@ -118,15 +153,19 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     setMessage(usesDialog ? "Windowsのダイアログで選択してください。\n表示されない場合はタスクバーを確認してください。" : "処理中…");
     try {
       const response = await vaultRequest(type, params, { send });
-      setMessage(successMessage(type, response));
-      if (response.status) {
-        status = response.status;
-        render();
+      if (source && response.vaultToken !== source.vaultToken) {
+        // The host only backs up the vault named; an answer naming another is reported, not trusted.
+        setMessage(`バックアップ元が表示中のVaultと一致しません。作成されたファイルを確認してください。\nバックアップ元: ${response.vaultPath}\n保存先: ${response.backupPath}`);
+        return;
       }
+      setMessage(successMessage(type, response));
+      if (response.status) showStatus(response.status);
       if (type !== "vault_backup") onVaultChanged();
     } catch (error) {
       const response = error instanceof SearchError ? error.response : null;
-      if (error.code === "location_needs_approval" && response?.path) {
+      if (source && error.code === "vault_switched") {
+        setMessage(`表示していたVault（${source.vaultPath}）は、もうActiveではありません。バックアップは作成していません。\n表示を最新の状態に更新しました。確認してから、もう一度実行してください。`);
+      } else if (error.code === "location_needs_approval" && response?.path) {
         setMessage("");
         showApproval(type, params, response);
       } else {

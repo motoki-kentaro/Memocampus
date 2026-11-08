@@ -62,7 +62,7 @@ pub fn handle(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> 
     Value::Object(reply)
 }
 
-fn is_hex64(value: &str) -> bool {
+pub(crate) fn is_hex64(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()

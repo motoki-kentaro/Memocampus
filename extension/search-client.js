@@ -24,6 +24,7 @@ const ERROR_MESSAGES = {
   vault_schema_mismatch: "このVaultは現在の形式に対応していません。自動変換は行いません（このVaultは変更していません）。",
   config_invalid: "設定ファイル(config.json)を読み取れません。Vaultを作成し直すか開き直すと設定が書き直されます。",
   vault_switched: "Vaultが切り替えられました。もう一度お試しください。",
+  invalid_vault_token: "対象のVaultを確認できませんでした。Vault設定を開き直してください。",
   vault_busy: "Vaultが使用中です。しばらくしてからもう一度お試しください。",
   management_disabled: "開発用DB(MEMOCAMPUS_DB)が指定されているため、Vault管理は無効です。",
   file_exists: "同名のファイルが既にあります。上書きはしません。別の名前を選ぶか「既存のVaultを開く」を使ってください。",

@@ -360,13 +360,17 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
     /** While true, every native message fails as when the host cannot be started (lastError). */
     disconnected: false,
     statusDelay,
+    /** vault_backup (Issue #48): what was backed up, the answer's delay, and a hook while it runs. */
+    backups: [],
+    backupDelay: 0,
+    backupDuring: null,
     requests: [],
     openedTabs: [],
     runtimeListeners: [],
     status() {
       const base = { managementEnabled: true, overridden: false, defaultPath: "C:\\Vaults\\memocampus.sqlite3", defaultExists: false, locationApproved: false };
       if (!host.active) return { ...base, state: "not_configured", vaultPath: null, counts: null, location: null };
-      return { ...base, state: "ready", vaultPath: host.active, counts: { visits: host.vaults[host.active].length, snapshots: 0 }, location: { verdict: "no_issue_detected", reasons: [] } };
+      return { ...base, state: "ready", vaultPath: host.active, vaultToken: tokenOf(host.active), counts: { visits: host.vaults[host.active].length, snapshots: 0 }, location: { verdict: "no_issue_detected", reasons: [] } };
     },
     /** `tags[vault]` maps a blob id to its tag names; `tagError` makes the next tag write fail. */
     tags: {},
@@ -507,6 +511,21 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
           response = reply({ type, vaultToken, blobId: message.blobId, items: sources, next: null });
         }
         return new Promise((resolve) => setTimeout(() => resolve(response), host.imageDelay[vault] ?? 0));
+      }
+      if (message.type === "vault_backup") {
+        const fail = (error) => ({ ok: false, type: "vault_result", requestId: message.requestId, error });
+        const expected = message.expectedVaultToken;
+        if (typeof expected !== "string" || !/^[0-9a-f]{64}$/.test(expected)) return fail("invalid_vault_token");
+        if (!host.active) return fail("vault_not_configured");
+        if (tokenOf(host.active) !== expected) return fail("vault_switched");
+        // `backupDuring` runs while the folder dialog is open (e.g. another window switching).
+        return new Promise((resolve) => setTimeout(() => {
+          host.backupDuring?.();
+          if (!host.active || tokenOf(host.active) !== expected) return resolve(fail("vault_switched"));
+          const backupPath = `C:\\Backups\\memocampus-backup-${host.backups.length}.sqlite3`;
+          host.backups.push({ vault: host.active, backupPath });
+          resolve(reply({ type: "vault_result", backupPath, vaultPath: host.active, vaultToken: expected }));
+        }, host.backupDelay));
       }
       if (message.type === "vault_open") {
         host.active = message.path;

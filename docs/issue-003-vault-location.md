@@ -27,6 +27,12 @@ is never read, written, moved, or deleted by the new host. Users start by creati
   folder, checked (`integrity_check`, schema, row counts equal to the snapshot), flushed, then renamed without
   replacement to `memocampus-backup-YYYYMMDD-HHMMSSZ.sqlite3` (`-1`, `-2`, … on collision). On failure the partial
   file is removed and no success is reported. The active vault does not change.
+- A backup is of the vault the side panel shows (Issue #48). The panel sends that vault's token
+  (`expectedVaultToken`, the `vaultToken` of its `vault_status`); the host refuses the request with `vault_switched`
+  unless it is the active vault, before any dialog. No connection is kept while the folder dialog is open; the copy
+  is then read through `Session::read_for`, which opens the active vault once and runs only if that file is the same
+  vault file (same file identity), else `vault_switched` before any file is created. A switch away and back to the
+  same file is that vault; another file put at the same path is not. The answer names the vault backed up.
 
 ## Active vault location check
 
@@ -76,15 +82,17 @@ vault is usable — and undecodable JSON gets `{ "ok": false, "eventId": null, "
 
 New messages, each answered by one `{ "ok", "type": "vault_result", "requestId", … }`:
 
-- `vault_status` → `status: { state, vaultPath, counts, location, locationApproved, defaultPath, defaultExists, managementEnabled, overridden }`
+- `vault_status` → `status: { state, vaultPath, vaultToken, counts, location, locationApproved, defaultPath, defaultExists, managementEnabled, overridden }`
   (`state`: `ready`, `not_configured`, `missing`, `invalid`, `config_invalid`, `app_dir_unavailable`). Read-only.
 - `vault_create` `{ path? | useDefault?, approveWarnings? }` → `{ path, status }`. Without `path`/`useDefault` a native save dialog is shown.
 - `vault_open` `{ path?, approveWarnings? }` → `{ path, status }`. Without `path` a native open dialog is shown.
-- `vault_backup` `{ directory? }` → `{ backupPath }`. Without `directory` a native folder dialog is shown.
+- `vault_backup` `{ expectedVaultToken, directory? }` → `{ backupPath, vaultPath, vaultToken }`. Without `directory` a
+  native folder dialog is shown. `expectedVaultToken` (required) is the shown vault's `vaultToken`; `vaultPath` /
+  `vaultToken` name the vault backed up.
 
 Error codes: `invalid_request_id`, `unknown_type`, `management_disabled`, `invalid_path`, `parent_missing`, `file_exists`,
 `sidecar_exists`, `location_rejected` / `location_needs_approval` (with `path`, `location`), `vault_missing`, `vault_invalid`,
-`vault_busy`, `cancelled`, `backup_failed`, `io_error`, `db_error`.
+`vault_busy`, `vault_switched`, `invalid_vault_token`, `cancelled`, `backup_failed`, `io_error`, `db_error`.
 
 ## Follow-up (not in this issue)
 

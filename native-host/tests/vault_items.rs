@@ -204,7 +204,7 @@ fn a_url_is_previewed_then_deleted_whole_and_alone() {
     std::fs::create_dir(&backups).unwrap();
     let backup = call(
         &tmp,
-        json!({ "type": "vault_backup", "requestId": "b", "directory": backups }),
+        json!({ "type": "vault_backup", "requestId": "b", "directory": backups, "expectedVaultToken": vault_token(&tmp) }),
     );
     let backup = PathBuf::from(backup["backupPath"].as_str().unwrap());
 

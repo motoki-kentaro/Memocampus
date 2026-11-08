@@ -77,6 +77,7 @@ pub fn status(session: &Session) -> Value {
         "defaultPath": default_path.as_deref().map(display),
         "defaultExists": default_path.as_deref().is_some_and(Path::exists),
         "vaultPath": null,
+        "vaultToken": null,
         "counts": null,
         "location": null,
         "locationApproved": false,
@@ -102,6 +103,8 @@ pub fn status(session: &Session) -> Value {
     match vault::open_vault(&path) {
         Ok(db) => {
             status["state"] = "ready".into();
+            // The vault shown, as `vault_backup` must name it (taken while `db` holds the file).
+            status["vaultToken"] = json!(vault::vault_token(&path).ok());
             if let Ok(counts) = vault::counts(&db) {
                 status["counts"] = json!(counts);
             }
@@ -247,17 +250,41 @@ fn open(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Result
     activate(session, &lock, &target, location_approved)
 }
 
+/// Backs up the vault the user saw: `expectedVaultToken` is the `vaultToken` of the status the panel
+/// shows. That vault must be the active one when the request arrives (else nothing is asked), and the
+/// backup is read only from that same vault file (`read_for`), after the folder is chosen. A switch
+/// at any point before (panel shown, dialog open, folder given) fails with `vault_switched`, before
+/// any file is created; a switch away and back to the same file is that vault again.
 fn backup(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Result<Value, Failure> {
     require_management(session)?;
-    // Fail before showing a dialog if there is nothing to back up.
-    session.read(|_| ())?;
+    let expected = message
+        .get("expectedVaultToken")
+        .and_then(Value::as_str)
+        .filter(|token| crate::image_original::is_hex64(token))
+        .ok_or_else(|| Failure::with("invalid_vault_token", json!({})))?;
+    // Fail before showing a dialog if there is nothing to back up, or not the vault shown.
+    let ticket = session.ticket()?;
+    if ticket.token != expected {
+        return Err(VaultError::Switched.into());
+    }
+    // Neither a connection nor a lock is held while the dialog is open.
+    session.reset();
     let dir = match requested_path(message, "directory")? {
         Some(path) => path,
         None => dialogs.choose_backup_dir().ok_or(VaultError::Cancelled)?,
     };
-    let path = session.read(|db| vault::backup_vault(db, &dir, SystemTime::now()))??;
-    Ok(json!({ "backupPath": display(&path) }))
+    let path = session.read_for(&ticket, |db| {
+        vault::backup_vault(db, &dir, SystemTime::now())
+    })?;
+    Ok(json!({
+        "backupPath": display(&path),
+        "vaultPath": ticket.path,
+        "vaultToken": ticket.token,
+    }))
 }
+
+#[cfg(test)]
+mod backup_race_tests;
 
 #[cfg(test)]
 mod tests {
@@ -495,7 +522,11 @@ mod tests {
             answer: Some(dest.clone()),
             ..FakeDialogs::default()
         };
-        let early = send(&mut session, &dialogs, json!({ "type": "vault_backup" }));
+        let early = send(
+            &mut session,
+            &dialogs,
+            json!({ "type": "vault_backup", "expectedVaultToken": "0".repeat(64) }),
+        );
         assert_eq!(early["error"], "vault_not_configured");
         assert!(
             dialogs.calls.borrow().is_empty(),
@@ -507,8 +538,16 @@ mod tests {
             &dialogs,
             json!({ "type": "vault_create", "path": tmp.0.join("v.sqlite3") }),
         );
-        let done = send(&mut session, &dialogs, json!({ "type": "vault_backup" }));
+        let shown = send(&mut session, &dialogs, json!({ "type": "vault_status" }));
+        let token = shown["status"]["vaultToken"].clone();
+        assert!(token.is_string(), "{shown}");
+        let done = send(
+            &mut session,
+            &dialogs,
+            json!({ "type": "vault_backup", "expectedVaultToken": token }),
+        );
         assert_eq!(done["ok"], true, "{done}");
+        assert_eq!(done["vaultToken"], token);
         let path = PathBuf::from(done["backupPath"].as_str().unwrap());
         assert_eq!(path.parent().unwrap(), dest);
         assert!(vault::open_vault_checked(&path).is_ok());

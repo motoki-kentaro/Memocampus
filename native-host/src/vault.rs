@@ -684,6 +684,30 @@ impl Session {
         Ok((token, f(db)))
     }
 
+    /// A read bound to the vault of `ticket`, as `write_for` binds a write: one resolution of the
+    /// active vault opens a fresh connection (a cached one is never reused here), and `f` runs on it
+    /// only if the file that connection holds is the ticket's vault file (same `vault_token`, i.e.
+    /// the same file identity, however its path is spelled). Otherwise `f` does not run and the call
+    /// fails with `Switched`. So a vault that was switched away and back (A→B→A) is accepted, and
+    /// another file put at the same path is not.
+    ///
+    /// The token is taken from the path after the connection opened it. On Windows SQLite opens the
+    /// vault without `FILE_SHARE_DELETE`, so while the connection lives the file at that path can be
+    /// neither replaced nor renamed: the token names the very file `f` reads (tested).
+    pub fn read_for<T, E: From<VaultError>>(
+        &mut self,
+        ticket: &VaultTicket,
+        f: impl FnOnce(&Connection) -> Result<T, E>,
+    ) -> Result<T, E> {
+        self.reset();
+        let (path, db) = self.open()?;
+        if vault_token(Path::new(path))? != ticket.token {
+            self.reset();
+            return Err(VaultError::Switched.into());
+        }
+        f(db)
+    }
+
     /// Identifies the vault that is active now, for an operation that will write later (an image
     /// transfer). Pass it to `write_for` so the write can only land in this same vault.
     pub fn ticket(&mut self) -> Result<VaultTicket, VaultError> {

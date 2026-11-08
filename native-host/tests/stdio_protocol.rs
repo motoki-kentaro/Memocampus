@@ -100,6 +100,14 @@ fn exchange(tmp: &TempDir, messages: &[Value]) -> Vec<Value> {
     exchange_with(tmp, |_| {}, messages)
 }
 
+/// A `vault_backup` of the vault the panel would show: the token `vault_status` answers now.
+fn backup_of_shown(tmp: &TempDir, directory: &Path) -> Value {
+    let status = &exchange(tmp, &[json!({ "type": "vault_status", "requestId": "s" })])[0];
+    let token = status["status"]["vaultToken"].clone();
+    assert!(token.is_string(), "{status}");
+    json!({ "type": "vault_backup", "requestId": "b", "directory": directory, "expectedVaultToken": token })
+}
+
 /// Explicit first-use step; repeating it is harmless because it never replaces the policy.
 fn initialize_policy(tmp: &TempDir) {
     let response = &exchange(
@@ -363,10 +371,7 @@ fn backup_through_the_protocol_produces_a_verified_copy() {
     );
     let dest = tmp.0.join("backup dir");
     std::fs::create_dir(&dest).unwrap();
-    let response = &exchange(
-        &tmp,
-        &[json!({ "type": "vault_backup", "requestId": "b", "directory": dest })],
-    )[0];
+    let response = &exchange(&tmp, &[backup_of_shown(&tmp, &dest)])[0];
     assert_eq!(response["ok"], true, "{response}");
     let path = PathBuf::from(response["backupPath"].as_str().unwrap());
     assert_eq!(path.parent().unwrap(), dest);
@@ -377,6 +382,56 @@ fn backup_through_the_protocol_produces_a_verified_copy() {
         real_path(&tmp.default_vault()),
         "active vault unchanged"
     );
+}
+
+#[test]
+fn a_backup_names_its_vault_and_refuses_a_vault_not_shown() {
+    // Issue #48 through the real host: the panel's status names vault A (its token); another
+    // window then opens B. A backup asked for A is refused and writes nothing; one asked for the
+    // vault shown now is B's, and the answer names B.
+    let tmp = TempDir::new();
+    create_default_vault(&tmp);
+    exchange(
+        &tmp,
+        &[visit("v1", "https://a.test/", "2026-10-29T10:00:00.000Z")],
+    );
+    let dest = tmp.0.join("backups");
+    std::fs::create_dir(&dest).unwrap();
+    let shown_a = backup_of_shown(&tmp, &dest);
+    let vault_b = tmp.0.join("b.sqlite3");
+    let created = &exchange(
+        &tmp,
+        &[json!({ "type": "vault_create", "requestId": "c", "path": vault_b })],
+    )[0];
+    assert_eq!(created["ok"], true, "{created}");
+
+    let refused = &exchange(&tmp, &[shown_a])[0];
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"], "vault_switched");
+    assert_eq!(
+        std::fs::read_dir(&dest).unwrap().count(),
+        0,
+        "no file, no .partial"
+    );
+    for missing in [json!(null), json!("not a token")] {
+        let mut message = backup_of_shown(&tmp, &dest);
+        message["expectedVaultToken"] = missing;
+        assert_eq!(
+            exchange(&tmp, &[message])[0]["error"],
+            "invalid_vault_token"
+        );
+    }
+
+    let done = &exchange(&tmp, &[backup_of_shown(&tmp, &dest)])[0];
+    assert_eq!(done["ok"], true, "{done}");
+    assert_eq!(done["vaultPath"], real_path(&vault_b));
+    let status = &exchange(&tmp, &[json!({ "type": "vault_status", "requestId": "s" })])[0];
+    assert_eq!(done["vaultToken"], status["status"]["vaultToken"]);
+    assert_eq!(
+        row_dump(Path::new(done["backupPath"].as_str().unwrap())),
+        row_dump(&vault_b)
+    );
+    assert_eq!(std::fs::read_dir(&dest).unwrap().count(), 1);
 }
 
 #[test]
@@ -549,10 +604,7 @@ fn backups_of_a_vault_with_images_are_complete_and_verified() {
     }
     let dest = tmp.0.join("backups");
     std::fs::create_dir(&dest).unwrap();
-    let response = &exchange(
-        &tmp,
-        &[json!({ "type": "vault_backup", "requestId": "b", "directory": dest })],
-    )[0];
+    let response = &exchange(&tmp, &[backup_of_shown(&tmp, &dest)])[0];
     assert_eq!(response["ok"], true, "{response}");
     let copy = PathBuf::from(response["backupPath"].as_str().unwrap());
     let dump = |path: &Path| -> Vec<String> {
@@ -888,11 +940,7 @@ fn an_image_survives_save_list_read_rebuild_backup_and_vault_switches_unchanged(
     // 6. A backup holds the image, its history and thumbnail completely.
     let backups = tmp.0.join("backups");
     std::fs::create_dir(&backups).unwrap();
-    let backup = exchange(
-        &tmp,
-        &[json!({ "type": "vault_backup", "requestId": "b", "directory": backups })],
-    )
-    .remove(0);
+    let backup = exchange(&tmp, &[backup_of_shown(&tmp, &backups)]).remove(0);
     let copy = PathBuf::from(backup["backupPath"].as_str().unwrap());
     assert_eq!(blob_state(&copy), blob_state(&vault_a));
 
@@ -1244,7 +1292,7 @@ fn every_vault_other_than_schema_7_is_refused_for_every_operation_and_left_untou
             json!({ "type": "image_tag_remove", "requestId": "tr", "blobId": 1, "sha256": "0".repeat(64), "vaultToken": "0".repeat(64), "tag": "cat" }),
             json!({ "type": "image_tag_list", "requestId": "tl" }),
             json!({ "type": "image_tag_search", "requestId": "ts", "tag": "cat" }),
-            json!({ "type": "vault_backup", "requestId": "b", "directory": dest }),
+            json!({ "type": "vault_backup", "requestId": "b", "directory": dest, "expectedVaultToken": "0".repeat(64) }),
             json!({ "type": "vault_open", "requestId": "o", "path": vault }),
         ];
         messages.extend(upload_messages(&bytes, false).into_iter().take(1));
@@ -4844,10 +4892,7 @@ fn backups_carry_the_navigations_and_count_them() {
     );
     let dest = tmp.0.join("backups");
     std::fs::create_dir(&dest).unwrap();
-    let response = &exchange(
-        &tmp,
-        &[json!({ "type": "vault_backup", "requestId": "b", "directory": dest })],
-    )[0];
+    let response = &exchange(&tmp, &[backup_of_shown(&tmp, &dest)])[0];
     assert_eq!(response["ok"], true, "{response}");
     let copy = PathBuf::from(response["backupPath"].as_str().unwrap());
     let dump = |path: &Path| -> Vec<String> {
@@ -5023,10 +5068,7 @@ fn image_tags_over_the_real_host_are_stored_consistently_and_leave_images_unchan
     // A backup carries the tags and is verified.
     let dest = tmp.0.join("backups");
     std::fs::create_dir(&dest).unwrap();
-    let response = &exchange(
-        &tmp,
-        &[json!({ "type": "vault_backup", "requestId": "b", "directory": dest })],
-    )[0];
+    let response = &exchange(&tmp, &[backup_of_shown(&tmp, &dest)])[0];
     assert_eq!(response["ok"], true, "{response}");
     let copy = PathBuf::from(response["backupPath"].as_str().unwrap());
     let tags = |path: &Path| -> Vec<String> {
