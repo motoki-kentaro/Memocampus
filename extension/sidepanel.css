@@ -8,6 +8,9 @@
   --accent: #0b57d0;
   --error-bg: #fce8e6;
   --error-fg: #a50e0e;
+  --sunday: #c5221f;
+  --saturday: #0b57d0;
+  --on-accent: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -20,6 +23,9 @@
     --accent: #a8c7fa;
     --error-bg: #3c1f1e;
     --error-fg: #f2b8b5;
+    --sunday: #f28b82;
+    --saturday: #8ab4f8;
+    --on-accent: #062e6f;
   }
 }
 
@@ -328,6 +334,7 @@ body {
 }
 
 .toolbar {
+  position: relative; /* the calendar popover hangs below it, over the list */
   flex: none;
   padding: 10px 10px 6px;
   background: var(--bg);
@@ -433,7 +440,94 @@ button.secondary { font-size: 12px; white-space: nowrap; }
 
 .load-more { display: block; width: calc(100% - 20px); margin: 10px; padding: 6px; }
 
-.toolbar-buttons { display: flex; gap: 6px; }
+.toolbar-buttons { display: flex; flex: none; gap: 6px; }
+
+/* Visit calendar (Issue #5): [calendar][YYYY/MM/DD ×][count …][全タブを記録]. The start shrinks (the
+   count is cut with an ellipsis) so the record button keeps its place. */
+.toolbar-start { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+.toolbar-start .summary { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.calendar-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  color: var(--muted);
+}
+.calendar-button:hover:not(:disabled), .calendar-button[aria-expanded="true"] { color: var(--accent); }
+.calendar-button[aria-expanded="true"] { border-color: var(--accent); }
+.calendar-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.calendar-icon { display: block; }
+.date-chip { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.visit-calendar {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 2px);
+  left: 8px;
+  width: min(300px, calc(100% - 16px));
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+.visit-calendar:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.calendar-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin-bottom: 4px; }
+.calendar-nav { min-width: 32px; min-height: 30px; padding: 0 6px; border-color: transparent; }
+.calendar-title { flex: 1 1 auto; min-height: 30px; border-color: transparent; font-weight: 600; font-variant-numeric: tabular-nums; }
+.calendar-nav:focus-visible, .calendar-title:focus-visible, .calendar-month:focus-visible,
+.calendar-day:focus-visible, .calendar-retry:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.calendar-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.calendar-grid th { padding: 2px 0; font-size: 11px; font-weight: 600; color: var(--muted); text-align: center; }
+.calendar-grid td { padding: 1px; text-align: center; }
+.calendar-grid th.is-sun, .calendar-day.is-sun { color: var(--sunday); }
+.calendar-grid th.is-sat, .calendar-day.is-sat { color: var(--saturday); }
+.calendar-day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 34px;
+  padding: 2px 0 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.calendar-day:disabled { opacity: 0.4; }
+.calendar-day.has-visits { font-weight: 600; }
+/* Today: a ring. Chosen: filled. The dot sits under the number so neither hides it. */
+.calendar-day.is-today { border-color: currentColor; }
+.calendar-day.is-selected { color: var(--on-accent); background: var(--accent); border-color: var(--accent); opacity: 1; }
+.calendar-day.is-selected.is-today { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--fg); }
+.calendar-dot {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.calendar-months { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px 0; }
+.calendar-month { min-height: 34px; padding: 0; }
+.calendar-month[aria-current="true"] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+.calendar-status { margin: 6px 2px 0; font-size: 12px; color: var(--muted); }
+.calendar-status:empty { display: none; }
+@media (forced-colors: active) {
+  .visit-calendar { border-color: CanvasText; }
+  .calendar-day.is-today { border-color: CanvasText; }
+  .calendar-day.is-selected, .calendar-month[aria-current="true"] { forced-color-adjust: none; color: HighlightText; background: Highlight; }
+  .calendar-dot { forced-color-adjust: none; background: CanvasText; }
+  .calendar-day.is-selected .calendar-dot { background: HighlightText; }
+}
 
 .vault-panel {
   padding: 8px 10px 10px;

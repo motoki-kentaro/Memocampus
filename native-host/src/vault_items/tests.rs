@@ -148,6 +148,7 @@ fn deleting_a_url_removes_all_of_it_and_nothing_else() {
             query: "a.test".into(),
             limit: 50,
             offset: 0,
+            visited: None,
         },
     )
     .unwrap();
