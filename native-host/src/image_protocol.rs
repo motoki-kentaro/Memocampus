@@ -278,7 +278,14 @@ impl Uploads {
         if expected.is_some_and(|expected| expected != ticket.token) {
             return Err(crate::vault::VaultError::Switched.into());
         }
-        let precheck = session.read(|db| images::precheck(db, &request))??;
+        // The lookup must be of the ticket's vault: an `AlreadySaved` answer names the ticket's
+        // token, and the upload decision is that vault's. One resolution gives the lookup and its
+        // vault's token together; another vault since the ticket refuses the begin.
+        let (token, precheck) = session.read_with_token(|db| images::precheck(db, &request))?;
+        if token != ticket.token {
+            return Err(crate::vault::VaultError::Switched.into());
+        }
+        let precheck = precheck?;
         let needs_bytes = match precheck {
             Precheck::AlreadySaved(outcome) => {
                 return Ok(saved(&request.save_id, &ticket, outcome))

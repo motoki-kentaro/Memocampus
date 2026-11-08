@@ -16,6 +16,8 @@ mod launch;
 mod location;
 mod manage;
 mod policy_gate;
+#[cfg(test)]
+mod read_token_tests;
 mod search;
 mod vault;
 mod vault_items;

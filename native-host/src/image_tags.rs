@@ -325,24 +325,22 @@ fn answer(
                 .and_then(Value::as_i64)
                 .filter(|id| *id > 0)
                 .ok_or("invalid_blob_id")?;
-            let ticket = session.ticket().map_err(|error| error.code())?;
-            let tags = session
-                .read(|db| tags_of(db, blob_id))
-                .map_err(|error| error.code())?
-                .map_err(ImageError::code)?;
-            fields.insert("vaultToken".into(), ticket.token.into());
+            let (token, tags) = session
+                .read_with_token(|db| tags_of(db, blob_id))
+                .map_err(|error| error.code())?;
+            let tags = tags.map_err(ImageError::code)?;
+            fields.insert("vaultToken".into(), token.into());
             fields.insert("blobId".into(), blob_id.into());
             fields.insert("tags".into(), json!(tags));
         }
         "image_tag_list" => {
             let after = tag_cursor(message)?;
             let limit = limit(message, MAX_TAG_PAGE)?;
-            let ticket = session.ticket().map_err(|error| error.code())?;
-            let (items, next) = session
-                .read(|db| list_tags(db, after.as_deref(), limit))
-                .map_err(|error| error.code())?
-                .map_err(ImageError::code)?;
-            fields.insert("vaultToken".into(), ticket.token.into());
+            let (token, page) = session
+                .read_with_token(|db| list_tags(db, after.as_deref(), limit))
+                .map_err(|error| error.code())?;
+            let (items, next) = page.map_err(ImageError::code)?;
+            fields.insert("vaultToken".into(), token.into());
             fields.insert("items".into(), json!(items));
             fields.insert("next".into(), json!(next));
         }
@@ -350,11 +348,10 @@ fn answer(
             let name = tag_of(message)?;
             let after = cursor(message)?;
             let limit = limit(message, MAX_PAGE_SIZE)?;
-            let ticket = session.ticket().map_err(|error| error.code())?;
-            let page = session
-                .read(|db| search_by_tag(db, &name, after, limit))
-                .map_err(|error| error.code())?
-                .map_err(ImageError::code)?;
+            let (token, page) = session
+                .read_with_token(|db| search_by_tag(db, &name, after, limit))
+                .map_err(|error| error.code())?;
+            let page = page.map_err(ImageError::code)?;
             let (items, cut) = within_budget(page.items, RESPONSE_BUDGET - 4096);
             let next = if cut {
                 items.last().map(|last| ImageCursor {
@@ -364,7 +361,7 @@ fn answer(
             } else {
                 page.next
             };
-            fields.insert("vaultToken".into(), ticket.token.into());
+            fields.insert("vaultToken".into(), token.into());
             fields.insert("tag".into(), name.into());
             fields.insert("items".into(), json!(items));
             fields.insert("next".into(), json!(next));
