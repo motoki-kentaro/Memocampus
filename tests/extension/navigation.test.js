@@ -798,7 +798,7 @@ test("end to end with the real host: navigations stored in a fresh schema 7 vaul
   try {
     assert.equal((await call({ type: "policy_initialize", requestId: "p" })).ok, true);
     assert.equal((await call({ type: "vault_create", requestId: "c", useDefault: true })).ok, true);
-    assert.deepEqual((await call({ type: "host_capabilities", requestId: "h" })).capabilities, [CAPABILITY_NAVIGATION, "vault_items_v1"]);
+    assert.deepEqual((await call({ type: "host_capabilities", requestId: "h" })).capabilities, [CAPABILITY_NAVIGATION, "vault_items_v1", "visit_calendar_v1"]);
     const worker = await startWorker({ transport: call });
     await worker.document(1, "d1", A, { transitionType: "typed", qualifiers: ["from_address_bar"] });
     await worker.document(1, "d2", B, { seconds: 1 });

@@ -19,6 +19,7 @@ mod policy_gate;
 mod search;
 mod vault;
 mod vault_items;
+mod visit_days;
 
 #[derive(Debug, Deserialize)]
 struct VisitEvent {
@@ -282,17 +283,56 @@ fn store_navigation(
     )
 }
 
+/// One `search_pages` answer. A successful page names its vault (`vaultToken`, as `image_list` does),
+/// so a later `url_delete` can only reach the vault the results came from (Issue #43). The token
+/// and the rows come from one resolution of the vault (`Session::read_with_token`): never one
+/// vault's token with another's rows.
+fn search_response(session: &mut vault::Session, value: &serde_json::Value) -> serde_json::Value {
+    session
+        .read_with_token(|db| search::handle(db, value))
+        .map(|(token, mut response)| {
+            if response["ok"] == true {
+                response["vaultToken"] = token.into();
+            }
+            response
+        })
+        .unwrap_or_else(|error| search::failure(value, error.code()))
+}
+
+/// One `visit_days` answer (Issue #5). The bounds are checked before any vault is opened; the
+/// counts and their token come from one resolution of the vault, as for `search_pages`. A failed
+/// read is a failure, never counts.
+fn visit_days_response(
+    session: &mut vault::Session,
+    value: &serde_json::Value,
+) -> serde_json::Value {
+    let bounds = match search::request_id(value)
+        .ok_or("invalid_request_id")
+        .and_then(|_| visit_days::parse_request(value))
+    {
+        Ok(bounds) => bounds,
+        Err(code) => return visit_days::failure(value, code),
+    };
+    match session.read_with_token(|db| visit_days::count_visits(db, &bounds)) {
+        Ok((token, Ok(counts))) => visit_days::success(value, token, counts),
+        Ok((_, Err(_))) => visit_days::failure(value, "db_error"),
+        Err(error) => visit_days::failure(value, error.code()),
+    }
+}
+
 /// Visits may carry `navigation` (`navigation.rs`) and are acknowledged with `navigation`.
 const CAPABILITY_NAVIGATION: &str = "navigation_v1";
 /// `policy_item_*`, `url_delete*` and `image_delete*` (Issue #43; `vault_items.rs`,
 /// `policy_gate/items.rs`).
 const CAPABILITY_VAULT_ITEMS: &str = "vault_items_v1";
+/// `visit_days`, and the date range of `search_pages` (Issue #5; `visit_days.rs`, `search.rs`).
+const CAPABILITY_VISIT_CALENDAR: &str = "visit_calendar_v1";
 
 /// What this host can store, for an extension to ask before it sends anything new:
 ///
 /// ```text
 /// → { type: "host_capabilities", requestId }
-/// ← { ok: true, type: "host_capabilities_result", requestId, capabilities: ["navigation_v1", "vault_items_v1"] }
+/// ← { ok: true, type: "host_capabilities_result", requestId, capabilities: ["navigation_v1", "vault_items_v1", "visit_calendar_v1"] }
 /// ```
 ///
 /// A host from before Issue #41 answers this as an unknown event: `{ ok: false, eventId: null,
@@ -301,7 +341,7 @@ fn capabilities(message: &serde_json::Value) -> serde_json::Value {
     const RESULT: &str = "host_capabilities_result";
     match search::request_id(message) {
         Some(id) => serde_json::json!({
-            "ok": true, "type": RESULT, "requestId": id, "capabilities": [CAPABILITY_NAVIGATION, CAPABILITY_VAULT_ITEMS],
+            "ok": true, "type": RESULT, "requestId": id, "capabilities": [CAPABILITY_NAVIGATION, CAPABILITY_VAULT_ITEMS, CAPABILITY_VISIT_CALENDAR],
         }),
         None => serde_json::json!({
             "ok": false, "type": RESULT, "requestId": null, "error": "invalid_request_id",
@@ -368,25 +408,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
         match value.get("type").and_then(|value| value.as_str()) {
-            Some("search_pages") => {
-                // A successful page names its vault (`vaultToken`, as `image_list` does), so a later
-                // `url_delete` can only reach the vault the results came from (Issue #43).
-                let response = session
-                    .ticket()
-                    .and_then(|ticket| {
-                        session
-                            .read(|db| search::handle(db, &value))
-                            .map(|response| (ticket, response))
-                    })
-                    .map(|(ticket, mut response)| {
-                        if response["ok"] == true {
-                            response["vaultToken"] = ticket.token.into();
-                        }
-                        response
-                    })
-                    .unwrap_or_else(|error| search::failure(&value, error.code()));
-                write_message(&response)?;
-            }
+            Some("search_pages") => write_message(&search_response(&mut session, &value))?,
+            Some("visit_days") => write_message(&visit_days_response(&mut session, &value))?,
             Some(
                 "image_save_begin" | "image_save_chunk" | "image_save_commit" | "image_save_abort",
             ) => {
@@ -626,5 +649,248 @@ mod tests {
             super::allowed_source(&mut session, &gate, "missing"),
             Ok(None)
         );
+    }
+
+    // --- One vault per answer (Issue #5 review): the token and the data of a read ------------------
+
+    mod one_vault_per_answer {
+        use crate::vault::{
+            self, create_vault, switch_active, tests::TempDir, vault_token, ConfigLock,
+            Environment, Session,
+        };
+        use rusqlite::Connection;
+        use serde_json::{json, Value};
+        use std::path::{Path, PathBuf};
+
+        /// November 2026 in Tokyo, as the extension sends it.
+        fn bounds() -> Vec<String> {
+            std::iter::once("2026-10-31T15:00:00.000Z".to_owned())
+                .chain((1..=30).map(|day| format!("2026-11-{day:02}T15:00:00.000Z")))
+                .collect()
+        }
+
+        fn search() -> Value {
+            json!({ "type": "search_pages", "requestId": "s" })
+        }
+
+        fn days() -> Value {
+            json!({ "type": "visit_days", "requestId": "d", "bounds": bounds() })
+        }
+
+        /// Vaults A (one visit on Nov 3 in Tokyo) and B (two visits on Nov 20), A active.
+        struct Two {
+            _tmp: TempDir,
+            env: Environment,
+            a: PathBuf,
+            b: PathBuf,
+        }
+
+        fn activate(env: &Environment, path: &Path) {
+            let lock = ConfigLock::acquire(env).unwrap();
+            switch_active(env, &lock, path, true).unwrap();
+        }
+
+        fn two() -> Two {
+            let tmp = TempDir::new();
+            let env = tmp.env();
+            let (a, b) = (tmp.0.join("a.sqlite3"), tmp.0.join("b.sqlite3"));
+            for (path, rows) in [
+                (
+                    &a,
+                    vec![("a1", "https://a.test/", "2026-11-03T01:00:00.000Z")],
+                ),
+                (
+                    &b,
+                    vec![
+                        ("b1", "https://b.test/", "2026-11-20T01:00:00.000Z"),
+                        ("b2", "https://b.test/", "2026-11-20T02:00:00.000Z"),
+                    ],
+                ),
+            ] {
+                create_vault(path).unwrap();
+                let db = Connection::open(path).unwrap();
+                for (id, url, at) in rows {
+                    db.execute("INSERT INTO visits VALUES (?1, ?2, 't', ?3)", [id, url, at])
+                        .unwrap();
+                }
+            }
+            activate(&env, &a);
+            Two {
+                _tmp: tmp,
+                env,
+                a,
+                b,
+            }
+        }
+
+        fn token(path: &Path) -> String {
+            vault_token(path).unwrap()
+        }
+
+        fn urls(answer: &Value) -> Vec<String> {
+            answer["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["url"].as_str().unwrap().to_owned())
+                .collect()
+        }
+
+        fn days_with(answer: &Value) -> Vec<(usize, u64)> {
+            answer["counts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .filter(|(_, count)| count.as_u64() != Some(0))
+                .map(|(index, count)| (index + 1, count.as_u64().unwrap()))
+                .collect()
+        }
+
+        /// A session whose next read sees the active vault switched to `to` by another process,
+        /// right after it resolved and opened its vault: the window of the finding.
+        fn switching(t: &Two, to: &Path) -> Session {
+            let mut session = Session::new(t.env.clone());
+            let (env, to) = (t.env.clone(), to.to_owned());
+            let mut done = false;
+            session.after_open = Some(Box::new(move || {
+                if !done {
+                    done = true;
+                    activate(&env, &to);
+                }
+            }));
+            session
+        }
+
+        #[test]
+        fn the_window_is_real_for_a_ticket_then_a_read() {
+            // Why `read_with_token` exists: resolving twice pairs one vault's token with the other's
+            // data when the switch falls between the two.
+            let t = two();
+            let mut session = switching(&t, &t.b);
+            let ticket = session.ticket().unwrap();
+            let rows = session
+                .read(|db| super::super::search::handle(db, &search()))
+                .unwrap();
+            assert_eq!(ticket.token, token(&t.a));
+            assert_eq!(urls(&rows), ["https://b.test/"], "B's rows under A's token");
+        }
+
+        #[test]
+        fn search_pages_names_the_vault_it_read_even_when_switched_in_the_window() {
+            let t = two();
+            let mut session = switching(&t, &t.b);
+            let first = super::super::search_response(&mut session, &search());
+            assert_eq!(urls(&first), ["https://a.test/"]);
+            assert_eq!(first["vaultToken"], token(&t.a), "A's rows, A's token");
+            // The switch counts from the next request on: B's rows with B's token.
+            let second = super::super::search_response(&mut session, &search());
+            assert_eq!(urls(&second), ["https://b.test/"]);
+            assert_eq!(second["vaultToken"], token(&t.b));
+            // And back, the other way round.
+            let mut session = switching(&t, &t.a);
+            let third = super::super::search_response(&mut session, &search());
+            assert_eq!(
+                (urls(&third), third["vaultToken"].clone()),
+                (vec!["https://b.test/".to_owned()], json!(token(&t.b)))
+            );
+        }
+
+        #[test]
+        fn visit_days_names_the_vault_it_counted_even_when_switched_in_the_window() {
+            let t = two();
+            let mut session = switching(&t, &t.b);
+            let first = super::super::visit_days_response(&mut session, &days());
+            assert_eq!(days_with(&first), [(3, 1)]);
+            assert_eq!(first["vaultToken"], token(&t.a));
+            let second = super::super::visit_days_response(&mut session, &days());
+            assert_eq!(days_with(&second), [(20, 2)]);
+            assert_eq!(second["vaultToken"], token(&t.b));
+        }
+
+        #[test]
+        fn a_read_that_fails_in_the_window_is_a_failure_without_a_token() {
+            // Another connection removes the table the read needs, after the vault was opened.
+            let t = two();
+            for (request, respond) in [
+                (
+                    days(),
+                    super::super::visit_days_response as fn(&mut Session, &Value) -> Value,
+                ),
+                (search(), super::super::search_response),
+            ] {
+                let t2 = two();
+                let mut session = Session::new(t2.env.clone());
+                let a = t2.a.clone();
+                session.after_open = Some(Box::new(move || {
+                    Connection::open(&a)
+                        .unwrap()
+                        .execute_batch("PRAGMA foreign_keys = OFF; DROP TABLE navigation_events; DROP TABLE page_metadata; DROP TABLE visits;")
+                        .unwrap();
+                }));
+                let answer = respond(&mut session, &request);
+                assert_eq!(answer["ok"], false, "{answer}");
+                assert_eq!(answer["error"], "db_error");
+                assert!(
+                    answer.get("vaultToken").is_none()
+                        && answer.get("counts").is_none()
+                        && answer.get("items").is_none()
+                );
+            }
+            drop(t);
+        }
+
+        #[test]
+        fn no_vault_or_a_missing_one_is_the_error_it_was() {
+            let tmp = TempDir::new();
+            let mut session = Session::new(tmp.env());
+            for (answer, kind) in [
+                (
+                    super::super::visit_days_response(&mut session, &days()),
+                    "visit_days_result",
+                ),
+                (
+                    super::super::search_response(&mut session, &search()),
+                    "search_pages_result",
+                ),
+            ] {
+                assert_eq!(
+                    answer,
+                    json!({ "ok": false, "type": kind, "requestId": answer["requestId"], "error": "vault_not_configured" })
+                );
+            }
+            let t = two();
+            let mut session = Session::new(t.env.clone());
+            std::fs::remove_file(&t.a).unwrap();
+            for answer in [
+                super::super::visit_days_response(&mut session, &days()),
+                super::super::search_response(&mut session, &search()),
+            ] {
+                assert_eq!(answer["ok"], false);
+                assert_eq!(answer["error"], "vault_missing");
+                assert!(answer.get("vaultToken").is_none());
+            }
+            // Bounds are still judged before any vault.
+            let refused = super::super::visit_days_response(
+                &mut session,
+                &json!({ "type": "visit_days", "requestId": "d", "bounds": [] }),
+            );
+            assert_eq!(refused["error"], "invalid_bounds");
+        }
+
+        #[test]
+        fn a_write_after_the_switch_still_goes_by_the_lock_of_the_new_vault() {
+            // `read_with_token` changes nothing of writes: a ticket of A (B became active right
+            // after it) is refused, while the next read is B's rows with B's token.
+            let t = two();
+            let mut session = switching(&t, &t.b);
+            let ticket = session.ticket().unwrap();
+            assert_eq!(ticket.token, token(&t.a));
+            let read = super::super::search_response(&mut session, &search());
+            assert_eq!(urls(&read), ["https://b.test/"]);
+            assert_eq!(read["vaultToken"], token(&t.b));
+            let refused = session.write_for(&ticket, |_| Ok::<_, vault::VaultError>(()));
+            assert_eq!(refused, Err(vault::VaultError::Switched));
+        }
     }
 }

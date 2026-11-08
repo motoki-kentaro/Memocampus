@@ -1,10 +1,22 @@
 //! `search_pages`: read-only search over `visits` and `tab_snapshots`, aggregated by URL.
 //!
 //! Source rows are never modified; aggregation happens entirely inside the query.
+//!
+//! A date range (Issue #5): `visitedFrom` and `visitedTo`, both or neither, exact `Date#toISOString()`
+//! instants with `visitedFrom < visitedTo` at most 32 days apart (else `invalid_bounds`). With it, the
+//! search is over the visits with `visitedFrom <= visited_at < visitedTo` only (and a valid
+//! `visited_at`, `visit_days::VALID_VISITED_AT`): no tab snapshot, and nothing of a visit outside the
+//! range. Each URL is still one row, its title the latest non-empty title of those visits,
+//! `lastVisitedAt` and `lastActivityAt` its last visit in the range, `lastCapturedAt` null and
+//! `source` "visit"; order, paging and `hasMore` are as without a range. Without it, the query and
+//! its results are exactly what they were.
 
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::sync::LazyLock;
+
+use crate::visit_days::{checked_bounds, INVALID_BOUNDS, VALID_VISITED_AT};
 
 pub const DEFAULT_LIMIT: u64 = 50;
 pub const MAX_LIMIT: u64 = 100;
@@ -17,6 +29,8 @@ pub struct SearchRequest {
     pub query: String,
     pub limit: u64,
     pub offset: u64,
+    /// `[visitedFrom, visitedTo)`: only visits in it, or None for the search as it always was.
+    pub visited: Option<(String, String)>,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -40,11 +54,15 @@ pub struct SearchPage {
 // the visit and capture timestamps. Both are `Date#toISOString()` strings, so text order is time
 // order. The title is picked in the same single GROUP BY pass by maximizing "timestamp<TAB>title"
 // (timestamps never contain a tab), which is about twice as fast as a window function here.
-const SEARCH_SQL: &str = r"
+// `?4` and `?5` are the date range: both NULL without one, which leaves every row in as before.
+static SEARCH_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        r"
 WITH pages(url, title, visited_at, captured_at) AS (
   SELECT url, title, visited_at, NULL FROM visits
+   WHERE ?4 IS NULL OR (visited_at >= ?4 AND visited_at < ?5 AND {VALID_VISITED_AT})
   UNION ALL
-  SELECT url, title, NULL, recorded_at FROM tab_snapshots
+  SELECT url, title, NULL, recorded_at FROM tab_snapshots WHERE ?4 IS NULL
 ),
 grouped AS (
   SELECT
@@ -65,7 +83,9 @@ SELECT
 FROM grouped
 ORDER BY last_activity_at DESC, url ASC
 LIMIT ?2 OFFSET ?3
-";
+"
+    )
+});
 
 /// Escapes LIKE metacharacters so user input only ever matches literally.
 pub fn like_pattern(query: &str) -> String {
@@ -114,17 +134,41 @@ pub fn parse_request(value: &Value) -> Result<SearchRequest, &'static str> {
         query: query.to_owned(),
         limit: optional_bounded(value, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT)?,
         offset: optional_bounded(value, "offset", 0, 0, MAX_OFFSET)?,
+        visited: visited_range(value)?,
     })
 }
 
+/// `visitedFrom` and `visitedTo`: both absent (or null), or both exact instants in order.
+fn visited_range(value: &Value) -> Result<Option<(String, String)>, &'static str> {
+    let field = |key| match value.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.as_str())),
+        Some(_) => Err(INVALID_BOUNDS),
+    };
+    match (field("visitedFrom")?, field("visitedTo")?) {
+        (None, None) => Ok(None),
+        (Some(from), Some(to)) => {
+            checked_bounds(&[from, to])?;
+            Ok(Some((from.to_owned(), to.to_owned())))
+        }
+        _ => Err(INVALID_BOUNDS),
+    }
+}
+
 pub fn search_pages(db: &Connection, request: &SearchRequest) -> rusqlite::Result<SearchPage> {
-    let mut statement = db.prepare_cached(SEARCH_SQL)?;
+    let mut statement = db.prepare_cached(&SEARCH_SQL)?;
+    let (from, to) = match &request.visited {
+        Some((from, to)) => (Some(from.as_str()), Some(to.as_str())),
+        None => (None, None),
+    };
     // Fetch one extra row to learn whether another page exists.
     let rows = statement.query_map(
         params![
             like_pattern(&request.query),
             request.limit + 1,
-            request.offset
+            request.offset,
+            from,
+            to
         ],
         |row| {
             let last_visited_at: Option<String> = row.get(2)?;
@@ -221,6 +265,7 @@ mod tests {
                 query: query.to_owned(),
                 limit,
                 offset,
+                visited: None,
             },
         )
         .unwrap()
@@ -509,7 +554,8 @@ mod tests {
             SearchRequest {
                 query: "rust".to_owned(),
                 limit: DEFAULT_LIMIT,
-                offset: 0
+                offset: 0,
+                visited: None,
             }
         );
         assert_eq!(
@@ -586,5 +632,276 @@ mod tests {
         let response = handle(&db, &json!({ "requestId": "r1" }));
         assert_eq!(response["ok"], false);
         assert_eq!(response["error"], "db_error");
+    }
+
+    // --- Date range (Issue #5) -------------------------------------------------------------------
+
+    /// November 8, 2026 in Tokyo.
+    const FROM: &str = "2026-11-07T15:00:00.000Z";
+    const TO: &str = "2026-11-08T15:00:00.000Z";
+
+    fn on_day(db: &Connection, query: &str, limit: u64, offset: u64) -> SearchPage {
+        search_pages(
+            db,
+            &SearchRequest {
+                query: query.to_owned(),
+                limit,
+                offset,
+                visited: Some((FROM.to_owned(), TO.to_owned())),
+            },
+        )
+        .unwrap()
+    }
+
+    /// A URL seen on three days with three titles, one seen only that day, one only before, and
+    /// snapshots on and off the day.
+    fn days_db() -> Connection {
+        let db = db();
+        let a = "https://a.test/thread";
+        visit(&db, "a1", a, "Old title", "2026-11-06T10:00:00.000Z");
+        visit(&db, "a2", a, "Day title", "2026-11-07T15:00:00.000Z"); // 00:00 of the day
+        visit(&db, "a3", a, "", "2026-11-08T03:00:00.000Z"); // later that day, no title
+        visit(&db, "a4", a, "New title", "2026-11-08T15:00:00.000Z"); // 00:00 the next day
+        visit(
+            &db,
+            "b1",
+            "https://b.test/",
+            "Bravo",
+            "2026-11-08T14:59:59.999Z",
+        );
+        visit(
+            &db,
+            "c1",
+            "https://c.test/",
+            "Charlie",
+            "2026-11-07T14:59:59.999Z",
+        );
+        visit(&db, "d1", "https://d.test/", "", "2026-11-08T01:00:00.000Z");
+        snapshot(
+            &db,
+            "s1",
+            "https://e.test/",
+            "Echo",
+            "2026-11-08T02:00:00.000Z",
+        );
+        snapshot(&db, "s2", a, "Snapshot title", "2026-11-08T05:00:00.000Z");
+        db
+    }
+
+    #[test]
+    fn a_date_range_aggregates_only_the_visits_of_that_range() {
+        let db = days_db();
+        let page = on_day(&db, "", 50, 0);
+        assert_eq!(
+            page.items,
+            [
+                PageHit {
+                    url: "https://b.test/".into(),
+                    title: "Bravo".into(),
+                    last_visited_at: Some("2026-11-08T14:59:59.999Z".into()),
+                    last_captured_at: None,
+                    last_activity_at: "2026-11-08T14:59:59.999Z".into(),
+                    source: "visit",
+                },
+                PageHit {
+                    // The day's last visit and the day's latest non-empty title: nothing of the
+                    // visits before or after it, and nothing of its snapshot.
+                    url: "https://a.test/thread".into(),
+                    title: "Day title".into(),
+                    last_visited_at: Some("2026-11-08T03:00:00.000Z".into()),
+                    last_captured_at: None,
+                    last_activity_at: "2026-11-08T03:00:00.000Z".into(),
+                    source: "visit",
+                },
+                PageHit {
+                    url: "https://d.test/".into(),
+                    title: "".into(),
+                    last_visited_at: Some("2026-11-08T01:00:00.000Z".into()),
+                    last_captured_at: None,
+                    last_activity_at: "2026-11-08T01:00:00.000Z".into(),
+                    source: "visit",
+                },
+            ]
+        );
+        assert!(!page.has_more);
+        // The same URL on another day is found there, with that day's title.
+        let other = search_pages(
+            &db,
+            &SearchRequest {
+                query: String::new(),
+                limit: 50,
+                offset: 0,
+                visited: Some((
+                    "2026-11-08T15:00:00.000Z".into(),
+                    "2026-11-09T15:00:00.000Z".into(),
+                )),
+            },
+        )
+        .unwrap();
+        assert_eq!(urls(&other), ["https://a.test/thread"]);
+        assert_eq!(other.items[0].title, "New title");
+    }
+
+    #[test]
+    fn a_query_and_a_date_range_must_both_match() {
+        let db = days_db();
+        assert_eq!(urls(&on_day(&db, "bravo", 50, 0)), ["https://b.test/"]);
+        // Charlie exists, but not on that day; the old title of A matches, but not on that day.
+        assert!(on_day(&db, "charlie", 50, 0).items.is_empty());
+        assert!(on_day(&db, "old title", 50, 0).items.is_empty());
+        assert!(on_day(&db, "new title", 50, 0).items.is_empty());
+        assert!(
+            on_day(&db, "echo", 50, 0).items.is_empty(),
+            "a snapshot is no visit"
+        );
+        assert_eq!(
+            urls(&on_day(&db, "day title", 50, 0)),
+            ["https://a.test/thread"]
+        );
+        assert_eq!(
+            urls(&on_day(&db, "a.test", 50, 0)),
+            ["https://a.test/thread"]
+        );
+    }
+
+    #[test]
+    fn without_a_range_the_search_is_what_it_was() {
+        let db = days_db();
+        let page = search(&db, "", 50, 0);
+        assert_eq!(
+            urls(&page),
+            [
+                "https://a.test/thread",
+                "https://b.test/",
+                "https://e.test/",
+                "https://d.test/",
+                "https://c.test/"
+            ]
+        );
+        let a = &page.items[0];
+        assert_eq!(a.title, "New title");
+        assert_eq!(
+            a.last_visited_at.as_deref(),
+            Some("2026-11-08T15:00:00.000Z")
+        );
+        assert_eq!(
+            a.last_captured_at.as_deref(),
+            Some("2026-11-08T05:00:00.000Z")
+        );
+        assert_eq!(a.source, "both");
+        assert_eq!(page.items[2].source, "snapshot");
+    }
+
+    #[test]
+    fn a_date_range_pages_like_the_search_without_one() {
+        let db = db();
+        for n in 0..7 {
+            visit(
+                &db,
+                &format!("v{n}"),
+                &format!("https://p{n}.test/"),
+                "P",
+                &format!("2026-11-08T0{n}:00:00.000Z"),
+            );
+            visit(
+                &db,
+                &format!("w{n}"),
+                &format!("https://p{n}.test/"),
+                "P",
+                &format!("2026-11-10T0{n}:00:00.000Z"),
+            );
+        }
+        let first = on_day(&db, "", 3, 0);
+        let second = on_day(&db, "", 3, 3);
+        let last = on_day(&db, "", 3, 6);
+        assert_eq!(
+            urls(&first),
+            ["https://p6.test/", "https://p5.test/", "https://p4.test/"]
+        );
+        assert_eq!(
+            urls(&second),
+            ["https://p3.test/", "https://p2.test/", "https://p1.test/"]
+        );
+        assert_eq!(urls(&last), ["https://p0.test/"]);
+        assert!(first.has_more && second.has_more && !last.has_more);
+        assert_eq!(
+            first.items[0].last_visited_at.as_deref(),
+            Some("2026-11-08T06:00:00.000Z")
+        );
+    }
+
+    #[test]
+    fn a_stored_time_that_is_no_valid_instant_is_in_no_range_but_still_listed_without_one() {
+        let db = db();
+        visit(
+            &db,
+            "1",
+            "https://ok.test/",
+            "Ok",
+            "2026-11-08T01:00:00.000Z",
+        );
+        visit(
+            &db,
+            "2",
+            "https://feb.test/",
+            "Bad",
+            "2026-11-08T24:00:00.000Z",
+        );
+        visit(
+            &db,
+            "3",
+            "https://short.test/",
+            "Bad",
+            "2026-11-08T01:00:00Z",
+        );
+        visit(
+            &db,
+            "4",
+            "https://space.test/",
+            "Bad",
+            "2026-11-08 01:00:00.000Z",
+        );
+        assert_eq!(urls(&on_day(&db, "", 50, 0)), ["https://ok.test/"]);
+        assert_eq!(
+            search(&db, "", 50, 0).items.len(),
+            4,
+            "the list without a range is unchanged"
+        );
+    }
+
+    #[test]
+    fn a_date_range_is_both_ends_exact_and_in_order() {
+        let ok = parse_request(&json!({ "visitedFrom": FROM, "visitedTo": TO })).unwrap();
+        assert_eq!(ok.visited, Some((FROM.to_owned(), TO.to_owned())));
+        assert_eq!(
+            parse_request(&json!({ "visitedFrom": null, "visitedTo": null }))
+                .unwrap()
+                .visited,
+            None
+        );
+        for bad in [
+            json!({ "visitedFrom": FROM }),
+            json!({ "visitedTo": TO }),
+            json!({ "visitedFrom": FROM, "visitedTo": null }),
+            json!({ "visitedFrom": TO, "visitedTo": FROM }),
+            json!({ "visitedFrom": FROM, "visitedTo": FROM }),
+            json!({ "visitedFrom": "2026-11-07T15:00:00Z", "visitedTo": TO }),
+            json!({ "visitedFrom": "2026-02-30T15:00:00.000Z", "visitedTo": TO }),
+            json!({ "visitedFrom": FROM, "visitedTo": "2026-12-10T15:00:00.000Z" }),
+            json!({ "visitedFrom": 1, "visitedTo": TO }),
+            json!({ "visitedFrom": FROM, "visitedTo": ["x"] }),
+        ] {
+            assert_eq!(parse_request(&bad), Err("invalid_bounds"), "{bad}");
+        }
+        // A refused range runs no query: the answer is the error, with the request id.
+        let db = days_db();
+        let answer = handle(
+            &db,
+            &json!({ "type": "search_pages", "requestId": "r", "visitedFrom": FROM }),
+        );
+        assert_eq!(
+            answer,
+            json!({ "ok": false, "type": "search_pages_result", "requestId": "r", "error": "invalid_bounds" })
+        );
     }
 }

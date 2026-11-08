@@ -573,6 +573,10 @@ fn file_identity(path: &Path) -> Result<Vec<u8>, VaultError> {
 pub struct Session {
     pub env: Environment,
     connection: Option<(String, Connection)>,
+    /// Tests only: runs each time the active vault was resolved and opened (`open`), before its
+    /// connection is used: the window in which another process may switch the active vault.
+    #[cfg(test)]
+    pub(crate) after_open: Option<Box<dyn FnMut()>>,
 }
 
 impl Session {
@@ -580,6 +584,8 @@ impl Session {
         Self {
             env,
             connection: None,
+            #[cfg(test)]
+            after_open: None,
         }
     }
 
@@ -604,20 +610,35 @@ impl Session {
                 self.reset();
             }
         }
-        self.open_cached()
+        self.connect()?;
+        #[cfg(test)]
+        if let Some(mut hook) = self.after_open.take() {
+            hook();
+            self.after_open = Some(hook);
+        }
+        Ok(self.connected())
     }
 
     fn open_cached(&mut self) -> Result<(&str, &mut Connection), VaultError> {
+        self.connect()?;
+        Ok(self.connected())
+    }
+
+    fn connect(&mut self) -> Result<(), VaultError> {
         if self.connection.is_none() {
             let path = self.active_path()?;
             let db = open_vault(Path::new(&path))?;
             self.connection = Some((path, db));
         }
+        Ok(())
+    }
+
+    fn connected(&mut self) -> (&str, &mut Connection) {
         let (path, db) = self
             .connection
             .as_mut()
             .expect("connection was just opened");
-        Ok((path.as_str(), db))
+        (path.as_str(), db)
     }
 
     pub fn read<T>(&mut self, f: impl FnOnce(&Connection) -> T) -> Result<T, VaultError> {
@@ -645,6 +666,22 @@ impl Session {
         self.write_checked(revalidate, None, |db| {
             f(db).map(|_| ()).map_err(|_| VaultError::Db)
         })
+    }
+
+    /// A read that names its vault: `f` runs on the connection of the vault that one resolution of
+    /// the config opened (as `read` does), and the token is that same vault's, taken from the path
+    /// of that connection. So a token and data always belong to one vault, also when another process
+    /// switches the active vault meanwhile: a switch after the resolution only affects the next call.
+    /// (`ticket()` followed by `read()` resolves twice, and a switch between them pairs one vault's
+    /// token with the other's data.) The token is taken before `f` runs; if it cannot be, `f` does not
+    /// run and the call fails.
+    pub fn read_with_token<T>(
+        &mut self,
+        f: impl FnOnce(&Connection) -> T,
+    ) -> Result<(String, T), VaultError> {
+        let (path, db) = self.open()?;
+        let token = vault_token(Path::new(path))?;
+        Ok((token, f(db)))
     }
 
     /// Identifies the vault that is active now, for an operation that will write later (an image
