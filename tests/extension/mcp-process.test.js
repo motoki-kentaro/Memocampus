@@ -140,3 +140,76 @@ test("end to end with the real host and MCP: a new vault is refused until confir
     rmSync(appDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+
+test("end to end with the real host and MCP: an encrypted vault written by the host is read by MCP only once confirmed", { skip: HOST_BIN && MCP_BIN ? false : "set MEMOCAMPUS_TEST_HOST and MEMOCAMPUS_TEST_MCP to run" }, async () => {
+  const { spawn } = await import("node:child_process");
+  const { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } = await import("node:fs");
+  const os = await import("node:os");
+  const appDir = mkdtempSync(path.join(os.tmpdir(), "memocampus-mcp-enc-e2e-"));
+  const env = { ...process.env, MEMOCAMPUS_APP_DIR: appDir };
+  delete env.MEMOCAMPUS_DB;
+  const call = (message) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(HOST_BIN, [], { env, cwd: appDir, stdio: ["pipe", "pipe", "pipe"] });
+      const chunks = [];
+      child.stdout.on("data", (chunk) => chunks.push(chunk));
+      child.on("error", reject);
+      child.on("close", () => {
+        const out = Buffer.concat(chunks);
+        if (out.length < 4) return reject(new Error("no answer"));
+        resolve(JSON.parse(out.subarray(4, 4 + out.readUInt32LE(0)).toString("utf8")));
+      });
+      const body = Buffer.from(JSON.stringify({ requestId: "r", ...message }), "utf8");
+      const length = Buffer.alloc(4);
+      length.writeUInt32LE(body.length);
+      child.stdin.end(Buffer.concat([length, body]));
+    });
+  const vault = path.join(appDir, "encrypted.sqlite3");
+  const servers = [];
+  try {
+    assert.equal((await call({ type: "policy_initialize" })).ok, true);
+    const begun = await call({ type: "vault_create_encrypted", path: vault });
+    assert.equal(begun.ok, true, JSON.stringify(begun));
+    assert.equal(begun.recoveryPhrase.length, 12);
+    const phrase = begun.recoveryPhrase.join(" ");
+    const created = await call({ type: "vault_create_encrypted_commit", recoveryPhrase: phrase });
+    assert.equal(created.ok, true, JSON.stringify(created));
+    assert.equal(created.status.mode, "encrypted");
+    assert.equal(created.status.publication, "pending");
+    for (const [id, url, title] of [
+      ["v1", "https://public.test/encrypted-row", "Public encrypted row"],
+      ["v2", "https://accounts.google.com/CANARY", "CANARY private title"],
+    ]) {
+      const ack = await call({ type: "visit", id, url, title, incognito: false, visitedAt: "2026-11-09T10:00:00.000Z" });
+      assert.equal(ack.ok, true, JSON.stringify(ack));
+    }
+    // At rest: neither the rows nor the phrase are readable in any file of the app directory.
+    for (const name of readdirSync(appDir, { recursive: true })) {
+      const file = path.join(appDir, String(name));
+      if (!statSync(file).isFile()) continue;
+      const bytes = readFileSync(file);
+      assert.equal(bytes.includes("encrypted-row"), false, file);
+      assert.equal(bytes.includes(phrase), false, file);
+    }
+
+    const pending = await failure(startMcpServer(servers, env, []).initialize("enc-e2e"));
+    assert.match(pending.stderr, /vault refused: vault_publication_pending/);
+    await confirmPublication(call);
+    const mcp = startMcpServer(servers, env, []);
+    await mcp.initialize("enc-e2e");
+    const found = await mcp.request("tools/call", { name: "memocampus_search_visits", arguments: { query: "" } });
+    const text = JSON.stringify(found);
+    assert.match(text, /encrypted-row/);
+    assert.doesNotMatch(text, /CANARY/, "the privacy gate applies to encrypted vaults too");
+    assert.equal(text.includes(phrase), false);
+  } finally {
+    for (const server of servers) await server.close();
+    rmSync(appDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+function startMcpServer(servers, env, args) {
+  const mcp = startMcp(MCP_BIN, args, { env, timeoutMs: 15_000 });
+  servers.push(mcp);
+  return mcp;
+}

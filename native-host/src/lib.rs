@@ -8,3 +8,4 @@ pub mod policy;
 pub mod policy_store;
 pub mod public_suffix;
 pub mod schema;
+pub mod secure_vault;

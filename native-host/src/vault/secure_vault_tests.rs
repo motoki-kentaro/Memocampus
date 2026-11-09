@@ -15,9 +15,13 @@ fn encrypted_like(path: &Path) -> Vec<u8> {
     bytes
 }
 
+/// The vault id the encrypted fixtures are recorded with.
+const TEST_ID: VaultId = VaultId::from_array([0x11; 16]);
+
 fn config_with(env: &Environment, path: &Path, mode: VaultMode, publication: Option<Publication>) {
     let config = Config {
         publication,
+        vault_id: (mode == VaultMode::Encrypted).then_some(TEST_ID),
         ..Config::new(path.to_string_lossy().into_owned(), false, mode)
     };
     write_config(env, &config).unwrap();
@@ -38,8 +42,8 @@ fn configure(env: &Environment, path: &Path) {
 struct FixedKeys(Result<(), KeyError>);
 
 impl KeySource for FixedKeys {
-    fn key_for(&self, _: &Path) -> Result<VaultKey, KeyError> {
-        self.0.map(|()| VaultKey([7; 32]))
+    fn key_for(&self, _: &KeyRequest) -> Result<VaultKey, KeyError> {
+        self.0.map(|()| VaultKey::from_bytes(&mut [7; 32]))
     }
 }
 
@@ -74,19 +78,36 @@ fn key_failures_have_their_own_codes_and_never_prove_the_vault_unwritable() {
     let path = tmp.0.join("enc.sqlite3");
     let bytes = encrypted_like(&path);
     for (error, kind, code) in cases {
-        let failure =
-            open_vault_in(&path, VaultMode::Encrypted, &FixedKeys(Err(error))).unwrap_err();
+        let failure = open_vault_in(
+            &path,
+            VaultMode::Encrypted,
+            Some(TEST_ID),
+            &FixedKeys(Err(error)),
+        )
+        .unwrap_err();
         assert_eq!(failure.kind, kind, "{error:?}");
         assert_eq!(failure.cause, OpenCause::Key(error));
         assert_eq!(kind.code(), code);
         assert!(!failure.proves_unwritable(), "{error:?}");
         assert!(failure.needs_handle_fence(), "{error:?}");
     }
-    // A key that was obtained still opens nothing in this version.
-    let failure = open_vault_in(&path, VaultMode::Encrypted, &FixedKeys(Ok(()))).unwrap_err();
-    assert_eq!(failure.kind, VaultError::EncryptionUnsupported);
+    // A key that SQLCipher refuses for these bytes (Slice B: keyed open): a decrypt failure, which
+    // proves nothing either, and the file is left exactly as it was.
+    let failure = open_vault_in(
+        &path,
+        VaultMode::Encrypted,
+        Some(TEST_ID),
+        &FixedKeys(Ok(())),
+    )
+    .unwrap_err();
+    assert_eq!(failure.kind, VaultError::DecryptFailed);
     assert!(!failure.proves_unwritable());
-    assert_eq!(fs::read(&path).unwrap(), bytes, "never handed to SQLite");
+    assert!(failure.needs_handle_fence());
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        bytes,
+        "a refused key changes nothing"
+    );
     for suffix in SIDECAR_SUFFIXES {
         assert!(!sidecar(&path, suffix).exists());
     }
@@ -113,7 +134,13 @@ fn a_refused_key_is_a_decrypt_failure_never_proof_while_plain_not_a_database_sta
     assert!(!plain.needs_handle_fence());
     // Absence proves in either mode.
     let tmp = TempDir::new();
-    let missing = open_vault_in(&tmp.0.join("gone"), VaultMode::Encrypted, &NoKeys).unwrap_err();
+    let missing = open_vault_in(
+        &tmp.0.join("gone"),
+        VaultMode::Encrypted,
+        Some(TEST_ID),
+        &NoKeys,
+    )
+    .unwrap_err();
     assert_eq!(missing.kind, VaultError::Missing);
     assert!(missing.proves_unwritable());
     // Every other failure in encrypted mode, whatever its kind and cause, proves nothing.
@@ -134,13 +161,19 @@ fn a_file_contradicting_the_recorded_mode_is_a_mode_mismatch_and_left_alone() {
     let plain = tmp.0.join("plain.sqlite3");
     create_vault(&plain).unwrap();
     let before = fs::read(&plain).unwrap();
-    let failure = open_vault_in(&plain, VaultMode::Encrypted, &FixedKeys(Ok(()))).unwrap_err();
+    let failure = open_vault_in(
+        &plain,
+        VaultMode::Encrypted,
+        Some(TEST_ID),
+        &FixedKeys(Ok(())),
+    )
+    .unwrap_err();
     assert_eq!(failure.kind, VaultError::ModeMismatch);
     assert!(!failure.proves_unwritable());
     let empty = tmp.0.join("empty.sqlite3");
     fs::write(&empty, b"").unwrap();
     assert_eq!(
-        open_vault_in(&empty, VaultMode::Encrypted, &NoKeys)
+        open_vault_in(&empty, VaultMode::Encrypted, Some(TEST_ID), &NoKeys)
             .unwrap_err()
             .kind,
         VaultError::ModeMismatch
@@ -159,7 +192,7 @@ fn a_session_never_writes_to_reads_or_initializes_a_vault_it_cannot_key() {
     for (keys, code) in [
         (FixedKeys(Err(KeyError::Missing)), "key_unavailable"),
         (FixedKeys(Err(KeyError::Locked)), "vault_locked"),
-        (FixedKeys(Ok(())), "vault_encryption_unsupported"),
+        (FixedKeys(Ok(())), "vault_decrypt_failed"),
     ] {
         let mut session = Session::with_keys(env.clone(), Box::new(keys));
         let written = session.write(|db| {
@@ -168,8 +201,9 @@ fn a_session_never_writes_to_reads_or_initializes_a_vault_it_cannot_key() {
         assert_eq!(written.map_err(VaultError::code), Err(code));
         assert_eq!(session.read(|_| ()).map_err(VaultError::code), Err(code));
     }
+    // The production key store has no entry for it.
     let mut session = Session::new(env.clone());
-    assert_eq!(session.ticket(), Err(VaultError::EncryptionUnsupported));
+    assert_eq!(session.ticket(), Err(VaultError::KeyUnavailable));
     // Creating a vault at that path is refused: nothing re-initializes it.
     assert_eq!(create_vault(&path), Err(VaultError::FileExists));
     assert_eq!(fs::read(&path).unwrap(), bytes);
@@ -490,9 +524,10 @@ fn only_a_usable_vault_can_be_confirmed_but_any_can_be_revoked() {
             policy_revision: None,
         }),
     );
+    // No key in this user's key store: it cannot be confirmed (Slice B: was "unsupported").
     assert_eq!(
         set_publication(&env, &lock, &te, confirm),
-        Err(VaultError::EncryptionUnsupported)
+        Err(VaultError::KeyUnavailable)
     );
     set_publication(&env, &lock, &te, PublicationChange::Revoke).unwrap();
     assert_eq!(publication_of(&env), Some((te, PublicationState::Pending)));
@@ -987,4 +1022,148 @@ fn a_withdrawal_after_a_switch_touches_only_the_vault_now_active() {
     configure(&env, &a);
     assert_eq!(publication_of(&env), Some((ta, PublicationState::Pending)));
     assert_ne!(publication_of(&env).unwrap().0, tb);
+}
+
+// --- Slice B: keyed vaults in the host ----------------------------------------------------------
+
+mod keyed {
+    use super::*;
+    use memocampus_native_host::secure_vault::{cipher, key_store};
+
+    /// An encrypted vault at `path` whose key is in `env`'s key store; recorded as active.
+    fn active_encrypted(env: &Environment, path: &Path) -> (VaultId, VaultKey) {
+        let key = VaultKey::generate().unwrap();
+        let salt = cipher::create(path, &key).unwrap();
+        let id = VaultId::generate().unwrap();
+        key_store::store(
+            env.app_dir.as_ref().unwrap(),
+            &id,
+            &salt,
+            &key,
+            key_store::Write::New,
+        )
+        .unwrap();
+        let lock = ConfigLock::acquire(env).unwrap();
+        switch_active_to(
+            env,
+            &lock,
+            &NewActive::encrypted(path, id),
+            false,
+            &KeyStore::of(env),
+            false,
+        )
+        .unwrap();
+        (id, key)
+    }
+
+    #[test]
+    fn a_session_writes_and_reads_an_encrypted_vault_with_its_key_only() {
+        let tmp = TempDir::new();
+        let env = tmp.env();
+        let path = tmp.0.join("enc.sqlite3");
+        let (id, key) = active_encrypted(&env, &path);
+        let config = current(&env);
+        assert_eq!(config.mode, VaultMode::Encrypted);
+        assert_eq!(config.vault_id, Some(id));
+        let mut session = Session::new(env.clone());
+        session
+            .write(|db| db.execute("INSERT INTO visits VALUES ('1', 'https://a.test/CANARY', 'A', '2026-11-09T00:00:00.000Z')", []))
+            .unwrap();
+        assert_eq!(
+            session
+                .read(
+                    |db| db.query_row("SELECT count(*) FROM visits", [], |row| row
+                        .get::<_, i64>(0))
+                )
+                .unwrap()
+                .unwrap(),
+            1
+        );
+        let bytes = fs::read(&path).unwrap();
+        assert!(!bytes.windows(6).any(|w| w == b"CANARY"));
+        assert!(!key.appears_in(&bytes));
+        // A ticket and a bound read work as for a plain vault.
+        let ticket = session.ticket().unwrap();
+        assert_eq!(ticket.token, vault_token(&path).unwrap());
+        // The key entry gone: writes are refused with a key error, never applied elsewhere.
+        fs::remove_file(key_store::entry_path(env.app_dir.as_ref().unwrap(), &id)).unwrap();
+        let mut fresh = Session::new(env.clone());
+        assert_eq!(
+            fresh.write(|db| db.execute("DELETE FROM visits", [])),
+            Err(VaultError::KeyUnavailable)
+        );
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn an_encrypted_vault_of_another_schema_is_a_schema_mismatch_not_a_key_failure() {
+        let tmp = TempDir::new();
+        let env = tmp.env();
+        let path = tmp.0.join("enc.sqlite3");
+        let (id, key) = active_encrypted(&env, &path);
+        let db = cipher::open(&path, &key, OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap();
+        db.execute_batch("PRAGMA user_version = 6;").unwrap();
+        drop(db);
+        let keys = KeyStore::of(&env);
+        let failure = open_vault_in(&path, VaultMode::Encrypted, Some(id), &keys).unwrap_err();
+        assert_eq!(failure.kind, VaultError::SchemaMismatch);
+        assert!(
+            !failure.proves_unwritable(),
+            "nothing proves in encrypted mode"
+        );
+        // Another vault id for the same file: its entry does not exist.
+        let other = VaultId::generate().unwrap();
+        assert_eq!(
+            open_vault_in(&path, VaultMode::Encrypted, Some(other), &keys)
+                .unwrap_err()
+                .kind,
+            VaultError::KeyUnavailable
+        );
+    }
+
+    #[test]
+    fn switching_away_from_an_unlocked_encrypted_vault_takes_its_write_lock() {
+        let tmp = TempDir::new();
+        let env = tmp.env();
+        let (enc, b) = (tmp.0.join("enc.sqlite3"), tmp.0.join("b.sqlite3"));
+        let (_, key) = active_encrypted(&env, &enc);
+        create_vault(&b).unwrap();
+        // A writer holding the encrypted vault's write lock makes the switch wait, then give up.
+        let writer = cipher::open(&enc, &key, OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let lock = ConfigLock::acquire(&env).unwrap();
+        assert_eq!(switch_active(&env, &lock, &b, false), Err(VaultError::Busy));
+        assert_eq!(current(&env).active_vault, enc.to_string_lossy());
+        writer.execute_batch("ROLLBACK").unwrap();
+        drop(writer);
+        switch_active(&env, &lock, &b, false).unwrap();
+        let config = current(&env);
+        assert_eq!(config.mode, VaultMode::Plain);
+        assert_eq!(config.vault_id, None);
+    }
+
+    #[test]
+    fn a_config_must_name_the_key_of_an_encrypted_vault_and_only_of_one() {
+        let tmp = TempDir::new();
+        let env = tmp.env();
+        let path = tmp.0.join("v.sqlite3");
+        create_vault(&path).unwrap();
+        let lock = ConfigLock::acquire(&env).unwrap();
+        let invalid = NewActive {
+            path: &path,
+            mode: VaultMode::Encrypted,
+            vault_id: None,
+        };
+        assert!(switch_active_to(&env, &lock, &invalid, false, &NoKeys, false).is_err());
+        fs::create_dir_all(env.app_dir.as_ref().unwrap()).unwrap();
+        for text in [
+            serde_json::json!({"version": 2, "activeVault": path, "mode": "encrypted"}),
+            serde_json::json!({"version": 2, "activeVault": path, "mode": "plain", "vaultId": "11".repeat(16)}),
+            serde_json::json!({"version": 2, "activeVault": path, "mode": "encrypted", "vaultId": "XX".repeat(16)}),
+            serde_json::json!({"version": 2, "activeVault": path, "mode": "encrypted", "vaultId": "11".repeat(15)}),
+        ] {
+            fs::write(env.config_path().unwrap(), text.to_string()).unwrap();
+            assert_eq!(resolve(&env), Err(VaultError::ConfigInvalid), "{text}");
+        }
+    }
 }

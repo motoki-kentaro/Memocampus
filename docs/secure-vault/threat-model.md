@@ -47,7 +47,7 @@
 
 | Attack | Defence | Status |
 |---|---|---|
-| T1/T3 read a stolen encrypted vault | SQLCipher AES-256 + HMAC per page under a random 256-bit VK; VK only in DPAPI and phrase envelopes | design; SQLCipher [DOC], DPAPI [POC] |
+| T1/T3 read a stolen encrypted vault | SQLCipher AES-256 + HMAC per page under a random 256-bit VK; VK only in DPAPI and phrase envelopes | [TEST] Slice B (`slice-b.md`: no plaintext row, key or phrase in any file) |
 | T3 steal the vault plus `.mckey` sidecar | the sidecar is phrase-wrapped (128-bit); not enough without the phrase | [POC A-3] |
 | T2 brute-force a B backup | 128-bit phrase; HKDF + AEAD per guess | accepted level (P5) |
 | T2 brute-force a C backup | Argon2id (64 MiB, t=3) per guess; C over B still needs the phrase | [POC A-5]; weak passwords stay weak (R3) |
@@ -55,13 +55,15 @@
 | T5 resource exhaustion (header length, Argon2 parameters, section count) | bounds checked before allocation | [POC A-5.2] |
 | T5 restore overwriting the active vault or config | always a new target; `create_new`/`rename_no_replace`; config untouched until explicit activation | design (§6) |
 | T4 another user reads the key store | DPAPI user scope (`%LOCALAPPDATA%` ACLs too) | [DOC]; cross-user **NOT RUN** |
-| Key store entry swapped or altered | vault id in the DPAPI entropy; kcv; `cipherSalt` match | [POC A-2.2] for the DPAPI part |
+| Key store entry swapped or altered | vault id in the DPAPI entropy; kcv; `cipherSalt` match | [TEST] Slice B `key_store` tests |
 | Wrong key mistaken for "not a database", so the write fence is skipped (HIGH-4) | mode recorded in config; keyed failures never prove unwritable; key-independent exclusive-handle fence | [POC A-7.1/A-8.1] |
-| Encrypted vault misread as plain (HIGH-5) | mode from config; VisibleStore mode-aware | design |
+| Encrypted vault misread as plain (HIGH-5) | mode from config; VisibleStore mode-aware; keyed reads | [TEST] B0 + Slice B |
 | Stale MCP keeps reading the old plain vault after conversion (HIGH-1) | follow-active resolution per call; fixed-path mode refused unless active | design |
 | Restored vault exposed to MCP under a different or empty policy (HIGH-3) | publication gate: `pending` until confirmed; never auto-overwrite global policy | design |
 | Approval given under one policy carried over to a policy initialized again after a loss (review F-02) | `policy_initialize`/`policy_start` withdraw the active vault's publication (`confirmed` → `pending`) under the policy lock before writing; a failed withdrawal writes no policy; a failed policy write leaves `pending`. Ordinary rule edits keep the approval; each read applies the current policy | [TEST] `slice-b0.md` §10; hand-made valid policy files are not detected |
-| Secrets leak through logs, IPC, MCP or errors | fixed error codes; key never formatted; canary tests | design |
+| Secrets leak through logs, IPC, MCP or errors | fixed error codes; key handed to SQLCipher through its C API, never SQL text; canary tests (`VaultKey::appears_in`) over host output, MCP answers, the MCP log and every file | [TEST] Slice B; the phrase itself crosses Native Messaging at creation and recovery (`slice-b.md` D3, R-B1) |
+| Wrong recovery phrase or altered sidecar overwrites a working key, or activates a vault | the phrase must open the envelope and the key must open the vault before anything is written; damaged metadata told apart by the check value | [TEST] Slice B |
+| Interrupted creation leaves a half-made vault active, or mixes keys on retry | manifest + `.pending` files, commit point = config rename, one creation at a time, cancel removes only files bound to that creation | [TEST] Slice B |
 | Plaintext temp files during secure backup | raw ciphertext copy under SHARED; stream encryption for C; `temp_store = MEMORY` | [POC A-4.2] (plain); SQLCipher [DOC] |
 | Silent loss of capture during conversion | `vault_maintenance` is temporary, so events stay queued; watchdog cancels before overflow; policy evaluation unaffected | design (§8) |
 

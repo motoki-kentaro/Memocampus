@@ -68,7 +68,10 @@ impl Env {
     }
 
     fn seed(&self) {
-        let db = Connection::open(&self.vault).unwrap();
+        Self::seed_into(&Connection::open(&self.vault).unwrap());
+    }
+
+    fn seed_into(db: &Connection) {
         let visits = [
             (
                 "p1",
@@ -1495,5 +1498,111 @@ fn both_transports_follow_the_same_active_vault_and_refuse_alike() {
     assert_eq!(
         String::from_utf8(stdio.stderr).unwrap().trim(),
         "memocampus-mcp: vault refused: vault_publication_pending"
+    );
+}
+
+// --- Issue #51 Slice B: an encrypted vault ------------------------------------------------------
+
+/// Replaces the fixture's vault with an encrypted one holding the same rows, its key in the app
+/// directory's key store (DPAPI, this Windows user), published to MCP.
+fn encrypt(
+    env: &Env,
+) -> (
+    memocampus_native_host::secure_vault::secret::VaultId,
+    memocampus_native_host::secure_vault::secret::VaultKey,
+) {
+    use memocampus_native_host::secure_vault::secret::{VaultId, VaultKey};
+    use memocampus_native_host::secure_vault::{cipher, key_store};
+    fs::remove_file(&env.vault).unwrap();
+    let key = VaultKey::generate().unwrap();
+    let salt = cipher::create(&env.vault, &key).unwrap();
+    let id = VaultId::generate().unwrap();
+    key_store::store(&env.app, &id, &salt, &key, key_store::Write::New).unwrap();
+    Env::seed_into(
+        &cipher::open(
+            &env.vault,
+            &key,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
+        )
+        .unwrap(),
+    );
+    let config = json!({
+        "version": 2, "activeVault": env.vault, "mode": "encrypted", "vaultId": id.to_hex(),
+        "publication": {
+            "vaultToken": memocampus_native_host::active_vault::vault_token(&env.vault).unwrap(),
+            "state": "confirmed",
+        },
+    });
+    fs::write(env.app.join("config.json"), config.to_string()).unwrap();
+    (id, key)
+}
+
+#[test]
+fn an_encrypted_vault_answers_the_same_over_http_as_over_stdio_and_never_without_its_key() {
+    let env = Env::new();
+    let (id, key) = encrypt(&env);
+    let bytes = fs::read(&env.vault).unwrap();
+    assert!(
+        !bytes.windows(6).any(|w| w == b"CANARY"),
+        "encrypted at rest"
+    );
+    let requests = vec![
+        call_body(1, "memocampus_search_visits", &json!({"query": ""})),
+        call_body(2, "memocampus_get_domain_stats", &json!({})),
+        call_body(
+            3,
+            "memocampus_get_visits_by_day",
+            &json!({"date": "2026-11-05", "utc_offset": "+00:00"}),
+        ),
+        call_body(4, "memocampus_search_images", &json!({})),
+    ];
+    let over_stdio = stdio_answers(&env, &requests);
+    let server = Server::start(&env, "127.0.0.1:0");
+    let token = env.token();
+    let over_http: Vec<Value> = requests
+        .iter()
+        .map(|request| post(&server, &token, request).json())
+        .collect();
+    for (http, stdio) in over_http.iter().zip(&over_stdio) {
+        assert_eq!(without_process_keys(http), without_process_keys(stdio));
+    }
+    let domains = &over_http[1]["result"]["structuredContent"];
+    assert_eq!(domains["total_visits"], 3, "the privacy gate applies");
+    let all = format!("{over_http:?}{over_stdio:?}{}", env.log());
+    for private in ["CANARY", "never.test", "nomcp.test"] {
+        assert!(!all.contains(private), "{private}");
+    }
+    assert!(!key.appears_in(all.as_bytes()), "the key never leaves");
+    assert!(!all.contains(&id.to_hex()), "nor the vault id");
+
+    // Without this user's key: refused over HTTP at the next call, and a new server will not start.
+    let entry = memocampus_native_host::secure_vault::key_store::entry_path(&env.app, &id);
+    let saved = fs::read(&entry).unwrap();
+    fs::remove_file(&entry).unwrap();
+    let refused = post(&server, &token, &requests[0]).json();
+    assert_eq!(refused["result"]["isError"], true, "{refused}");
+    assert!(refused.to_string().contains("vault_locked"), "{refused}");
+    let output = env.command(&[]).output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("vault refused: vault_locked"));
+    fs::write(&entry, saved).unwrap();
+    assert_eq!(
+        post(&server, &token, &requests[1]).json()["result"]["structuredContent"]["total_visits"],
+        3
+    );
+    // Pending: refused, whatever the key.
+    let mut config: Value =
+        serde_json::from_slice(&fs::read(env.app.join("config.json")).unwrap()).unwrap();
+    config["publication"]["state"] = "pending".into();
+    fs::write(env.app.join("config.json"), config.to_string()).unwrap();
+    let pending = post(&server, &token, &requests[0]).json();
+    assert!(
+        pending.to_string().contains("vault_publication_pending"),
+        "{pending}"
+    );
+    assert_eq!(
+        fs::read(&env.vault).unwrap(),
+        bytes,
+        "MCP never writes the vault"
     );
 }

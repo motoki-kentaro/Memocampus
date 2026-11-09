@@ -49,7 +49,7 @@ HIGH-4, HIGH-5 and R8 for plain vaults. S2 and later need A' and S0.
   - Node/E2E on a SQLCipher host binary;
   - DPAPI with another user or on a real second PC.
 
-### S0 — build switch (no behaviour change)
+### S0 — build switch (no behaviour change) — **carried out within Slice B** (`slice-b.md` §2)
 
 - **Scope.**
   - Use `bundled-sqlcipher-vendored-openssl` in all three crates, and document the toolchain (native
@@ -88,7 +88,7 @@ replace (POSIX rename instead of `MOVEFILE_WRITE_THROUGH`). Its differences are 
   - A power-cut model for the config rename (crash-point injection).
   - A canary: no key or path secrets in responses.
 
-### S2 — encrypted vault creation and onboarding (Phase B)
+### S2 — encrypted vault creation and onboarding (Phase B) — **implemented as Slice B** (`slice-b.md`; review and dogfood pending)
 
 - **Scope.**
   - Key store (DPAPI), recovery sidecar (P1), phrase display and 3-word confirmation.

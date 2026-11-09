@@ -12,6 +12,7 @@
 //!   therefore unpublished; so is every vault a version 1 config names (the host migrates those).
 //! - Anything that cannot be read or understood refuses; nothing is guessed.
 
+use crate::secure_vault::secret::VaultId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs::File;
@@ -76,6 +77,10 @@ pub struct Config {
     /// None: nothing was ever decided for the active vault, which is therefore unpublished.
     #[serde(default)]
     pub publication: Option<Publication>,
+    /// Issue #51 Slice B: the id of an encrypted vault, which names its key store entry. Required
+    /// in encrypted mode, absent in plain mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vault_id: Option<VaultId>,
 }
 
 #[derive(Deserialize)]
@@ -104,6 +109,15 @@ impl Config {
             location_approved,
             mode,
             publication: None,
+            vault_id: None,
+        }
+    }
+
+    /// A version 2 config naming the encrypted vault `active_vault` of id `vault_id`.
+    pub fn encrypted(active_vault: String, location_approved: bool, vault_id: VaultId) -> Self {
+        Self {
+            vault_id: Some(vault_id),
+            ..Self::new(active_vault, location_approved, VaultMode::Encrypted)
         }
     }
 
@@ -141,6 +155,7 @@ impl Config {
                     location_approved: legacy.location_approved,
                     mode: VaultMode::Plain,
                     publication: None,
+                    vault_id: None,
                 }
             }
             Some(version) if version == u64::from(CONFIG_VERSION) => {
@@ -152,7 +167,9 @@ impl Config {
             .publication
             .as_ref()
             .is_none_or(|publication| is_token(&publication.vault_token));
-        if !Path::new(&config.active_vault).is_absolute() || !token_ok {
+        // An encrypted vault names its key; a plain one has none to name.
+        let id_ok = (config.mode == VaultMode::Encrypted) == config.vault_id.is_some();
+        if !Path::new(&config.active_vault).is_absolute() || !token_ok || !id_ok {
             return Err(ConfigError::Invalid);
         }
         Ok(config)
@@ -272,6 +289,8 @@ pub struct Admitted {
     pub path: PathBuf,
     pub mode: VaultMode,
     pub token: String,
+    /// The encrypted vault's id (its key store entry); None for a plain vault.
+    pub vault_id: Option<VaultId>,
 }
 
 /// The publication gate for readers. `pinned` is the path a fixed-path reader was started with:
@@ -315,6 +334,7 @@ pub fn admit(app_dir: &Path, pinned: Option<&Path>) -> Result<Admitted, GateErro
         path,
         mode: config.mode,
         token,
+        vault_id: config.vault_id,
     })
 }
 

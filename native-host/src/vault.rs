@@ -5,8 +5,9 @@
 //! request, opened without SQLite's create flag, and existing files are never overwritten.
 //!
 //! Issue #51 (Slice B0): the config records the vault's mode (`plain` / `encrypted`) and whether
-//! it is published to MCP (see `active_vault`). This version opens plain vaults only; an encrypted
-//! one is refused with a key or mode error that never counts as proof that nobody writes to it.
+//! it is published to MCP (see `active_vault`). Slice B: an encrypted vault is opened with its key from
+//! this Windows user's key store (`secure_vault`); a key or mode error never counts as proof that
+//! nobody writes to it.
 
 use rusqlite::backup::{Backup, StepResult};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
@@ -53,7 +54,7 @@ pub enum VaultError {
     DecryptFailed,
     /// The file contradicts the mode the config records (e.g. plain SQLite in encrypted mode).
     ModeMismatch,
-    /// The config names an encrypted vault, which this version cannot open.
+    /// The engine or platform cannot open encrypted vaults (no SQLCipher, no key protector).
     EncryptionUnsupported,
 }
 
@@ -393,57 +394,65 @@ pub enum OpenCause {
     ModeMismatch,
 }
 
-/// Why no key is available for an encrypted vault. Never carries key material. This version only
-/// ever produces `NotSupported`; the others are what key sources report from Slice S2 on, and
-/// tests inject them.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyError {
-    /// This version has no way to unlock encrypted vaults.
-    NotSupported,
-    /// No key store entry for the vault.
-    Missing,
-    /// The OS protector (DPAPI) refused the entry: another user, damaged profile or blob.
-    ProtectorFailed,
-    /// An entry exists but belongs to another vault (vault id, salt or check value differ).
-    Mismatch,
-    /// The key needs the user (e.g. a recovery phrase) before it can be used.
-    Locked,
-}
+pub use memocampus_native_host::secure_vault::secret::{CipherSalt, VaultId, VaultKey};
+pub use memocampus_native_host::secure_vault::KeyError;
+use memocampus_native_host::secure_vault::{cipher, key_store};
 
-impl KeyError {
-    fn kind(self) -> VaultError {
-        match self {
-            Self::NotSupported => VaultError::EncryptionUnsupported,
-            Self::Missing | Self::ProtectorFailed | Self::Mismatch => VaultError::KeyUnavailable,
-            Self::Locked => VaultError::Locked,
+/// The vault error a key failure is reported as. None of them proves anything about the file.
+fn key_kind(error: KeyError) -> VaultError {
+    match error {
+        KeyError::NotSupported => VaultError::EncryptionUnsupported,
+        KeyError::Missing | KeyError::ProtectorFailed | KeyError::Mismatch | KeyError::Io => {
+            VaultError::KeyUnavailable
         }
+        KeyError::Locked => VaultError::Locked,
     }
 }
 
-/// A vault key. Opaque: no `Debug` output of its bytes, never serialized.
-pub struct VaultKey(#[allow(dead_code)] [u8; 32]);
-
-impl std::fmt::Debug for VaultKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("VaultKey(..)")
-    }
+/// What a key source is asked: the key of the encrypted vault `vault_id` whose file starts with
+/// `salt` (read from the file itself, never from the config).
+pub struct KeyRequest {
+    pub vault_id: Option<VaultId>,
+    pub salt: CipherSalt,
 }
 
-/// Where the key of an encrypted vault comes from (DPAPI key store from Slice S2 on).
+/// Where the key of an encrypted vault comes from.
 pub trait KeySource {
-    fn key_for(&self, vault: &Path) -> Result<VaultKey, KeyError>;
+    fn key_for(&self, request: &KeyRequest) -> Result<VaultKey, KeyError>;
 }
 
-/// This version's key source: encrypted vaults cannot be unlocked.
+/// No keys at all: encrypted vaults cannot be unlocked (tests, and the key-independent paths).
 pub struct NoKeys;
 
 impl KeySource for NoKeys {
-    fn key_for(&self, _: &Path) -> Result<VaultKey, KeyError> {
+    fn key_for(&self, _: &KeyRequest) -> Result<VaultKey, KeyError> {
         Err(KeyError::NotSupported)
     }
 }
 
+/// The production key source: this Windows user's DPAPI key store in the app directory
+/// (`secure_vault::key_store`). A missing or unusable entry is an error; a key is never created
+/// here.
+pub struct KeyStore {
+    app_dir: Option<PathBuf>,
+}
+
+impl KeyStore {
+    pub fn of(env: &Environment) -> Self {
+        Self {
+            app_dir: env.app_dir.clone(),
+        }
+    }
+}
+
+impl KeySource for KeyStore {
+    fn key_for(&self, request: &KeyRequest) -> Result<VaultKey, KeyError> {
+        let (Some(app_dir), Some(vault_id)) = (&self.app_dir, &request.vault_id) else {
+            return Err(KeyError::Missing);
+        };
+        key_store::unlock(app_dir, vault_id, &request.salt)
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenFailure {
     pub kind: VaultError,
@@ -466,7 +475,7 @@ impl OpenFailure {
     }
 
     fn key(error: KeyError) -> Self {
-        Self::new(error.kind(), OpenCause::Key(error)).in_mode(VaultMode::Encrypted)
+        Self::new(key_kind(error), OpenCause::Key(error)).in_mode(VaultMode::Encrypted)
     }
 
     /// The key-independent cases in which a switch away from this vault must hold an exclusive
@@ -569,22 +578,32 @@ impl From<OpenFailure> for VaultError {
 
 /// Only schema 4 is ever used, for every operation. Older vaults are refused here, unchanged.
 fn validate_schema(db: &Connection) -> Result<(), OpenFailure> {
-    schema::check(db).map_err(|error| match error {
-        SchemaError::ForeignApplicationId(id) => {
-            OpenFailure::new(VaultError::Invalid, OpenCause::ForeignApplicationId(id))
-        }
-        SchemaError::UnsupportedVersion(version) => OpenFailure::new(
-            VaultError::SchemaMismatch,
-            OpenCause::UnsupportedVersion(version),
-        ),
-        SchemaError::Shape(name) => {
-            OpenFailure::new(VaultError::SchemaMismatch, OpenCause::SchemaMismatch(name))
-        }
-        SchemaError::Sqlite(error) => OpenFailure::from_sqlite(&error),
-    })
+    validate_schema_in(db, VaultMode::Plain)
+}
+
+/// `validate_schema` on a connection opened in `mode`: on a keyed connection, the first read is
+/// what tells a refused key (`DecryptFailed`) from success.
+fn validate_schema_in(db: &Connection, mode: VaultMode) -> Result<(), OpenFailure> {
+    let in_mode = |failure: OpenFailure| failure.in_mode(mode);
+    schema::check(db)
+        .map_err(|error| match error {
+            SchemaError::ForeignApplicationId(id) => {
+                OpenFailure::new(VaultError::Invalid, OpenCause::ForeignApplicationId(id))
+            }
+            SchemaError::UnsupportedVersion(version) => OpenFailure::new(
+                VaultError::SchemaMismatch,
+                OpenCause::UnsupportedVersion(version),
+            ),
+            SchemaError::Shape(name) => {
+                OpenFailure::new(VaultError::SchemaMismatch, OpenCause::SchemaMismatch(name))
+            }
+            SchemaError::Sqlite(error) => OpenFailure::from_sqlite_in(&error, mode),
+        })
+        .map_err(in_mode)
 }
 
 /// Opens an existing vault. Never creates a file: SQLite's create flag is not passed.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn open_vault(path: &Path) -> Result<Connection, VaultError> {
     open_vault_detailed(path).map_err(VaultError::from)
 }
@@ -622,65 +641,102 @@ pub fn open_vault_detailed(path: &Path) -> Result<Connection, OpenFailure> {
 }
 
 /// Opens the vault in the mode its config records. Plain: `open_vault_detailed`. Encrypted: the
-/// file must not be plain SQLite, and the key must be obtainable; this version then refuses
-/// (`EncryptionUnsupported`) without ever handing the file to SQLite, so it can neither misread
-/// nor initialize it.
+/// file must not be plain SQLite, its key must be obtainable for `vault_id` and the salt the file
+/// starts with, and the keyed connection must pass every check a plain one passes. A key that
+/// SQLCipher refuses is `DecryptFailed`, never "not a vault". The file is never created or
+/// initialized here.
 pub fn open_vault_in(
     path: &Path,
     mode: VaultMode,
+    vault_id: Option<VaultId>,
     keys: &dyn KeySource,
 ) -> Result<Connection, OpenFailure> {
     match mode {
         VaultMode::Plain => open_vault_detailed(path),
-        VaultMode::Encrypted => Err(open_encrypted(path, keys)),
+        VaultMode::Encrypted => open_encrypted(path, vault_id, keys),
     }
 }
 
-const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
-
-fn open_encrypted(path: &Path, keys: &dyn KeySource) -> OpenFailure {
+fn open_encrypted(
+    path: &Path,
+    vault_id: Option<VaultId>,
+    keys: &dyn KeySource,
+) -> Result<Connection, OpenFailure> {
     let encrypted = |failure: OpenFailure| failure.in_mode(VaultMode::Encrypted);
-    let mut file = match fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => match File::open(path) {
-            Ok(file) => file,
-            Err(error) => return encrypted(OpenFailure::from_io(&error)),
-        },
-        Ok(_) => return encrypted(OpenFailure::new(VaultError::Invalid, OpenCause::NotAFile)),
-        Err(error) => return encrypted(OpenFailure::from_io(&error)),
-    };
-    // A SQLCipher file starts with its random salt; plain SQLite (or an empty file) contradicts
-    // the recorded mode. Never resolved by switching modes.
-    let mut head = [0u8; 16];
-    let mut read = 0;
-    while read < head.len() {
-        match io::Read::read(&mut file, &mut head[read..]) {
-            Ok(0) => break,
-            Ok(n) => read += n,
-            Err(error) => return encrypted(OpenFailure::from_io(&error)),
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => {
+            return Err(encrypted(OpenFailure::new(
+                VaultError::Invalid,
+                OpenCause::NotAFile,
+            )))
         }
+        Err(error) => return Err(encrypted(OpenFailure::from_io(&error))),
     }
-    drop(file);
-    if read < head.len() || &head == SQLITE_MAGIC {
-        return encrypted(OpenFailure::new(
-            VaultError::ModeMismatch,
-            OpenCause::ModeMismatch,
-        ));
+    // A SQLCipher file starts with its random salt; plain SQLite (or a file too short to hold a
+    // salt) contradicts the recorded mode. Never resolved by switching modes.
+    let salt = match cipher::read_head(path) {
+        Ok(cipher::Head::Salt(salt)) => salt,
+        Ok(_) => {
+            return Err(encrypted(OpenFailure::new(
+                VaultError::ModeMismatch,
+                OpenCause::ModeMismatch,
+            )))
+        }
+        Err(error) => return Err(encrypted(OpenFailure::from_io(&error))),
+    };
+    let key = keys
+        .key_for(&KeyRequest { vault_id, salt })
+        .map_err(OpenFailure::key)?;
+    let db = cipher::open(
+        path,
+        &key,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|error| match error {
+        cipher::KeyingError::Unavailable => OpenFailure::key(KeyError::NotSupported),
+        cipher::KeyingError::Sqlite(error) => match fs::metadata(path) {
+            Err(io) if io.kind() == io::ErrorKind::NotFound => encrypted(OpenFailure::from_io(&io)),
+            _ => OpenFailure::from_sqlite_in(&error, VaultMode::Encrypted),
+        },
+    })?;
+    drop(key);
+    let sqlite = |error: rusqlite::Error| OpenFailure::from_sqlite_in(&error, VaultMode::Encrypted);
+    db.busy_timeout(BUSY_TIMEOUT).map_err(sqlite)?;
+    db.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(sqlite)?;
+    validate_schema_in(&db, VaultMode::Encrypted)?;
+    if db
+        .is_readonly(rusqlite::DatabaseName::Main)
+        .map_err(sqlite)?
+    {
+        return Err(encrypted(OpenFailure::new(
+            VaultError::Io,
+            OpenCause::ReadOnly,
+        )));
     }
-    match keys.key_for(path) {
-        Err(error) => OpenFailure::key(error),
-        // Keyed opening (SQLCipher) arrives with Slice S2; until then a key changes nothing.
-        Ok(_key) => OpenFailure::key(KeyError::NotSupported),
-    }
+    Ok(db)
 }
-
 /// `open_vault` plus a full structural check, for when the user picks a file to open.
 pub fn open_vault_checked(path: &Path) -> Result<Connection, VaultError> {
-    let db = open_vault(path)?;
+    open_checked_in(path, VaultMode::Plain, None, &NoKeys).map_err(VaultError::from)
+}
+
+/// `open_vault_in` plus `PRAGMA quick_check`, for a file the user picks or a vault just made.
+pub fn open_checked_in(
+    path: &Path,
+    mode: VaultMode,
+    vault_id: Option<VaultId>,
+    keys: &dyn KeySource,
+) -> Result<Connection, OpenFailure> {
+    let db = open_vault_in(path, mode, vault_id, keys)?;
     let result: String = db
         .query_row("PRAGMA quick_check", [], |row| row.get(0))
-        .map_err(|error| VaultError::from(OpenFailure::from_sqlite(&error)))?;
+        .map_err(|error| OpenFailure::from_sqlite_in(&error, mode))?;
     if result != "ok" {
-        return Err(OpenFailure::new(VaultError::Invalid, OpenCause::IntegrityCheckFailed).into());
+        return Err(
+            OpenFailure::new(VaultError::Invalid, OpenCause::IntegrityCheckFailed).in_mode(mode),
+        );
     }
     Ok(db)
 }
@@ -737,7 +793,34 @@ pub fn switch_active(
     new_path: &Path,
     location_approved: bool,
 ) -> Result<(), VaultError> {
-    switch_active_with(env, lock, new_path, location_approved, &NoKeys)
+    switch_active_with(env, lock, new_path, location_approved, &KeyStore::of(env))
+}
+
+/// The vault a switch makes active.
+#[derive(Debug, Clone, Copy)]
+pub struct NewActive<'a> {
+    pub path: &'a Path,
+    pub mode: VaultMode,
+    /// Required for an encrypted vault (its key store entry), None for a plain one.
+    pub vault_id: Option<VaultId>,
+}
+
+impl<'a> NewActive<'a> {
+    pub fn plain(path: &'a Path) -> Self {
+        Self {
+            path,
+            mode: VaultMode::Plain,
+            vault_id: None,
+        }
+    }
+
+    pub fn encrypted(path: &'a Path, vault_id: VaultId) -> Self {
+        Self {
+            path,
+            mode: VaultMode::Encrypted,
+            vault_id: Some(vault_id),
+        }
+    }
 }
 
 /// What keeps writers off the old vault while the config is replaced.
@@ -795,15 +878,39 @@ thread_local! {
 /// vault is the very file (same identity) whose publication was already confirmed.
 pub fn switch_active_with(
     env: &Environment,
-    _lock: &ConfigLock,
+    lock: &ConfigLock,
     new_path: &Path,
     location_approved: bool,
     keys: &dyn KeySource,
 ) -> Result<(), VaultError> {
+    switch_active_to(
+        env,
+        lock,
+        &NewActive::plain(new_path),
+        location_approved,
+        keys,
+        false,
+    )
+}
+
+/// `switch_active_with` for a vault of either mode. `fresh_publication`: the new vault starts
+/// pending even if it is the very file whose publication was confirmed (a recovered vault).
+pub fn switch_active_to(
+    env: &Environment,
+    _lock: &ConfigLock,
+    new: &NewActive,
+    location_approved: bool,
+    keys: &dyn KeySource,
+    fresh_publication: bool,
+) -> Result<(), VaultError> {
+    let new_path = new.path;
+    if (new.mode == VaultMode::Encrypted) != new.vault_id.is_some() {
+        return Err(VaultError::InvalidPath);
+    }
     let (fence, previous) = match resolve(env) {
         Ok(Active::Configured(config)) => {
             let path = PathBuf::from(&config.active_vault);
-            let fence = match open_vault_in(&path, config.mode, keys) {
+            let fence = match open_vault_in(&path, config.mode, config.vault_id, keys) {
                 Ok(db) => Fence::WriteLock(db),
                 Err(failure) if failure.proves_unwritable() => Fence::None,
                 Err(failure) if failure.needs_handle_fence() => handle_fence(&path)?,
@@ -829,7 +936,7 @@ pub fn switch_active_with(
     let token = active_vault::vault_token(new_path).ok();
     let publication = token.map(
         |token| match previous.and_then(|config| config.publication) {
-            Some(kept) if kept.vault_token == token => kept,
+            Some(kept) if kept.vault_token == token && !fresh_publication => kept,
             _ => Publication {
                 vault_token: token,
                 state: PublicationState::Pending,
@@ -839,10 +946,11 @@ pub fn switch_active_with(
     );
     let config = Config {
         publication,
+        vault_id: new.vault_id,
         ..Config::new(
             new_path.to_string_lossy().into_owned(),
             location_approved,
-            VaultMode::Plain,
+            new.mode,
         )
     };
     let result = write_config(env, &config);
@@ -882,7 +990,8 @@ pub fn set_publication(
     let path = PathBuf::from(&config.active_vault);
     let token = match change {
         PublicationChange::Confirm { .. } => {
-            let db = open_vault_in(&path, config.mode, &NoKeys).map_err(VaultError::from)?;
+            let db = open_vault_in(&path, config.mode, config.vault_id, &KeyStore::of(env))
+                .map_err(VaultError::from)?;
             let token = vault_token(&path)?;
             drop(db);
             token
@@ -1102,6 +1211,14 @@ pub fn vault_token(path: &Path) -> Result<String, VaultError> {
     active_vault::vault_token(path).map_err(|error| OpenFailure::from_io(&error).kind)
 }
 
+/// The active vault as one resolution of the config names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveSpec {
+    pub path: String,
+    pub mode: VaultMode,
+    pub vault_id: Option<VaultId>,
+}
+
 /// Holds the connection to the active vault for one host process.
 ///
 /// Consistency with a concurrent vault switch (`switch_active`):
@@ -1116,8 +1233,8 @@ pub fn vault_token(path: &Path) -> Result<String, VaultError> {
 ///   anyway; the revalidation matters for hosts that serve several requests.
 pub struct Session {
     pub env: Environment,
-    /// The open vault: its path and the mode it was opened in, as the config named them.
-    connection: Option<(String, VaultMode, Connection)>,
+    /// The open vault: its path, mode and vault id as the config named them.
+    connection: Option<(ActiveSpec, Connection)>,
     keys: Box<dyn KeySource>,
     /// Tests only: runs each time the active vault was resolved and opened (`open`), before its
     /// connection is used: the window in which another process may switch the active vault.
@@ -1127,10 +1244,11 @@ pub struct Session {
 
 impl Session {
     pub fn new(env: Environment) -> Self {
+        let keys: Box<dyn KeySource> = Box::new(KeyStore::of(&env));
         Self {
             env,
             connection: None,
-            keys: Box::new(NoKeys),
+            keys,
             #[cfg(test)]
             after_open: None,
         }
@@ -1149,23 +1267,33 @@ impl Session {
         self.connection = None;
     }
 
-    /// Path and mode of the active vault. The override (`MEMOCAMPUS_DB`) is always plain.
-    pub fn active_target(&self) -> Result<(String, VaultMode), VaultError> {
+    /// Path, mode and id of the active vault. The override (`MEMOCAMPUS_DB`) is always plain.
+    pub fn active_target(&self) -> Result<ActiveSpec, VaultError> {
         match resolve(&self.env)? {
-            Active::Override(path) => Ok((path.to_string_lossy().into_owned(), VaultMode::Plain)),
-            Active::Configured(config) => Ok((config.active_vault, config.mode)),
+            Active::Override(path) => Ok(ActiveSpec {
+                path: path.to_string_lossy().into_owned(),
+                mode: VaultMode::Plain,
+                vault_id: None,
+            }),
+            Active::Configured(config) => Ok(ActiveSpec {
+                path: config.active_vault,
+                mode: config.mode,
+                vault_id: config.vault_id,
+            }),
             Active::NotConfigured => Err(VaultError::NotConfigured),
         }
+    }
+
+    /// The key source this session opens encrypted vaults with.
+    pub fn keys(&self) -> &dyn KeySource {
+        self.keys.as_ref()
     }
 
     /// Opens the configured vault, first dropping a cached connection that no longer matches
     /// the config (see the type-level notes for what this does and does not guarantee).
     fn open(&mut self) -> Result<(&str, &mut Connection), VaultError> {
-        if let Some((cached, mode, _)) = &self.connection {
-            let current = self.active_target().ok();
-            if current.as_ref().map(|(path, mode)| (path.as_str(), *mode))
-                != Some((cached.as_str(), *mode))
-            {
+        if let Some((cached, _)) = &self.connection {
+            if self.active_target().ok().as_ref() != Some(cached) {
                 self.reset();
             }
         }
@@ -1185,23 +1313,28 @@ impl Session {
 
     fn connect(&mut self) -> Result<(), VaultError> {
         if self.connection.is_none() {
-            let (path, mode) = self.active_target()?;
-            let db = open_vault_in(Path::new(&path), mode, self.keys.as_ref())?;
-            self.connection = Some((path, mode, db));
+            let spec = self.active_target()?;
+            let db = open_vault_in(
+                Path::new(&spec.path),
+                spec.mode,
+                spec.vault_id,
+                self.keys.as_ref(),
+            )?;
+            self.connection = Some((spec, db));
         }
         Ok(())
     }
 
     fn connected(&mut self) -> (&str, &mut Connection) {
-        let (path, _, db) = self
+        let (spec, db) = self
             .connection
             .as_mut()
             .expect("connection was just opened");
-        (path.as_str(), db)
+        (spec.path.as_str(), db)
     }
 
-    fn connected_mode(&self) -> Option<VaultMode> {
-        self.connection.as_ref().map(|(_, mode, _)| *mode)
+    fn connected_spec(&self) -> Option<ActiveSpec> {
+        self.connection.as_ref().map(|(spec, _)| spec.clone())
     }
 
     pub fn read<T>(&mut self, f: impl FnOnce(&Connection) -> T) -> Result<T, VaultError> {
@@ -1308,7 +1441,7 @@ impl Session {
             self.reset();
             return Err(VaultError::Switched.into());
         }
-        let mode = self.connected_mode();
+        let spec = self.connected_spec();
         let (_, db) = self.connected();
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -1316,7 +1449,11 @@ impl Session {
         if !overridden {
             match resolve(&env)? {
                 Active::Configured(config)
-                    if config.active_vault == path && Some(config.mode) == mode => {}
+                    if spec.as_ref().is_some_and(|spec| {
+                        config.active_vault == spec.path
+                            && config.mode == spec.mode
+                            && config.vault_id == spec.vault_id
+                    }) && config.active_vault == path => {}
                 _ => {
                     drop(tx);
                     self.reset();

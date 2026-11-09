@@ -14,6 +14,14 @@ Clicking the Memocampus toolbar action opens a side panel with three tabs: **URL
 
 The vault (SQLite file) is independent of the host executable. Its path is stored in `%LOCALAPPDATA%\Memocampus\config.json`; the default vault is `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`. On first use, open the side panel's **Vault** section and create a vault explicitly (or open an existing one). Automatic recording also needs the privacy policy to be initialized (see [Privacy policy](#privacy-policy)). Only vaults created by this version (schema 7, which added image tags in #44) can be used; a schema 6 vault is refused like any older one, so create a new vault after updating. An older vault is refused with an explanation and left unchanged: there is no conversion, and it cannot be backed up from the app, so copy the file if you want to keep it. Manual backups use the SQLite Backup API and copy the whole vault, including saved images, their save history and thumbnails. Switching or opening another vault switches the images too; nothing is copied between vaults. See `docs/issue-003-vault-location.md`.
 
+**Encrypted vaults** (Issue #51, [docs/secure-vault/slice-b.md](docs/secure-vault/slice-b.md)). A new vault is encrypted by default
+(SQLCipher, a random 256-bit key); choose **暗号化しない** for a plain one. Existing plain vaults are never converted. The key is
+protected with Windows DPAPI for your Windows user, so the vault opens without a password. When you create it, the panel shows a
+12-word **recovery phrase once** and asks for three of its words before the vault is created: write it down. With the phrase and the
+`<vault>.mckey` file next to the vault, the vault can be opened by another Windows user or on another PC (**リカバリーフレーズで復旧**);
+without both, nobody can. Encrypted vaults cannot be backed up from the app yet (later slice); the backup button refuses rather than
+write a plain copy.
+
 The database previously stored next to the executable (`native-host/target/release/memocampus.sqlite3`) is no longer used and is left untouched.
 
 This project never closes tabs automatically.
@@ -142,7 +150,10 @@ all sites (to fetch the right-clicked image with its site's cookies, and to reco
 
 ## Installation (Windows, developer mode)
 
-Requirements: Windows 10/11, Google Chrome 116 or later, [Rust](https://rustup.rs/) (stable, MSVC toolchain).
+Requirements: Windows 10/11, Google Chrome 116 or later, [Rust](https://rustup.rs/) (stable, MSVC toolchain),
+and a **native Windows Perl** (Strawberry Perl, or MSYS2 `mingw-w64-x86_64-perl`; not the Perl of Git for Windows): the
+host and the MCP server embed SQLCipher, whose OpenSSL is built from source (Issue #51; the first build takes about 12
+minutes more). If `perl` on `PATH` is not a native one, set `PERL` to it, e.g. `$env:PERL = "C:\Strawberry\perl\bin\perl.exe"`.
 Node.js 18+ is only needed to run the extension tests. No administrator rights are required.
 
 1. **Build the native host** (from the repository root):
@@ -189,7 +200,7 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 GitHub Actions (`.github/workflows/ci.yml`) runs on pull requests targeting `main`, on pushes to `main`, and on manual runs. It only has read access to the repository contents, uses no secrets, and uploads no artifacts.
 
 - **JavaScript** (`ubuntu-latest`, Node.js 24): `npm ci`, `npm test`. The extension tests use fake Chrome APIs and need no Windows.
-- **Rust** (`windows-latest`, stable MSVC toolchain): format check, tests, Clippy and a release build, for `native-host`, `visible-store` and `mcp-server` in turn. The host calls Windows APIs, embeds its icon through the MSVC linker, and has tests that only run on Windows/MSVC, so a Linux run would not verify it.
+- **Rust** (`windows-latest`, stable MSVC toolchain): format check, tests, Clippy and a release build, for `native-host`, `visible-store` and `mcp-server` in turn. The host calls Windows APIs (DPAPI among them), embeds its icon through the MSVC linker, and has tests that only run on Windows/MSVC, so a Linux run would not verify it. SQLCipher's OpenSSL is built with the runner's Strawberry Perl (`PERL`), and the three crates share one target directory so it is built once per profile.
 
 Run the same checks locally:
 

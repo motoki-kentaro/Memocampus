@@ -2,12 +2,16 @@
 //! connection, and closes the connection before any row is judged.
 //!
 //! The mode comes from the caller (the config), never from the file (Issue #51 B0-4). A plain
-//! vault must carry the SQLite header; an encrypted one must not, and is never handed to SQLite
-//! by this version.
+//! vault must carry the SQLite header; an encrypted one must not. An encrypted vault (Slice B) is
+//! opened read-only with SQLCipher, keyed from this Windows user's key store for exactly the vault
+//! id the gate admitted and the salt the file starts with; the key lives as long as the
+//! connection, and no part of it leaves this function.
 
 use crate::{location, Stage, Target, VaultMode, VisibleError};
 use memocampus_native_host::active_vault;
 use memocampus_native_host::schema::{self, SchemaError};
+use memocampus_native_host::secure_vault::secret::CipherSalt;
+use memocampus_native_host::secure_vault::{cipher, key_store, KeyError};
 use rusqlite::{Connection, ErrorCode, OpenFlags};
 use std::fs::File;
 use std::io::Read;
@@ -65,7 +69,15 @@ pub(crate) struct RawImageSave {
 
 /// SQLite's message may echo data, so only a fixed classification is kept.
 fn classify(error: &rusqlite::Error) -> VisibleError {
+    classify_in(error, VaultMode::Plain)
+}
+
+/// On a keyed connection "not a database" means the key was refused, never damage or schema.
+fn classify_in(error: &rusqlite::Error, mode: VaultMode) -> VisibleError {
     match error.sqlite_error_code() {
+        Some(ErrorCode::NotADatabase) if mode == VaultMode::Encrypted => {
+            VisibleError::VaultDecryptFailed
+        }
         Some(ErrorCode::NotADatabase) => VisibleError::VaultSchemaMismatch,
         Some(ErrorCode::DatabaseCorrupt) => VisibleError::VaultCorrupt,
         _ => VisibleError::VaultUnavailable,
@@ -81,13 +93,14 @@ fn sidecar_exists(path: &Path, suffix: &str) -> bool {
 /// Checked on the raw file first: merely reading a WAL database leaves `-wal` and `-shm` files.
 /// A plain vault without the SQLite header is a mode mismatch: it may be an encrypted vault the
 /// config misdescribes, so it is never called damaged or of the wrong schema.
-pub(crate) fn check_file(path: &Path, mode: VaultMode) -> Result<(), VisibleError> {
+/// For an encrypted vault, returns the salt its file starts with.
+pub(crate) fn check_file(path: &Path, mode: VaultMode) -> Result<Option<CipherSalt>, VisibleError> {
     let metadata = std::fs::metadata(path).map_err(|_| VisibleError::VaultUnavailable)?;
     if !metadata.is_file() {
         return Err(VisibleError::VaultUnavailable);
     }
     if mode == VaultMode::Encrypted {
-        return check_encrypted_file(path);
+        return check_encrypted_file(path).map(Some);
     }
     let mut header = [0u8; HEADER_LEN];
     File::open(path)
@@ -106,40 +119,62 @@ pub(crate) fn check_file(path: &Path, mode: VaultMode) -> Result<(), VisibleErro
     if versions != [ROLLBACK_JOURNAL, ROLLBACK_JOURNAL] {
         return Err(VisibleError::VaultSchemaMismatch);
     }
-    Ok(())
+    Ok(None)
 }
 
-/// An encrypted vault starts with its random salt, never the SQLite header (and is never empty).
-/// This version stops there: reading it needs a key and SQLCipher (Slice S2), so it is never
-/// opened, and certainly never as a plain database.
-fn check_encrypted_file(path: &Path) -> Result<(), VisibleError> {
-    let mut head = [0u8; 16];
-    match File::open(path).and_then(|mut file| file.read_exact(&mut head)) {
-        Ok(()) if head != *MAGIC => Err(VisibleError::VaultEncryptionUnsupported),
-        Ok(()) => Err(VisibleError::VaultModeMismatch),
-        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
-            Err(VisibleError::VaultModeMismatch)
-        }
-        Err(_) => Err(VisibleError::VaultUnavailable),
+/// An encrypted vault starts with its random salt, never the SQLite header (and is never empty),
+/// and is never opened as a plain database. Its header is encrypted, so the WAL check is made on
+/// the keyed connection (`journal_mode`) and here on the WAL files.
+fn check_encrypted_file(path: &Path) -> Result<CipherSalt, VisibleError> {
+    let salt = match cipher::read_head(path) {
+        Ok(cipher::Head::Salt(salt)) => salt,
+        Ok(_) => return Err(VisibleError::VaultModeMismatch),
+        Err(_) => return Err(VisibleError::VaultUnavailable),
+    };
+    if sidecar_exists(path, "-wal") || sidecar_exists(path, "-shm") {
+        return Err(VisibleError::VaultUnsupported);
     }
+    Ok(salt)
 }
 
-fn scalar_i64(db: &Connection, sql: &str) -> Result<i64, VisibleError> {
-    db.query_row(sql, [], |row| row.get(0))
-        .map_err(|error| classify(&error))
+/// A read-only connection to `path`: plain, or keyed for the encrypted vault `target` names.
+fn connect(
+    path: &Path,
+    target: &Target,
+    salt: Option<CipherSalt>,
+) -> Result<Connection, VisibleError> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let Some(salt) = salt else {
+        return Connection::open_with_flags(path, flags).map_err(|error| classify(&error));
+    };
+    let vault_id = target.vault_id.ok_or(VisibleError::VaultLocked)?;
+    let key =
+        key_store::unlock(&target.app_dir, &vault_id, &salt).map_err(|error| match error {
+            KeyError::NotSupported => VisibleError::VaultEncryptionUnsupported,
+            _ => VisibleError::VaultLocked,
+        })?;
+    cipher::open(path, &key, flags).map_err(|error| match error {
+        cipher::KeyingError::Unavailable => VisibleError::VaultEncryptionUnsupported,
+        cipher::KeyingError::Sqlite(error) => classify_in(&error, VaultMode::Encrypted),
+    })
 }
 
 /// Schema 4 can only be created, never reached from an older vault: up to schema 3, in-place
 /// upgrades kept visits from before incognito capture was blocked (#9), with no column to identify
 /// them. The check needs no write access and uses this package's own read-only connection.
+#[cfg(test)]
 pub(crate) fn check_schema(db: &Connection) -> Result<(), VisibleError> {
+    check_schema_in(db, VaultMode::Plain)
+}
+
+fn check_schema_in(db: &Connection, mode: VaultMode) -> Result<(), VisibleError> {
     schema::check(db).map_err(|error| match error {
-        SchemaError::Sqlite(error) => classify(&error),
+        SchemaError::Sqlite(error) => classify_in(&error, mode),
         _ => VisibleError::VaultSchemaMismatch,
     })?;
     let journal: String = db
         .query_row("PRAGMA journal_mode", [], |row| row.get(0))
-        .map_err(|error| classify(&error))?;
+        .map_err(|error| classify_in(&error, mode))?;
     if journal != "delete" {
         return Err(VisibleError::VaultUnsupported);
     }
@@ -309,26 +344,28 @@ fn read_committed<T>(
     read: fn(&Connection) -> rusqlite::Result<T>,
 ) -> Result<T, VisibleError> {
     let canonical = location::resolve_local(&target.path)?;
-    check_file(&canonical, target.mode)?;
+    let salt = check_file(&canonical, target.mode)?;
+    let mode = target.mode;
+    let classify = |error: &rusqlite::Error| classify_in(error, mode);
     // Without SQLITE_OPEN_URI a path can never carry `immutable=1`, which would skip locking.
-    let db = Connection::open_with_flags(
-        &canonical,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|error| classify(&error))?;
+    let db = connect(&canonical, target, salt)?;
     db.busy_timeout(BUSY_TIMEOUT)
         .map_err(|error| classify(&error))?;
     db.execute_batch("PRAGMA trusted_schema = OFF; PRAGMA query_only = ON; BEGIN;")
         .map_err(|error| classify(&error))?;
     // This first read takes the shared lock, which pins every later read to one committed state.
-    scalar_i64(&db, "SELECT count(*) FROM sqlite_master")?;
+    // On a keyed connection it is also the read that proves the key.
+    db.query_row("SELECT count(*) FROM sqlite_master", [], |row| {
+        row.get::<_, i64>(0)
+    })
+    .map_err(|error| classify(&error))?;
     if let Some(expected) = &target.token {
         match active_vault::vault_token(&canonical) {
             Ok(token) if token == *expected => {}
             _ => return Err(VisibleError::VaultSwitched),
         }
     }
-    check_schema(&db)?;
+    check_schema_in(&db, mode)?;
     stage(Stage::SchemaChecked);
     let rows = read(&db).map_err(|error| classify(&error))?;
     db.execute_batch("COMMIT")

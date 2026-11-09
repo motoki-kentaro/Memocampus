@@ -152,6 +152,19 @@
             <button id="vault-publication-cancel" type="button">やめる</button>
           </div>
         </div>
+        <div id="vault-creation-pending" class="vault-approval" role="alert" hidden>
+          <p id="vault-creation-pending-text"></p>
+          <button id="vault-creation-discard" type="button">作成途中のVaultを破棄する</button>
+        </div>
+        <div id="vault-recovery-offer" class="vault-recovery-offer" hidden>
+          <button id="vault-recovery-start" type="button">リカバリーフレーズで復旧…</button>
+        </div>
+        <fieldset id="vault-encryption" class="vault-encryption">
+          <legend>新規作成するVault</legend>
+          <label><input id="vault-encryption-encrypted" type="radio" name="vault-encryption" value="encrypted" checked> 暗号化する（推奨）</label>
+          <label><input id="vault-encryption-plain" type="radio" name="vault-encryption" value="plain"> 暗号化しない</label>
+          <p id="vault-encryption-note" class="vault-meta"></p>
+        </fieldset>
         <div class="vault-actions">
           <button id="vault-create-default" type="button">既定の場所に新規作成</button>
           <p id="vault-default-path" class="vault-meta"></p>
@@ -168,6 +181,27 @@
             <button type="button" data-manual="vault_backup">このフォルダにバックアップ</button>
           </div>
         </details>
+        <div id="vault-onboarding" class="vault-approval vault-onboarding" role="alertdialog" aria-labelledby="vault-onboarding-title" hidden>
+          <p id="vault-onboarding-title"></p>
+          <div id="vault-phrase-show">
+            <ol id="vault-phrase" class="vault-phrase"></ol>
+            <p id="vault-phrase-note" class="vault-meta"></p>
+            <button id="vault-phrase-written" type="button">書き留めました。確認に進む</button>
+          </div>
+          <div id="vault-phrase-check" hidden>
+            <p id="vault-phrase-check-title"></p>
+            <div id="vault-phrase-inputs" class="vault-phrase-inputs"></div>
+            <button id="vault-phrase-confirm" type="button">確認して作成を完了する</button>
+            <button id="vault-phrase-back" type="button">フレーズの表示に戻る</button>
+          </div>
+          <button id="vault-onboarding-cancel" type="button">作成をやめる</button>
+        </div>
+        <div id="vault-recovery" class="vault-approval" role="alertdialog" aria-labelledby="vault-recovery-title" hidden>
+          <p id="vault-recovery-title"></p>
+          <textarea id="vault-recovery-input" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="リカバリーフレーズ（12単語）"></textarea>
+          <button id="vault-recovery-submit" type="button">復旧して開く</button>
+          <button id="vault-recovery-cancel" type="button">やめる</button>
+        </div>
         <div id="vault-approval" class="vault-approval" role="alertdialog" aria-labelledby="vault-approval-title" hidden>
           <p id="vault-approval-title"></p>
           <ul id="vault-approval-reasons"></ul>
