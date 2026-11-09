@@ -1,0 +1,27 @@
+[package]
+name = "secure-vault-poc"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Issue #51 Slice A: isolated proof of concept. Not production code; never linked into the product."
+
+# Isolated: its own workspace, outside every production crate.
+[workspace]
+
+[dependencies]
+# The production crates are used read-only, unchanged, to run their own schema / VisibleStore checks.
+memocampus-native-host = { path = "../../../native-host" }
+memocampus-visible-store = { path = "../../../visible-store" }
+rusqlite = { version = "=0.32.1", features = ["bundled", "backup"] }
+bip39 = { version = "2", default-features = false, features = ["std"] }
+chacha20poly1305 = { version = "0.10", features = ["stream"] }
+hkdf = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
+argon2 = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }

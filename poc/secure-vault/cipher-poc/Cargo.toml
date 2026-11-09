@@ -1,0 +1,17 @@
+[package]
+name = "secure-vault-cipher-poc"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Issue #51 Slice A': isolated SQLCipher proof of concept. Not production code."
+
+# Isolated: its own workspace, outside every production crate.
+[workspace]
+
+[dependencies]
+# Unchanged production crate, read-only: its `schema` module runs on SQLCipher here through Cargo
+# feature unification (one libsqlite3-sys per graph).
+memocampus-native-host = { path = "../../../native-host" }
+rusqlite = { version = "=0.32.1", features = ["bundled-sqlcipher-vendored-openssl", "backup", "hooks"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"

@@ -1,0 +1,11 @@
+[package]
+name = "size-plain"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Isolated: not part of any production workspace.
+[workspace]
+
+[dependencies]
+rusqlite = { version = "=0.32.1", features = ["bundled", "backup"] }
