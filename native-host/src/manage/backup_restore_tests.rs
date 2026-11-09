@@ -209,6 +209,21 @@ fn activate(session: &mut Session, restored: &Value) -> Value {
     )
 }
 
+/// Whether two paths name the same existing file, by the host's file identity (`vault_token`:
+/// volume serial number and file index), whatever the spelling (8.3 short names, case).
+fn same_file(a: &Path, b: &Path) -> bool {
+    let token = |path: &Path| {
+        memocampus_native_host::active_vault::vault_token(path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+    };
+    token(a) == token(b)
+}
+
+/// `<path>.partial`, the name a restored vault has until it is verified and promoted.
+fn partial(path: &Path) -> PathBuf {
+    memocampus_native_host::secure_vault::fsutil::with_suffix(path, ".partial")
+}
+
 fn contains(bytes: &[u8], text: &str) -> bool {
     bytes.windows(text.len()).any(|w| w == text.as_bytes())
 }
@@ -667,7 +682,11 @@ fn a_restore_never_overwrites_and_never_touches_the_active_vault_or_the_policy()
         json!({ "password": "password123" }),
     );
     assert_eq!(restored["ok"], true, "{restored}");
-    assert_eq!(restored["status"]["vaultPath"], display(&active));
+    // The host reports canonical paths; the test's may be an 8.3 alias (CI's TEMP): same file?
+    assert!(same_file(
+        Path::new(restored["status"]["vaultPath"].as_str().unwrap()),
+        &active
+    ));
     assert_eq!(fs::read(env.config_path().unwrap()).unwrap(), config);
     assert_eq!(fs::read(&active).unwrap(), active_bytes);
     assert_eq!(
@@ -1061,7 +1080,10 @@ fn a_restore_interrupted_by_a_crash_is_reported_and_can_be_discarded_or_finished
             shown["status"]["restorePending"]["phase"], "restoring",
             "{step:?}"
         );
-        assert_eq!(shown["status"]["restorePending"]["path"], display(&target));
+        // The target itself does not exist yet: its `.partial` names the same file under both
+        // spellings of the path (the host's canonical one, the test's possibly 8.3 one).
+        let pending = PathBuf::from(shown["status"]["restorePending"]["path"].as_str().unwrap());
+        assert!(same_file(&partial(&pending), &partial(&target)), "{step:?}");
         let activate_early = send(
             &mut other,
             json!({ "type": "vault_restore_activate", "expectedVaultToken": "0".repeat(64) }),
@@ -1494,4 +1516,65 @@ fn b_and_d_backups_need_the_phrase_that_recovers_this_vault() {
             file.display()
         );
     }
+}
+
+/// The Windows 8.3 short form of an existing path (the same path if the volume has none).
+#[cfg(windows)]
+fn short_path(path: &Path) -> PathBuf {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut buffer = vec![0u16; 4096];
+    // SAFETY: `wide` is NUL-terminated and `buffer` is writable for its length.
+    let length =
+        unsafe { GetShortPathNameW(wide.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) }
+            as usize;
+    assert!(
+        length > 0 && length < buffer.len(),
+        "GetShortPathNameW failed"
+    );
+    PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length]))
+}
+
+#[cfg(windows)]
+#[test]
+fn a_restore_target_named_by_its_8_3_short_path_is_the_same_file_and_a_copy_is_not() {
+    let tmp = TempDir::new();
+    let mut session = Session::new(tmp.env());
+    create_plain(&mut session, &tmp.0.join("plain.sqlite3"));
+    fill(&mut session);
+    let backup = backup_to(&mut session, &tmp.0, json!({}))["backupPath"].clone();
+    let long_dir = tmp.0.join("Memocampus restore long directory");
+    fs::create_dir(&long_dir).unwrap();
+    let short_dir = short_path(&long_dir);
+    if short_dir.file_name() == long_dir.file_name() {
+        eprintln!("SKIPPED: this volume generates no 8.3 short names");
+        return;
+    }
+    let (short, long) = (short_dir.join("r.sqlite3"), long_dir.join("r.sqlite3"));
+    let restored = restore_to(&mut session, &backup, &short, json!({}));
+    assert_eq!(restored["ok"], true, "{restored}");
+    let reported = PathBuf::from(restored["path"].as_str().unwrap());
+    let pending = PathBuf::from(
+        restored["status"]["restorePending"]["path"]
+            .as_str()
+            .unwrap(),
+    );
+    assert_ne!(
+        reported, short,
+        "spelled differently: a string comparison would fail"
+    );
+    for path in [&reported, &pending] {
+        assert!(same_file(path, &short) && same_file(path, &long));
+    }
+    // A byte-for-byte copy beside it is another file, under either spelling.
+    let copy = long_dir.join("copy.sqlite3");
+    fs::copy(&long, &copy).unwrap();
+    assert_eq!(fs::read(&copy).unwrap(), fs::read(&long).unwrap());
+    assert!(!same_file(&reported, &copy) && !same_file(&reported, &short_path(&copy)));
+    // Activated: the active vault is that file; the source vault is still there.
+    let activated = activate(&mut session, &restored);
+    let active = PathBuf::from(activated["status"]["vaultPath"].as_str().unwrap());
+    assert!(same_file(&active, &short) && !same_file(&active, &copy));
+    assert!(!same_file(&active, &tmp.0.join("plain.sqlite3")));
 }
