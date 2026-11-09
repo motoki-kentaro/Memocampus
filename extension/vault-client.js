@@ -23,11 +23,60 @@ export const STATE_TEXT = {
   app_dir_unavailable: "設定フォルダを特定できません",
   // Issue #51: an encrypted or misdescribed vault is reported as such, never as invalid.
   vault_mode_mismatch: "Vaultファイルが設定上の形式（暗号化／平文）と一致しません。ファイルは変更していません",
-  vault_encryption_unsupported: "このVaultは暗号化されていますが、このバージョンは暗号化Vaultを開けません。ファイルは変更していません",
-  key_unavailable: "暗号化Vaultの鍵を取得できません。ファイルは変更していません",
+  vault_encryption_unsupported: "この環境では暗号化Vaultを開けません。ファイルは変更していません",
+  key_unavailable: "このWindowsユーザーでは暗号化Vaultの鍵を取得できません。ファイルは変更していません",
   vault_locked: "暗号化Vaultがロックされています。ファイルは変更していません",
   vault_decrypt_failed: "暗号化Vaultを復号できません。ファイルは変更していません",
 };
+
+/** Issue #51 Slice B: encrypted vaults. */
+export const ENCRYPTION_NOTE =
+  "暗号化すると、Vaultファイルが盗まれたりコピーされたりしても、鍵がなければ中身を読めません。" +
+  "このWindowsユーザーでは、毎回パスワードを入力せずに使えます。作成時に表示する12単語のリカバリーフレーズは、" +
+  "PCの入れ替えやWindowsの再インストール後に開くために必要です。";
+
+export const PHRASE_TITLE =
+  "リカバリーフレーズ（12単語）を紙などに順番どおり書き留めてください。\n" +
+  "このフレーズは今回だけ表示します。あとから表示し直すことはできません。";
+
+export const PHRASE_NOTE =
+  "・別のPC、Windowsの再インストール後、別のWindowsユーザーでこのVaultを開くには、このフレーズと「.mckey」ファイルが必要です。\n" +
+  "・フレーズをなくすと、このPCのWindowsユーザーが使えなくなったときにVaultを開けなくなります。Memocampusは再発行できません。\n" +
+  "・フレーズを知っている人は、Vaultファイルと「.mckey」ファイルがあれば中身を読めます。誰にも伝えず、写真やクラウドのメモに残さないでください。\n" +
+  "・この画面にはコピー機能はありません（クリップボードに残さないため）。";
+
+export const PHRASE_CHECK_TITLE = "書き留めたフレーズから、次の番号の単語を入力してください。正しく入力されるまでVaultは作成されません。";
+
+export const RECOVERY_TITLE =
+  "このWindowsユーザーには、この暗号化Vaultの鍵が保存されていません（別のPC・再インストール後・別のユーザーなど）。\n" +
+  "作成時に書き留めた12単語のリカバリーフレーズを入力すると、鍵をこのWindowsユーザー用に保存し直して開きます。\n" +
+  "フレーズはこのPCに保存しません。";
+
+/** Message for a phrase the host refused (`recovery_phrase_invalid` details). */
+export function describePhraseProblem(response) {
+  if (response?.reason === "word_count") return `12単語を入力してください（${Number(response.count) || 0}単語でした）。`;
+  if (response?.reason === "unknown_word") return `${Number(response.position) || "?"}番目の単語が単語リストにありません。綴りを確認してください。`;
+  if (response?.reason === "checksum") return "単語の綴りまたは順番が違います。書き留めたフレーズと照らし合わせてください。";
+  return "リカバリーフレーズの形式が正しくありません。";
+}
+
+/** `count` distinct 1-based positions out of 12, in ascending order, from `random` (a CSPRNG fill). */
+export function pickPositions(count = 3, random = (array) => crypto.getRandomValues(array)) {
+  const chosen = new Set();
+  const buffer = new Uint32Array(1);
+  while (chosen.size < count) {
+    random(buffer);
+    // Rejection sampling keeps every position equally likely.
+    if (buffer[0] >= 4294967292) continue;
+    chosen.add((buffer[0] % 12) + 1);
+  }
+  return [...chosen].sort((a, b) => a - b);
+}
+
+/** True when every answer matches the word at its position (case and surrounding space ignored). */
+export function checkAnswers(words, answers) {
+  return answers.length > 0 && answers.every(({ position, word }) => typeof word === "string" && words[position - 1] === word.trim().toLowerCase());
+}
 
 /** MCP access to the vault shown (Issue #51): `status.publication` from a host that knows it. */
 export const PUBLICATION_TEXT = {

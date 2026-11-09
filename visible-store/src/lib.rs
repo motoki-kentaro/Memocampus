@@ -47,6 +47,7 @@ use memocampus_native_host::active_vault::{self, Admitted, GateError, VaultMode}
 
 use memocampus_native_host::policy::CompiledPolicy;
 use memocampus_native_host::policy_store::{PolicyStore, StoreError};
+use memocampus_native_host::secure_vault::secret::VaultId;
 use std::path::PathBuf;
 use std::time::Duration;
 use visible_images::VisibleImages;
@@ -94,11 +95,13 @@ pub enum VisibleError {
     /// The file contradicts the mode the config records (plain SQLite in encrypted mode, or no
     /// SQLite header in plain mode). Never taken for damage, never resolved by switching modes.
     VaultModeMismatch,
-    /// The active vault is encrypted, which this version cannot read.
+    /// The active vault is encrypted and this build cannot open encrypted vaults.
     VaultEncryptionUnsupported,
-    /// Reserved for encrypted vaults (Slice S2): the key is not available to this process.
+    /// The active vault is encrypted and its key is not available to this process (no key store
+    /// entry for this Windows user, DPAPI refused it, or it belongs to another vault). The user
+    /// unlocks it in the side panel (recovery phrase); MCP never asks for one.
     VaultLocked,
-    /// Reserved for encrypted vaults (Slice S2): the key was refused.
+    /// The key was obtained but SQLCipher refuses it for this file.
     VaultDecryptFailed,
 }
 
@@ -297,6 +300,10 @@ pub(crate) struct Target {
     pub path: PathBuf,
     pub mode: VaultMode,
     pub token: Option<String>,
+    /// An encrypted vault's id: its key is read from the key store of `app_dir` for each read
+    /// (Issue #51 Slice B), with this Windows user's DPAPI. Never received from a client.
+    pub vault_id: Option<VaultId>,
+    pub app_dir: PathBuf,
 }
 
 type ReadRows<Row> = fn(&Target, &mut dyn FnMut(Stage)) -> Result<Vec<Row>, VisibleError>;
@@ -309,7 +316,7 @@ enum Source {
     Pinned(PathBuf),
     /// This crate's tests only: a vault read without the publication gate.
     #[cfg(test)]
-    Ungated(PathBuf, VaultMode),
+    Ungated(PathBuf, VaultMode, Option<VaultId>),
 }
 
 pub struct VisibleStore {
@@ -356,6 +363,22 @@ impl VisibleStore {
         Self::ungated_in(vault, app_dir, VaultMode::Plain)
     }
 
+    /// This crate's tests: an encrypted `vault` of id `vault_id` without the publication gate.
+    #[cfg(test)]
+    pub(crate) fn ungated_encrypted(
+        vault: PathBuf,
+        app_dir: PathBuf,
+        vault_id: Option<VaultId>,
+    ) -> Result<Self, VisibleError> {
+        let policy =
+            PolicyStore::new(app_dir.clone()).map_err(|_| VisibleError::PolicyUnavailable)?;
+        Ok(Self::with_policy(
+            Source::Ungated(vault, VaultMode::Encrypted, vault_id),
+            app_dir,
+            policy,
+        ))
+    }
+
     #[cfg(test)]
     pub(crate) fn ungated_in(
         vault: PathBuf,
@@ -365,7 +388,7 @@ impl VisibleStore {
         let policy =
             PolicyStore::new(app_dir.clone()).map_err(|_| VisibleError::PolicyUnavailable)?;
         Ok(Self::with_policy(
-            Source::Ungated(vault, mode),
+            Source::Ungated(vault, mode, None),
             app_dir,
             policy,
         ))
@@ -393,11 +416,13 @@ impl VisibleStore {
     /// The publication gate: the vault to open now, and what admitted it.
     fn admit(&self) -> Result<(Target, Option<Admitted>), VisibleError> {
         #[cfg(test)]
-        if let Source::Ungated(path, mode) = &self.source {
+        if let Source::Ungated(path, mode, vault_id) = &self.source {
             let target = Target {
                 path: path.clone(),
                 mode: *mode,
                 token: None,
+                vault_id: *vault_id,
+                app_dir: self.app_dir.clone(),
             };
             return Ok((target, None));
         }
@@ -406,6 +431,8 @@ impl VisibleStore {
             path: admitted.path.clone(),
             mode: admitted.mode,
             token: Some(admitted.token.clone()),
+            vault_id: admitted.vault_id,
+            app_dir: self.app_dir.clone(),
         };
         Ok((target, Some(admitted)))
     }

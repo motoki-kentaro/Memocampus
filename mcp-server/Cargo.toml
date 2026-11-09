@@ -34,5 +34,5 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Network
 
 [dev-dependencies]
 memocampus-native-host = { path = "../native-host" }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
 uuid = { version = "1", features = ["v4"] }

@@ -65,6 +65,8 @@ fn plain(path: &Path) -> Target {
         path: path.to_path_buf(),
         mode: VaultMode::Plain,
         token: None,
+        vault_id: None,
+        app_dir: PathBuf::new(),
     }
 }
 
@@ -4085,8 +4087,14 @@ fn image_tags_never_reach_a_reader() {
 // --- Issue #51, Slice B0: publication gate (B0-1, B0-2) and vault mode (B0-4) ------------------
 
 /// Names `vault` as the active vault of `app` in `mode`, with a publication `state` for its file.
+/// The vault id `activate` records for an encrypted vault.
+const ENCRYPTED_ID: &str = "33333333333333333333333333333333";
+
 fn activate(app: &Path, vault: &Path, mode: &str, state: Option<&str>) {
     let mut config = serde_json::json!({"version": 2, "activeVault": vault, "mode": mode});
+    if mode == "encrypted" {
+        config["vaultId"] = ENCRYPTED_ID.into();
+    }
     if let Some(state) = state {
         config["publication"] = serde_json::json!({
             "vaultToken": active_vault::vault_token(vault).unwrap(),
@@ -4370,15 +4378,11 @@ fn the_mode_comes_from_the_config_and_a_contradicting_file_is_never_misread() {
     let salt_first: Vec<u8> = (0..8192u32).map(|i| (i * 31 + 7) as u8).collect();
     fs::write(&encrypted, &salt_first).unwrap();
 
+    // Slice B: an encrypted vault whose key this user's key store does not hold is locked; it is
+    // never opened without a key.
     activate(&f.app, &encrypted, "encrypted", Some("confirmed"));
-    assert_failed(
-        store.search_visits(&ALL),
-        VisibleError::VaultEncryptionUnsupported,
-    );
-    assert_failed(
-        store.check_vault(),
-        VisibleError::VaultEncryptionUnsupported,
-    );
+    assert_failed(store.search_visits(&ALL), VisibleError::VaultLocked);
+    assert_failed(store.check_vault(), VisibleError::VaultLocked);
     // A plain SQLite file recorded as encrypted, and a salt-first file recorded as plain.
     activate(&f.app, &f.vault, "encrypted", Some("confirmed"));
     assert_failed(store.search_visits(&ALL), VisibleError::VaultModeMismatch);
@@ -4401,7 +4405,7 @@ fn the_mode_comes_from_the_config_and_a_contradicting_file_is_never_misread() {
     assert_eq!(
         fs::read(&encrypted).unwrap(),
         salt_first,
-        "never opened by SQLite"
+        "never opened without its key"
     );
     assert_eq!(fs::metadata(&empty).unwrap().len(), 0);
     for suffix in ["-journal", "-wal", "-shm"] {
@@ -4427,5 +4431,168 @@ fn no_reader_can_write_the_config_or_a_publication_decision() {
         ] {
             assert!(!source.contains(banned), "{name}: {banned}");
         }
+    }
+}
+
+// --- Issue #51 Slice B: encrypted vaults ---------------------------------------------------------
+
+mod encrypted {
+    use super::*;
+    use memocampus_native_host::secure_vault::secret::{CipherSalt, VaultId, VaultKey};
+    use memocampus_native_host::secure_vault::{cipher, key_store};
+
+    /// An encrypted vault beside the fixture's plain one, with the same public and private rows,
+    /// its key in the fixture's key store. Returns (path, id, salt, key).
+    fn encrypted_vault(f: &Fixture, name: &str) -> (PathBuf, VaultId, CipherSalt, VaultKey) {
+        let path = f.dir.join(name);
+        let key = VaultKey::generate().unwrap();
+        let salt = cipher::create(&path, &key).unwrap();
+        let id = VaultId::generate().unwrap();
+        key_store::store(&f.app, &id, &salt, &key, key_store::Write::New).unwrap();
+        let db = cipher::open(&path, &key, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap();
+        visit(&db, "pub-1", "https://one.public.test/", "One", &day(1));
+        visit(&db, "pub-2", "https://two.public.test/", "Two", &day(2));
+        for (row, url, title) in private_rows() {
+            visit(&db, row, url, title, &day(20));
+        }
+        drop(db);
+        (path, id, salt, key)
+    }
+
+    fn publish(app: &Path, vault: &Path, id: &VaultId, state: &str) {
+        let config = serde_json::json!({
+            "version": 2, "activeVault": vault, "mode": "encrypted", "vaultId": id.to_hex(),
+            "publication": {"vaultToken": active_vault::vault_token(vault).unwrap(), "state": state},
+        });
+        fs::write(app.join("config.json"), config.to_string()).unwrap();
+    }
+
+    #[test]
+    fn a_published_encrypted_vault_is_read_through_the_same_privacy_gate() {
+        let f = Fixture::new();
+        f.seed();
+        let (path, id, _, key) = encrypted_vault(&f, "enc.sqlite3");
+        let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+        publish(&f.app, &path, &id, "pending");
+        assert_failed(
+            store.search_visits(&ALL),
+            VisibleError::VaultPublicationPending,
+        );
+        publish(&f.app, &path, &id, "confirmed");
+        let page = store.search_visits(&ALL).unwrap();
+        assert_clean(&page);
+        assert_eq!(page.total, 2, "the policy hides the private rows");
+        assert_eq!(page.items[0].url, "https://two.public.test/");
+        store.check_vault().unwrap();
+        assert!(!key.appears_in(format!("{page:?}").as_bytes()));
+        // Privacy rules apply at once, as for a plain vault.
+        f.add_rule(false, "two.public.test");
+        let page = store.search_visits(&ALL).unwrap();
+        assert_eq!(page.total, 1);
+        // The plain vault is never read in its place.
+        assert_eq!(page.items[0].url, "https://one.public.test/");
+        let leftovers: Vec<_> = ["-journal", "-wal", "-shm"]
+            .iter()
+            .filter(|suffix| {
+                let mut name = path.as_os_str().to_owned();
+                name.push(suffix);
+                Path::new(&name).exists()
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    #[test]
+    fn no_key_a_wrong_key_entry_or_a_swapped_file_never_reads_and_never_falls_back() {
+        let f = Fixture::new();
+        f.seed();
+        let (path, id, salt, _) = encrypted_vault(&f, "enc.sqlite3");
+        let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+        publish(&f.app, &path, &id, "confirmed");
+        assert_eq!(store.search_visits(&ALL).unwrap().total, 2);
+        let entry = key_store::entry_path(&f.app, &id);
+        let saved = fs::read(&entry).unwrap();
+
+        // No key for this user: locked; nothing else (the plain vault) is read instead.
+        fs::remove_file(&entry).unwrap();
+        assert_failed(store.search_visits(&ALL), VisibleError::VaultLocked);
+        assert_failed(store.check_vault(), VisibleError::VaultLocked);
+        // Another vault's entry under this id: locked.
+        let (other, other_id, _, _) = encrypted_vault(&f, "other.sqlite3");
+        fs::copy(key_store::entry_path(&f.app, &other_id), &entry).unwrap();
+        assert_failed(store.search_visits(&ALL), VisibleError::VaultLocked);
+        fs::write(&entry, &saved).unwrap();
+        assert_eq!(store.search_visits(&ALL).unwrap().total, 2);
+
+        // A file carrying this vault's salt but another key's pages: the key is refused.
+        let bytes = fs::read(&path).unwrap();
+        let mut forged = fs::read(&other).unwrap();
+        forged[..16].copy_from_slice(salt.as_bytes());
+        let aside = f.dir.join("aside.sqlite3");
+        fs::rename(&path, &aside).unwrap();
+        fs::write(&path, &forged).unwrap();
+        publish(&f.app, &path, &id, "confirmed");
+        assert_failed(store.search_visits(&ALL), VisibleError::VaultDecryptFailed);
+        // Damaged pages after the salt: refused, never reported as a schema problem.
+        let mut damaged = bytes.clone();
+        for byte in &mut damaged[16..2048] {
+            *byte ^= 0x55;
+        }
+        fs::remove_file(&path).unwrap();
+        fs::write(&path, &damaged).unwrap();
+        publish(&f.app, &path, &id, "confirmed");
+        let error = store.search_visits(&ALL).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                VisibleError::VaultDecryptFailed | VisibleError::VaultCorrupt
+            ),
+            "{error:?}"
+        );
+        // The original file back under a new identity: pending until confirmed again.
+        fs::remove_file(&path).unwrap();
+        fs::copy(&aside, &path).unwrap();
+        publish(&f.app, &path, &id, "confirmed");
+        assert_eq!(store.search_visits(&ALL).unwrap().total, 2);
+        assert_eq!(
+            fs::read(&aside).unwrap(),
+            bytes,
+            "reads never change the vault"
+        );
+    }
+
+    #[test]
+    fn a_switch_between_encrypted_and_plain_vaults_during_a_read_discards_it() {
+        for at in [Stage::Admitted, Stage::PolicyLoaded, Stage::SchemaChecked] {
+            let f = Fixture::new();
+            f.seed();
+            let (path, id, _, _) = encrypted_vault(&f, "enc.sqlite3");
+            let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+            publish(&f.app, &path, &id, "confirmed");
+            let mut done = false;
+            let result = store.search_visits_staged(&ALL, &mut |stage| {
+                if stage == at && !done {
+                    done = true;
+                    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+                }
+            });
+            assert!(done);
+            assert_eq!(result.err(), Some(VisibleError::VaultSwitched), "{at:?}");
+            // And back: the encrypted vault keeps its approval only for its own file.
+            assert_eq!(store.search_visits(&ALL).unwrap().total, 2);
+            publish(&f.app, &path, &id, "confirmed");
+            assert_eq!(store.search_visits(&ALL).unwrap().total, 2);
+        }
+    }
+
+    #[test]
+    fn an_encrypted_file_recorded_without_its_id_or_as_plain_is_never_misread() {
+        let f = Fixture::new();
+        let (path, _, _, _) = encrypted_vault(&f, "enc.sqlite3");
+        let ungated = VisibleStore::ungated_encrypted(path.clone(), f.app.clone(), None).unwrap();
+        assert_failed(ungated.search_visits(&ALL), VisibleError::VaultLocked);
+        activate(&f.app, &path, "plain", Some("confirmed"));
+        let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+        assert_failed(store.search_visits(&ALL), VisibleError::VaultModeMismatch);
     }
 }

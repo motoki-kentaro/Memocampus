@@ -1,6 +1,8 @@
 # Secure Vault — technical architecture (Issue #51, Slice A)
 
-Status: **design proposal, not approved for implementation.** Basis: `main` at `c08797a`.
+Status: **design proposal.** Basis: `main` at `c08797a`. Implemented so far: Slice B0 (`slice-b0.md`) and Slice B
+(`slice-b.md`: SQLCipher, DPAPI key store, recovery phrase and sidecar, encrypted creation and recovery). Where the
+implementation differs from this text, the slice documents list the difference (`slice-b.md` §9).
 Each statement is tagged:
 
 - **[CODE]** — verified against the current source (file:line given);

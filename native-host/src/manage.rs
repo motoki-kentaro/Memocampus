@@ -21,6 +21,8 @@ use memocampus_native_host::policy_store::{PolicyStore, StoreError};
 
 const MAX_PATH_CHARS: usize = 32_767;
 const DEFAULT_VAULT_NAME: &str = "memocampus.sqlite3";
+/// `vault_backup` of an encrypted vault: refused, nothing written (Slice C brings its backups).
+const ENCRYPTED_BACKUP_UNSUPPORTED: &str = "vault_backup_encrypted_unsupported";
 
 struct Failure {
     code: &'static str,
@@ -60,6 +62,10 @@ pub fn handle(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> 
         Some("vault_backup") => backup(session, dialogs, message),
         Some("vault_publication_confirm") => publication(session, message, true),
         Some("vault_publication_revoke") => publication(session, message, false),
+        Some("vault_create_encrypted") => encrypted::begin(session, dialogs, message),
+        Some("vault_create_encrypted_commit") => encrypted::commit(session, message),
+        Some("vault_create_encrypted_cancel") => encrypted::cancel(session),
+        Some("vault_recover") => encrypted::recover(session, dialogs, message),
         _ => Err(Failure::with("unknown_type", json!({}))),
     };
     let mut response = match result {
@@ -97,8 +103,12 @@ pub fn status(session: &Session) -> Value {
         // cannot read it at all (no vault, or the MEMOCAMPUS_DB override, which MCP never reads).
         "publication": null,
         "publicationPolicyRevision": null,
+        // Issue #51 Slice B: whether new vaults can be encrypted here (DPAPI: Windows only), and
+        // the target of a creation interrupted before its phrase was confirmed (to be cancelled).
+        "encryptionAvailable": cfg!(windows),
+        "creationPending": encrypted::pending_creation(session),
     });
-    let (path, mode, config) = match vault::resolve(env) {
+    let (path, mode, vault_id, config) = match vault::resolve(env) {
         Err(error) => {
             status["state"] = error.code().into();
             return status;
@@ -107,17 +117,17 @@ pub fn status(session: &Session) -> Value {
             status["state"] = "not_configured".into();
             return status;
         }
-        Ok(Active::Override(path)) => (path, VaultMode::Plain, None),
+        Ok(Active::Override(path)) => (path, VaultMode::Plain, None, None),
         Ok(Active::Configured(config)) => {
             status["locationApproved"] = config.location_approved.into();
             let path = PathBuf::from(&config.active_vault);
             status["location"] = json!(location::probe(&path, env.exe_dir.as_deref()));
-            (path, config.mode, Some(config))
+            (path, config.mode, config.vault_id, Some(config))
         }
     };
     status["vaultPath"] = display(&path).into();
     status["mode"] = mode.code().into();
-    match vault::open_vault_in(&path, mode, &vault::NoKeys).map_err(VaultError::from) {
+    match vault::open_vault_in(&path, mode, vault_id, session.keys()).map_err(VaultError::from) {
         Ok(db) => {
             status["state"] = "ready".into();
             // The vault shown, as `vault_backup` must name it (taken while `db` holds the file).
@@ -142,6 +152,11 @@ pub fn status(session: &Session) -> Value {
     if config.is_some() && status["publication"].is_null() {
         // Whatever cannot be shown as ready is not readable by MCP either.
         status["publication"] = "pending".into();
+    }
+    // Issue #51 Slice B: an encrypted vault this user cannot unlock may be recovered with its
+    // phrase; a creation interrupted before its confirmation is shown so it can be cancelled.
+    if mode == VaultMode::Encrypted && status["state"] != "ready" {
+        status["recoveryAvailable"] = encrypted::recovery_available(&path).into();
     }
     status
 }
@@ -337,6 +352,10 @@ fn open(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Result
     let assessment = location::probe(&target, session.env.exe_dir.as_deref());
     // Location first: a rejected (e.g. network) file is never opened by SQLite.
     let location_approved = check_location(&assessment, &target, approved(message))?;
+    // Issue #51 Slice B: a file that is not plain SQLite may be an encrypted vault.
+    if let Some(opened) = encrypted::open_existing(session, &target, location_approved)? {
+        return Ok(opened);
+    }
     vault::open_vault_checked(&target)
         .map_err(|error| Failure::with(error.code(), json!({ "path": display(&target) })))?;
     let lock = ConfigLock::acquire(&session.env)?;
@@ -357,6 +376,11 @@ fn backup(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Resu
         .ok_or_else(|| Failure::with("invalid_vault_token", json!({})))?;
     // Fail before showing a dialog if there is nothing to back up, or not the vault shown.
     let ticket = session.ticket()?;
+    // Issue #51 Slice B: the existing backup writes a plain SQLite copy. An encrypted vault is
+    // never copied out in the clear; its backups (format B/C) arrive in Slice C.
+    if session.active_target()?.mode == VaultMode::Encrypted {
+        return Err(Failure::with(ENCRYPTED_BACKUP_UNSUPPORTED, json!({})));
+    }
     if ticket.token != expected {
         return Err(VaultError::Switched.into());
     }
@@ -375,6 +399,8 @@ fn backup(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Resu
         "vaultToken": ticket.token,
     }))
 }
+
+mod encrypted;
 
 #[cfg(test)]
 mod backup_race_tests;
@@ -792,10 +818,10 @@ mod tests {
         std::fs::write(&path, vec![0x5a; 4096]).unwrap();
         vault::write_config(
             &session.env,
-            &Config::new(
+            &Config::encrypted(
                 path.to_string_lossy().into_owned(),
                 false,
-                VaultMode::Encrypted,
+                vault::VaultId::from_array([0x22; 16]),
             ),
         )
         .unwrap();
@@ -804,7 +830,9 @@ mod tests {
             &FakeDialogs::default(),
             json!({ "type": "vault_status" }),
         );
-        assert_eq!(status["status"]["state"], "vault_encryption_unsupported");
+        // Slice B: no key for it in this user's key store, and no sidecar to recover from.
+        assert_eq!(status["status"]["state"], "key_unavailable");
+        assert_eq!(status["status"]["recoveryAvailable"], false);
         assert_eq!(status["status"]["mode"], "encrypted");
         assert_eq!(status["status"]["publication"], "pending");
         assert_eq!(status["status"]["vaultToken"], json!(null));

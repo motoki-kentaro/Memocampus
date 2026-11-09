@@ -160,6 +160,7 @@ export function createDocument() {
     "gallery-new-dot", "gallery-error", "gallery-open-settings", "gallery-empty", "gallery-more", "gallery-details", "gallery-sources-more", "gallery-menu",
     "gallery-filter", "gallery-tags-empty", "gallery-tag-picker", "gallery-tag-picker-more",
     "visit-calendar", "visit-date-chip",
+    "vault-creation-pending", "vault-recovery-offer", "vault-onboarding", "vault-phrase-check", "vault-recovery",
   ]) {
     document.querySelector(`#${id}`).hidden = true;
   }
@@ -176,6 +177,7 @@ export function createDocument() {
     manage.append(option);
   }
   document.querySelector("#item-scope-url").checked = true;
+  document.querySelector("#vault-encryption-encrypted").checked = true;
   document.$ = (selector) => document.querySelector(selector);
   return document;
 }
@@ -336,8 +338,14 @@ const PNG_THUMBNAIL = Buffer.from("89504e470d0a1a0a0000000d494844520000000400000
  * Native host stand-in: `vaults` maps a vault path to its pages; `active` is the open vault.
  * `images` maps a vault path to its image summaries (newest first) for the Image tab.
  */
-export function createHost({ vaults, active, statusDelay = 0, images = {}, policyStatus = null, capabilities = ["navigation_v1"], forward = null }) {
+export function createHost({ vaults, active, statusDelay = 0, images = {}, policyStatus = null, capabilities = ["navigation_v1"], forward = null, encryption = false }) {
   const host = {
+    /** Issue #51 Slice B: encrypted vaults, as the real host handles them (see native-host tests). */
+    encryption,
+    creation: null, // { path, phrase } while a creation waits for its confirmation
+    encrypted: new Set(), // vaults in encrypted mode
+    locked: new Map(), // vault path -> its phrase, for vaults this user has no key for
+    phraseFor: () => "abandon ability able about above absent absorb abstract absurd abuse access accident",
     capabilities,
     itemPolicy: createItemPolicy(),
     itemErrors: {}, // type -> error code, answered once
@@ -374,9 +382,11 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
     knowsPublication: true,
     status() {
       const base = { managementEnabled: true, overridden: false, defaultPath: "C:\\Vaults\\memocampus.sqlite3", defaultExists: false, locationApproved: false };
+      if (host.encryption) Object.assign(base, { encryptionAvailable: true, creationPending: host.creation?.path ?? null });
       if (!host.active) return { ...base, state: "not_configured", vaultPath: null, counts: null, location: null };
+      if (host.locked.has(host.active)) return { ...base, state: "key_unavailable", vaultPath: host.active, vaultToken: null, counts: null, mode: "encrypted", publication: "pending", recoveryAvailable: true, location: null };
       const confirmed = host.published.has(host.active);
-      const publication = host.knowsPublication ? { mode: "plain", publication: confirmed ? "confirmed" : "pending", publicationPolicyRevision: confirmed ? 4 : null } : {};
+      const publication = host.knowsPublication ? { mode: host.encrypted.has(host.active) ? "encrypted" : "plain", publication: confirmed ? "confirmed" : "pending", publicationPolicyRevision: confirmed ? 4 : null } : {};
       return { ...base, state: "ready", vaultPath: host.active, vaultToken: tokenOf(host.active), counts: { visits: host.vaults[host.active].length, snapshots: 0 }, location: { verdict: "no_issue_detected", reasons: [] }, ...publication };
     },
     /** `tags[vault]` maps a blob id to its tag names; `tagError` makes the next tag write fail. */
@@ -547,7 +557,47 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
         else host.published.delete(host.active);
         return reply({ type: "vault_result", status: host.status() });
       }
+      if (message.type === "vault_create_encrypted") {
+        const fail = (error, extra = {}) => ({ ok: false, type: "vault_result", requestId: message.requestId, error, ...extra });
+        if (host.creation) return fail("vault_creation_pending", { path: host.creation.path });
+        const path = message.path ?? (message.useDefault ? "C:\\Vaults\\memocampus.sqlite3" : "C:\\Picked\\enc.sqlite3");
+        if (host.vaults[path]) return fail("file_exists", { path });
+        host.creation = { path, phrase: host.phraseFor(path) };
+        return reply({ type: "vault_result", path, recoveryPhrase: host.creation.phrase.split(" ") });
+      }
+      if (message.type === "vault_create_encrypted_commit") {
+        const fail = (error, extra = {}) => ({ ok: false, type: "vault_result", requestId: message.requestId, error, ...extra });
+        if (!host.creation) return fail("vault_creation_not_pending");
+        const words = String(message.recoveryPhrase ?? "").trim().split(/\s+/);
+        if (words.length !== 12) return fail("recovery_phrase_invalid", { reason: "word_count", count: words.length });
+        if (words.join(" ").toLowerCase() !== host.creation.phrase) return fail("recovery_phrase_rejected");
+        const { path } = host.creation;
+        host.creation = null;
+        host.vaults[path] = [];
+        host.encrypted.add(path);
+        host.active = path;
+        return reply({ type: "vault_result", path, status: host.status() });
+      }
+      if (message.type === "vault_create_encrypted_cancel") {
+        host.creation = null;
+        return reply({ type: "vault_result", status: host.status() });
+      }
+      if (message.type === "vault_recover") {
+        const fail = (error, extra = {}) => ({ ok: false, type: "vault_result", requestId: message.requestId, error, ...extra });
+        const expected = host.locked.get(message.path);
+        if (expected === undefined) return fail("recovery_metadata_missing", { path: message.path });
+        const words = String(message.recoveryPhrase ?? "").trim().split(/\s+/).filter(Boolean);
+        if (words.length !== 12) return fail("recovery_phrase_invalid", { reason: "word_count", count: words.length });
+        if (words.join(" ").toLowerCase() !== expected) return fail("recovery_phrase_rejected", { path: message.path });
+        host.locked.delete(message.path);
+        host.active = message.path;
+        host.published.delete(message.path);
+        return reply({ type: "vault_result", path: message.path, status: host.status() });
+      }
       if (message.type === "vault_open") {
+        if (host.locked.has(message.path)) {
+          return { ok: false, type: "vault_result", requestId: message.requestId, error: "key_unavailable", path: message.path, recoveryAvailable: true };
+        }
         host.active = message.path;
         return reply({ type: "vault_result", path: message.path, status: host.status() });
       }

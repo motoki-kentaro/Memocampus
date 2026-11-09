@@ -29,10 +29,17 @@ jobs:
   rust:
     name: Rust (stable MSVC, Windows)
     runs-on: windows-latest
-    timeout-minutes: 30
+    # Issue #51 Slice B: SQLCipher with OpenSSL built from source (once for the dev profile and once
+    # for release; the three crates share one target directory, so each is built once per job).
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: native-host
+    env:
+      # OpenSSL's MSVC build needs a native (MSWin32) Perl: the runner image's Strawberry Perl. Git
+      # for Windows' MSYS Perl does not work (it lacks Locale::Maketext::Simple).
+      PERL: C:\Strawberry\perl\bin\perl.exe
+      CARGO_TARGET_DIR: ${{ github.workspace }}\target-ci
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -40,6 +47,12 @@ jobs:
       # rustup and the MSVC build tools come with the runner image.
       - run: rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal --component rustfmt,clippy --no-self-update
       - run: rustup default stable-x86_64-pc-windows-msvc
+      - name: Native Perl for the OpenSSL build
+        shell: pwsh
+        run: |
+          $os = & $env:PERL -e 'print $^O'
+          if ($os -ne 'MSWin32') { throw "PERL is not a native Windows Perl ($os)" }
+          & $env:PERL -v | Select-Object -First 2
       - run: cargo fmt --all -- --check
       - run: cargo test --locked
       - run: cargo clippy --locked --all-targets -- -D warnings
