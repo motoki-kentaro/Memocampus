@@ -66,9 +66,11 @@ To find the cause, look at the toolbar badge and the message at the top of the U
 
 ## MCP server (local, read-only)
 
-`memocampus-mcp.exe --vault "<absolute path to the vault>"` lets an MCP client such as Claude Desktop or Claude Code
-search the vault over stdio: visits (URL, title, page metadata), one day's visits, visit counts per domain, and the
-metadata of images marked public. It never writes and never returns image data, and by default it opens no network port.
+`memocampus-mcp.exe` lets an MCP client such as Claude Desktop or Claude Code search the active vault over stdio: visits
+(URL, title, page metadata), one day's visits, visit counts per domain, and the metadata of images marked public. It follows
+the vault chosen in the side panel, and reads it only after you approved it for MCP there (**MCPへの公開**); a newly created,
+opened or replaced vault stays closed to MCP until then. `--vault "<path>"` is optional and only accepted while that file is
+the approved active vault (Issue #51, [docs/secure-vault/slice-b0.md](docs/secure-vault/slice-b0.md)). It never writes and never returns image data, and by default it opens no network port.
 With `--transport streamable-http` it serves the same tools on `http://127.0.0.1:8765/mcp` instead: loopback only, a bearer
 token required on every request, browser origins refused ([docs/mcp-streamable-http.md](docs/mcp-streamable-http.md)). Every call goes
 through VisibleStore, which applies the current privacy policy: never-save and save-but-no-MCP pages, and anything that

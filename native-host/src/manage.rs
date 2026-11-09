@@ -1,5 +1,9 @@
 //! Vault management messages from the side panel: `vault_status`, `vault_create`,
-//! `vault_open`, `vault_backup`. Every message gets exactly one `vault_result` response.
+//! `vault_open`, `vault_backup`, and (Issue #51) `vault_publication_confirm` /
+//! `vault_publication_revoke`. Every message gets exactly one `vault_result` response.
+//!
+//! Publication decisions exist only here, in the Native Host, which only the extension can reach;
+//! the MCP server has no way to make or undo one.
 
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
@@ -7,8 +11,13 @@ use std::time::SystemTime;
 
 use crate::dialog::Dialogs;
 use crate::location::{self, Assessment, Verdict};
+use crate::policy_gate;
 use crate::search::request_id;
-use crate::vault::{self, Active, ConfigLock, Session, VaultError};
+use crate::vault::{
+    self, Active, ConfigLock, PolicyReadiness, PublicationChange, Session, VaultError,
+};
+use memocampus_native_host::active_vault::VaultMode;
+use memocampus_native_host::policy_store::{PolicyStore, StoreError};
 
 const MAX_PATH_CHARS: usize = 32_767;
 const DEFAULT_VAULT_NAME: &str = "memocampus.sqlite3";
@@ -49,6 +58,8 @@ pub fn handle(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> 
         Some("vault_create") => create(session, dialogs, message),
         Some("vault_open") => open(session, dialogs, message),
         Some("vault_backup") => backup(session, dialogs, message),
+        Some("vault_publication_confirm") => publication(session, message, true),
+        Some("vault_publication_revoke") => publication(session, message, false),
         _ => Err(Failure::with("unknown_type", json!({}))),
     };
     let mut response = match result {
@@ -81,8 +92,13 @@ pub fn status(session: &Session) -> Value {
         "counts": null,
         "location": null,
         "locationApproved": false,
+        "mode": null,
+        // MCP access to the vault shown (Issue #51): "confirmed", "pending", or null when MCP
+        // cannot read it at all (no vault, or the MEMOCAMPUS_DB override, which MCP never reads).
+        "publication": null,
+        "publicationPolicyRevision": null,
     });
-    let path = match vault::resolve(env) {
+    let (path, mode, config) = match vault::resolve(env) {
         Err(error) => {
             status["state"] = error.code().into();
             return status;
@@ -91,20 +107,30 @@ pub fn status(session: &Session) -> Value {
             status["state"] = "not_configured".into();
             return status;
         }
-        Ok(Active::Override(path)) => path,
+        Ok(Active::Override(path)) => (path, VaultMode::Plain, None),
         Ok(Active::Configured(config)) => {
             status["locationApproved"] = config.location_approved.into();
-            let path = PathBuf::from(config.active_vault);
+            let path = PathBuf::from(&config.active_vault);
             status["location"] = json!(location::probe(&path, env.exe_dir.as_deref()));
-            path
+            (path, config.mode, Some(config))
         }
     };
     status["vaultPath"] = display(&path).into();
-    match vault::open_vault(&path) {
+    status["mode"] = mode.code().into();
+    match vault::open_vault_in(&path, mode, &vault::NoKeys).map_err(VaultError::from) {
         Ok(db) => {
             status["state"] = "ready".into();
             // The vault shown, as `vault_backup` must name it (taken while `db` holds the file).
-            status["vaultToken"] = json!(vault::vault_token(&path).ok());
+            let token = vault::vault_token(&path).ok();
+            status["vaultToken"] = json!(token);
+            if let (Some(config), Some(token)) = (&config, &token) {
+                let published = config.is_published(token);
+                status["publication"] = if published { "confirmed" } else { "pending" }.into();
+                if published {
+                    status["publicationPolicyRevision"] =
+                        json!(config.publication.as_ref().and_then(|p| p.policy_revision));
+                }
+            }
             if let Ok(counts) = vault::counts(&db) {
                 status["counts"] = json!(counts);
             }
@@ -113,7 +139,74 @@ pub fn status(session: &Session) -> Value {
         Err(VaultError::Invalid) => status["state"] = "invalid".into(),
         Err(error) => status["state"] = error.code().into(),
     }
+    if config.is_some() && status["publication"].is_null() {
+        // Whatever cannot be shown as ready is not readable by MCP either.
+        status["publication"] = "pending".into();
+    }
     status
+}
+
+/// The global policy, as publication decisions need it (see `vault::migrate_legacy_config`).
+pub fn policy_readiness(env: &vault::Environment) -> PolicyReadiness {
+    let Some(store) = env
+        .app_dir
+        .clone()
+        .and_then(|dir| PolicyStore::new(dir).ok())
+    else {
+        return PolicyReadiness::Unknown;
+    };
+    match store.load() {
+        Ok(snapshot) => PolicyReadiness::Ready(snapshot.policy.revision),
+        Err(StoreError::Missing | StoreError::Invalid | StoreError::Unsupported) => {
+            PolicyReadiness::NotReady
+        }
+        Err(_) => PolicyReadiness::Unknown,
+    }
+}
+
+fn policy_failure(error: StoreError) -> Failure {
+    let code = match error {
+        StoreError::Missing => policy_gate::NOT_INITIALIZED,
+        StoreError::Invalid => policy_gate::INVALID,
+        StoreError::Unsupported => policy_gate::UNSUPPORTED,
+        StoreError::Busy => policy_gate::BUSY,
+        _ => policy_gate::UNAVAILABLE,
+    };
+    Failure::with(code, json!({}))
+}
+
+/// Confirms (`confirm`) or revokes MCP access to the vault the panel shows: `expectedVaultToken`
+/// is the `vaultToken` of that status. Confirming needs a usable global policy, whose revision is
+/// recorded; the policy itself is never written. Decided under the config lock (as every switch),
+/// so it can only apply to the vault shown, else `vault_switched` and nothing changes.
+fn publication(session: &mut Session, message: &Value, confirm: bool) -> Result<Value, Failure> {
+    require_management(session)?;
+    let expected = message
+        .get("expectedVaultToken")
+        .and_then(Value::as_str)
+        .filter(|token| crate::image_original::is_hex64(token))
+        .ok_or_else(|| Failure::with("invalid_vault_token", json!({})))?;
+    let change = if confirm {
+        let store = PolicyStore::new(
+            session
+                .env
+                .app_dir
+                .clone()
+                .ok_or(VaultError::AppDirUnavailable)?,
+        )
+        .map_err(|_| VaultError::AppDirUnavailable)?;
+        let snapshot = store.load().map_err(policy_failure)?;
+        PublicationChange::Confirm {
+            policy_revision: snapshot.policy.revision,
+        }
+    } else {
+        PublicationChange::Revoke
+    };
+    let lock = ConfigLock::acquire(&session.env)?;
+    vault::set_publication(&session.env, &lock, expected, change)?;
+    drop(lock);
+    session.reset();
+    Ok(json!({ "status": status(session) }))
 }
 
 fn require_management(session: &Session) -> Result<(), Failure> {
@@ -551,6 +644,178 @@ mod tests {
         let path = PathBuf::from(done["backupPath"].as_str().unwrap());
         assert_eq!(path.parent().unwrap(), dest);
         assert!(vault::open_vault_checked(&path).is_ok());
+    }
+
+    // --- Issue #51 B0-2: publication ----------------------------------------------------------
+
+    fn init_policy(session: &Session) {
+        PolicyStore::new(session.env.app_dir.clone().unwrap())
+            .unwrap()
+            .initialize()
+            .unwrap();
+    }
+
+    #[test]
+    fn a_new_vault_is_pending_until_the_user_confirms_it_with_a_ready_policy() {
+        let tmp = TempDir::new();
+        let mut session = Session::new(tmp.env());
+        let dialogs = FakeDialogs::default();
+        let created = send(
+            &mut session,
+            &dialogs,
+            json!({ "type": "vault_create", "path": tmp.0.join("v.sqlite3") }),
+        );
+        assert_eq!(created["status"]["publication"], "pending", "{created}");
+        assert_eq!(created["status"]["mode"], "plain");
+        let token = created["status"]["vaultToken"].clone();
+
+        // No policy yet: nothing can be decided for MCP, and the config is not touched.
+        let config = std::fs::read(session.env.config_path().unwrap()).unwrap();
+        let refused = send(
+            &mut session,
+            &dialogs,
+            json!({ "type": "vault_publication_confirm", "expectedVaultToken": token }),
+        );
+        assert_eq!(refused["error"], "policy_not_initialized");
+        assert_eq!(
+            std::fs::read(session.env.config_path().unwrap()).unwrap(),
+            config
+        );
+        assert!(
+            !session
+                .env
+                .app_dir
+                .as_ref()
+                .unwrap()
+                .join("policy.json")
+                .exists(),
+            "confirming never initializes the policy"
+        );
+
+        init_policy(&session);
+        let confirmed = send(
+            &mut session,
+            &dialogs,
+            json!({ "type": "vault_publication_confirm", "expectedVaultToken": token }),
+        );
+        assert_eq!(confirmed["ok"], true, "{confirmed}");
+        assert_eq!(confirmed["status"]["publication"], "confirmed");
+        assert_eq!(confirmed["status"]["publicationPolicyRevision"], 1);
+
+        let revoked = send(
+            &mut session,
+            &dialogs,
+            json!({ "type": "vault_publication_revoke", "expectedVaultToken": token }),
+        );
+        assert_eq!(revoked["status"]["publication"], "pending", "{revoked}");
+        assert_eq!(revoked["status"]["publicationPolicyRevision"], json!(null));
+    }
+
+    #[test]
+    fn a_decision_needs_the_token_of_the_vault_shown() {
+        let tmp = TempDir::new();
+        let mut session = Session::new(tmp.env());
+        let dialogs = FakeDialogs::default();
+        init_policy(&session);
+        let a = tmp.0.join("a.sqlite3");
+        send(
+            &mut session,
+            &dialogs,
+            json!({ "type": "vault_create", "path": a }),
+        );
+        let shown = send(&mut session, &dialogs, json!({ "type": "vault_status" }));
+        let token = shown["status"]["vaultToken"].clone();
+        // Another vault becomes active before the user's decision arrives.
+        let b = tmp.0.join("b.sqlite3");
+        send(
+            &mut session,
+            &dialogs,
+            json!({ "type": "vault_create", "path": b }),
+        );
+        for kind in ["vault_publication_confirm", "vault_publication_revoke"] {
+            let response = send(
+                &mut session,
+                &dialogs,
+                json!({ "type": kind, "expectedVaultToken": token }),
+            );
+            assert_eq!(response["error"], "vault_switched", "{kind}");
+        }
+        let status = send(&mut session, &dialogs, json!({ "type": "vault_status" }));
+        assert_eq!(status["status"]["publication"], "pending");
+        for bad in [json!(null), json!("x"), json!("A".repeat(64)), json!(42)] {
+            let response = send(
+                &mut session,
+                &dialogs,
+                json!({ "type": "vault_publication_confirm", "expectedVaultToken": bad }),
+            );
+            assert_eq!(response["error"], "invalid_vault_token", "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_override_and_unusable_vaults_offer_no_publication() {
+        let tmp = TempDir::new();
+        let dialogs = FakeDialogs::default();
+        let env = Environment {
+            db_override: Some(tmp.0.join("dev.sqlite3")),
+            ..tmp.env()
+        };
+        let mut session = Session::new(env);
+        let status = send(&mut session, &dialogs, json!({ "type": "vault_status" }));
+        assert_eq!(status["status"]["publication"], json!(null));
+        let refused = send(
+            &mut session,
+            &dialogs,
+            json!({ "type": "vault_publication_confirm", "expectedVaultToken": "0".repeat(64) }),
+        );
+        assert_eq!(refused["error"], "management_disabled");
+
+        let mut session = Session::new(tmp.env());
+        let target = tmp.0.join("v.sqlite3");
+        send(
+            &mut session,
+            &dialogs,
+            json!({ "type": "vault_create", "path": target }),
+        );
+        std::fs::remove_file(&target).unwrap();
+        let status = send(&mut session, &dialogs, json!({ "type": "vault_status" }));
+        assert_eq!(status["status"]["state"], "missing");
+        assert_eq!(status["status"]["publication"], "pending");
+    }
+
+    #[test]
+    fn an_encrypted_vault_is_reported_as_such_never_as_invalid() {
+        use memocampus_native_host::active_vault::Config;
+        let tmp = TempDir::new();
+        let mut session = Session::new(tmp.env());
+        let path = tmp.0.join("enc.sqlite3");
+        std::fs::write(&path, vec![0x5a; 4096]).unwrap();
+        vault::write_config(
+            &session.env,
+            &Config::new(
+                path.to_string_lossy().into_owned(),
+                false,
+                VaultMode::Encrypted,
+            ),
+        )
+        .unwrap();
+        let status = send(
+            &mut session,
+            &FakeDialogs::default(),
+            json!({ "type": "vault_status" }),
+        );
+        assert_eq!(status["status"]["state"], "vault_encryption_unsupported");
+        assert_eq!(status["status"]["mode"], "encrypted");
+        assert_eq!(status["status"]["publication"], "pending");
+        assert_eq!(status["status"]["vaultToken"], json!(null));
+        // Creating over it is refused; the file is untouched.
+        let again = send(
+            &mut session,
+            &FakeDialogs::default(),
+            json!({ "type": "vault_create", "path": path }),
+        );
+        assert_eq!(again["error"], "file_exists");
+        assert_eq!(std::fs::read(&path).unwrap(), vec![0x5a; 4096]);
     }
 
     #[test]

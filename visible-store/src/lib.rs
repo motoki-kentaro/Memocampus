@@ -43,9 +43,11 @@ mod time;
 mod visible_images;
 mod visible_set;
 
+use memocampus_native_host::active_vault::{self, Admitted, GateError, VaultMode};
+
 use memocampus_native_host::policy::CompiledPolicy;
 use memocampus_native_host::policy_store::{PolicyStore, StoreError};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 use visible_images::VisibleImages;
 use visible_set::{public_id, IdKey, Position, VisibleSet};
@@ -77,6 +79,27 @@ pub enum VisibleError {
     NotFound,
     /// A cursor this store did not issue, or not in the form it issues.
     InvalidCursor,
+    // --- Publication gate (Issue #51, B0): checked before anything is read. ---
+    /// No active vault is configured.
+    VaultNotConfigured,
+    /// `config.json` is damaged or of an unknown version.
+    ConfigInvalid,
+    /// A fixed-path store whose file is not the active vault.
+    VaultNotActive,
+    /// The active vault is not (or no longer) approved for MCP.
+    VaultPublicationPending,
+    /// The active vault or its approval changed during the read; nothing of it is returned.
+    VaultSwitched,
+    // --- Vault mode (B0-4). ---
+    /// The file contradicts the mode the config records (plain SQLite in encrypted mode, or no
+    /// SQLite header in plain mode). Never taken for damage, never resolved by switching modes.
+    VaultModeMismatch,
+    /// The active vault is encrypted, which this version cannot read.
+    VaultEncryptionUnsupported,
+    /// Reserved for encrypted vaults (Slice S2): the key is not available to this process.
+    VaultLocked,
+    /// Reserved for encrypted vaults (Slice S2): the key was refused.
+    VaultDecryptFailed,
 }
 
 impl VisibleError {
@@ -91,6 +114,28 @@ impl VisibleError {
             Self::VisibleSetFailed => "visible_set_failed",
             Self::NotFound => "not_found",
             Self::InvalidCursor => "invalid_cursor",
+            Self::VaultNotConfigured => "vault_not_configured",
+            Self::ConfigInvalid => "config_invalid",
+            Self::VaultNotActive => "vault_not_active",
+            Self::VaultPublicationPending => "vault_publication_pending",
+            Self::VaultSwitched => "vault_switched",
+            Self::VaultModeMismatch => "vault_mode_mismatch",
+            Self::VaultEncryptionUnsupported => "vault_encryption_unsupported",
+            Self::VaultLocked => "vault_locked",
+            Self::VaultDecryptFailed => "vault_decrypt_failed",
+        }
+    }
+}
+
+impl From<GateError> for VisibleError {
+    fn from(error: GateError) -> Self {
+        match error {
+            GateError::NotConfigured => Self::VaultNotConfigured,
+            GateError::ConfigInvalid => Self::ConfigInvalid,
+            GateError::Unavailable | GateError::VaultMissing => Self::VaultUnavailable,
+            GateError::NotActive => Self::VaultNotActive,
+            GateError::PublicationPending => Self::VaultPublicationPending,
+            GateError::Switched => Self::VaultSwitched,
         }
     }
 }
@@ -238,41 +283,141 @@ pub struct GetImageSources<'a> {
 /// Points in one read at which tests interleave other activity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Stage {
+    /// The publication gate admitted a vault; nothing has been opened yet.
+    Admitted,
     PolicyLoaded,
     SchemaChecked,
     VaultClosed,
     SetBuilt,
 }
 
-type ReadRows<Row> = fn(&Path, &mut dyn FnMut(Stage)) -> Result<Vec<Row>, VisibleError>;
+/// The vault one read opens: path and mode as the gate admitted them, and the file identity the
+/// open file must have (None only for this crate's ungated test stores).
+pub(crate) struct Target {
+    pub path: PathBuf,
+    pub mode: VaultMode,
+    pub token: Option<String>,
+}
+
+type ReadRows<Row> = fn(&Target, &mut dyn FnMut(Stage)) -> Result<Vec<Row>, VisibleError>;
+
+/// Which vault a store reads.
+enum Source {
+    /// The active vault `config.json` names now, resolved for every read (the default for MCP).
+    Active,
+    /// A fixed path, accepted only while it is the active vault file itself.
+    Pinned(PathBuf),
+    /// This crate's tests only: a vault read without the publication gate.
+    #[cfg(test)]
+    Ungated(PathBuf, VaultMode),
+}
 
 pub struct VisibleStore {
-    vault: PathBuf,
+    source: Source,
+    /// The global application directory: `config.json` and the policy, independent of the vault.
+    app_dir: PathBuf,
     policy: PolicyStore,
     id_key: IdKey,
 }
 
 impl VisibleStore {
-    /// `app_dir` is the global application directory holding `policy.json`, independent of the vault.
-    pub fn new(vault: PathBuf, app_dir: PathBuf) -> Result<Self, VisibleError> {
-        let policy = PolicyStore::new(app_dir).map_err(|_| VisibleError::PolicyUnavailable)?;
-        Ok(Self::with_policy(vault, policy))
+    /// Reads whatever vault `app_dir/config.json` names as active and publishes (Issue #51 I1, I2):
+    /// every read passes the publication gate again, so a switch, a pending vault or a replaced
+    /// file is never read. `app_dir` also holds the global `policy.json`.
+    pub fn follow_active(app_dir: PathBuf) -> Result<Self, VisibleError> {
+        let policy =
+            PolicyStore::new(app_dir.clone()).map_err(|_| VisibleError::PolicyUnavailable)?;
+        Ok(Self::with_policy(Source::Active, app_dir, policy))
     }
 
-    /// The policy of `%LOCALAPPDATA%\Memocampus` (or `MEMOCAMPUS_APP_DIR`).
-    pub fn from_process(vault: PathBuf) -> Result<Self, VisibleError> {
+    /// Reads only `vault`, and only while it is the active vault with a confirmed publication
+    /// (`vault_not_active` otherwise). For diagnostics and clients started with a path.
+    pub fn pinned(vault: PathBuf, app_dir: PathBuf) -> Result<Self, VisibleError> {
+        let policy =
+            PolicyStore::new(app_dir.clone()).map_err(|_| VisibleError::PolicyUnavailable)?;
+        Ok(Self::with_policy(Source::Pinned(vault), app_dir, policy))
+    }
+
+    /// The application directory `%LOCALAPPDATA%\Memocampus` (or `MEMOCAMPUS_APP_DIR`): pinned
+    /// to `vault` if given, else following the active vault.
+    pub fn from_process(vault: Option<PathBuf>) -> Result<Self, VisibleError> {
         let policy = PolicyStore::from_process().map_err(|_| VisibleError::PolicyUnavailable)?;
-        Ok(Self::with_policy(vault, policy))
+        let app_dir = policy.app_dir().to_path_buf();
+        let source = match vault {
+            Some(vault) => Source::Pinned(vault),
+            None => Source::Active,
+        };
+        Ok(Self::with_policy(source, app_dir, policy))
     }
 
-    fn with_policy(vault: PathBuf, policy: PolicyStore) -> Self {
+    /// This crate's tests: `vault` without the publication gate, as a plain vault.
+    #[cfg(test)]
+    pub(crate) fn ungated(vault: PathBuf, app_dir: PathBuf) -> Result<Self, VisibleError> {
+        Self::ungated_in(vault, app_dir, VaultMode::Plain)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ungated_in(
+        vault: PathBuf,
+        app_dir: PathBuf,
+        mode: VaultMode,
+    ) -> Result<Self, VisibleError> {
+        let policy =
+            PolicyStore::new(app_dir.clone()).map_err(|_| VisibleError::PolicyUnavailable)?;
+        Ok(Self::with_policy(
+            Source::Ungated(vault, mode),
+            app_dir,
+            policy,
+        ))
+    }
+
+    fn with_policy(source: Source, app_dir: PathBuf, policy: PolicyStore) -> Self {
         let mut id_key = [0u8; 32];
         id_key[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
         id_key[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
         Self {
-            vault,
+            source,
+            app_dir,
             policy,
             id_key,
+        }
+    }
+
+    fn pinned_path(&self) -> Option<&std::path::Path> {
+        match &self.source {
+            Source::Pinned(path) => Some(path),
+            _ => None,
+        }
+    }
+
+    /// The publication gate: the vault to open now, and what admitted it.
+    fn admit(&self) -> Result<(Target, Option<Admitted>), VisibleError> {
+        #[cfg(test)]
+        if let Source::Ungated(path, mode) = &self.source {
+            let target = Target {
+                path: path.clone(),
+                mode: *mode,
+                token: None,
+            };
+            return Ok((target, None));
+        }
+        let admitted = active_vault::admit(&self.app_dir, self.pinned_path())?;
+        let target = Target {
+            path: admitted.path.clone(),
+            mode: admitted.mode,
+            token: Some(admitted.token.clone()),
+        };
+        Ok((target, Some(admitted)))
+    }
+
+    /// After a read: the gate still admits the very same vault, else the read is discarded.
+    fn still_admitted(&self, admitted: &Option<Admitted>) -> Result<(), VisibleError> {
+        match admitted {
+            Some(admitted) => {
+                active_vault::still_admitted(&self.app_dir, self.pinned_path(), admitted)
+                    .map_err(VisibleError::from)
+            }
+            None => Ok(()),
         }
     }
 
@@ -280,10 +425,17 @@ impl VisibleStore {
         self.search_visits_staged(request, &mut |_| {})
     }
 
-    /// The vault passes every check a read makes (location, mode, schema), and nothing is read.
-    /// The policy is not needed for this.
+    /// The vault passes every check a read makes (publication, location, mode, schema), and
+    /// nothing is read. The policy is not needed for this.
     pub fn check_vault(&self) -> Result<(), VisibleError> {
-        snapshot::check_vault(&self.vault, &mut |_| {})
+        self.check_vault_staged(&mut |_| {})
+    }
+
+    fn check_vault_staged(&self, stage: &mut dyn FnMut(Stage)) -> Result<(), VisibleError> {
+        let (target, admitted) = self.admit()?;
+        stage(Stage::Admitted);
+        snapshot::check_vault(&target, stage)?;
+        self.still_admitted(&admitted)
     }
 
     pub fn domain_stats(&self, request: &DomainStats) -> Result<DomainStatsPage, VisibleError> {
@@ -421,12 +573,18 @@ impl VisibleStore {
         query: impl Fn(&Set) -> Result<T, VisibleError>,
     ) -> Result<T, VisibleError> {
         for _ in 0..POLICY_CHANGE_ATTEMPTS {
+            // The publication gate comes first: an unpublished vault is not even opened.
+            let (target, admitted) = self.admit()?;
+            stage(Stage::Admitted);
             // Compiled once for this attempt, as it was loaded. A policy that does not compile
             // gives no decision at all.
             let policy = self.read_policy(PolicyStore::load)?;
             stage(Stage::PolicyLoaded);
-            let rows = read(&self.vault, stage)?;
+            let rows = read(&target, stage)?;
             stage(Stage::VaultClosed);
+            // Rows of a vault that stopped being the published active one during the read are
+            // dropped unjudged.
+            self.still_admitted(&admitted)?;
             let set = build(rows, &policy.compiled, &self.id_key)?;
             stage(Stage::SetBuilt);
             // The same bytes as loaded, so the same valid policy: no need to compile it again.

@@ -48,7 +48,13 @@ Vault (schema 7)  ◄── writes ── Native Host ◄── Native Messaging
 memocampus-mcp.exe --vault "C:\Users\<you>\AppData\Local\Memocampus\memocampus.sqlite3"
 ```
 
-- Exactly `--vault <absolute path>` (or `--help` / `--version`). A relative path is refused: an MCP client's working directory is
+- **Changed by Issue #51 (Slice B0, `secure-vault/slice-b0.md`):** `--vault` is optional. Without it the server follows the
+  side panel's active vault, resolved for every call, and reads it only while it is approved for MCP in the side panel
+  (`vault_publication_pending` otherwise). With `--vault <absolute path>` the file must be that approved active vault
+  (`vault_not_active` otherwise), so the "fixed for the life of the process" behaviour described below no longer exists.
+  Codes added: `vault_not_configured`, `config_invalid`, `vault_not_active`, `vault_publication_pending`, `vault_switched`,
+  `vault_mode_mismatch` (a file without the SQLite header; formerly `vault_schema_mismatch`), `vault_encryption_unsupported`.
+- `--vault <absolute path>` (or `--help` / `--version`). A relative path is refused: an MCP client's working directory is
   not something to rely on.
 - The vault is checked once at start with the same checks as a read (`VisibleStore::check_vault`): location (fixed local drive,
   no UNC), file header, not WAL, `journal_mode = delete`, schema 7 byte for byte. Failure: exit code 2 and one line on stderr,
@@ -274,13 +280,15 @@ Use your own vault only by hand; the automated tests never read it.
    `C:\Users\<you>\AppData\Local\Memocampus\memocampus.sqlite3`. It must be a schema 7 vault.
 3. Check it starts (it waits for a client; press Ctrl+C to stop):
    ```powershell
-   & "C:\works\Memocampus\mcp-server\target\release\memocampus-mcp.exe" --vault "$env:LOCALAPPDATA\Memocampus\memocampus.sqlite3"
+   & "C:\works\Memocampus\mcp-server\target\release\memocampus-mcp.exe"
    ```
+   (Issue #51: no `--vault` needed; the side panel's active vault is followed once it is approved for MCP there.
+   `vault_publication_pending` means: approve it in the side panel's Vault section.)
    An immediate exit with `memocampus-mcp: vault refused: <code>` means: `vault_unavailable` (path wrong or missing),
    `vault_schema_mismatch` (not a schema 7 Memocampus vault), `vault_unsupported` (WAL, or not on a fixed local drive).
 4. Register with **Claude Code** (user scope, so it works from any folder):
    ```powershell
-   claude mcp add --scope user memocampus -- "C:\works\Memocampus\mcp-server\target\release\memocampus-mcp.exe" --vault "C:\Users\<you>\AppData\Local\Memocampus\memocampus.sqlite3"
+   claude mcp add --scope user memocampus -- "C:\works\Memocampus\mcp-server\target\release\memocampus-mcp.exe"
    claude mcp list
    ```
    In a session, `/mcp` should show `memocampus` connected with 4 tools.
@@ -290,7 +298,7 @@ Use your own vault only by hand; the automated tests never read it.
      "mcpServers": {
        "memocampus": {
          "command": "C:\\works\\Memocampus\\mcp-server\\target\\release\\memocampus-mcp.exe",
-         "args": ["--vault", "C:\\Users\\<you>\\AppData\\Local\\Memocampus\\memocampus.sqlite3"]
+         "args": []
        }
      }
    }

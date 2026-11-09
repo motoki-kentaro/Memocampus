@@ -21,7 +21,37 @@ export const STATE_TEXT = {
   vault_schema_mismatch: "このVaultは現在の形式に対応していません。自動変換は行いません",
   config_invalid: "設定ファイルを読み取れません",
   app_dir_unavailable: "設定フォルダを特定できません",
+  // Issue #51: an encrypted or misdescribed vault is reported as such, never as invalid.
+  vault_mode_mismatch: "Vaultファイルが設定上の形式（暗号化／平文）と一致しません。ファイルは変更していません",
+  vault_encryption_unsupported: "このVaultは暗号化されていますが、このバージョンは暗号化Vaultを開けません。ファイルは変更していません",
+  key_unavailable: "暗号化Vaultの鍵を取得できません。ファイルは変更していません",
+  vault_locked: "暗号化Vaultがロックされています。ファイルは変更していません",
+  vault_decrypt_failed: "暗号化Vaultを復号できません。ファイルは変更していません",
 };
+
+/** MCP access to the vault shown (Issue #51): `status.publication` from a host that knows it. */
+export const PUBLICATION_TEXT = {
+  confirmed: "MCPへの公開: 承認済み",
+  pending: "MCPへの公開: 未承認",
+};
+
+export const PUBLICATION_NOTE = {
+  confirmed: "MCPクライアントは、プライバシー設定を通過した記録と、MCP公開にした画像だけを読めます。設定の変更は次の読み取りから反映されます。",
+  pending: "MCPクライアントには、このVaultの内容を一切返しません。新規作成・切り替え・置き換えたVaultは、承認するまでこの状態です。",
+  unusable: "Vaultを開けないため、承認できません。",
+};
+
+export const PUBLICATION_REVIEW =
+  "このVaultを、MCPクライアント（Claudeなど）から読めるようにします。\n" +
+  "読めるのは、現在のプライバシー設定（保存しないグループ・MCPサーバに見せないグループ・基本保護）を通過した記録と、MCP公開にした画像だけです。\n" +
+  "承認の前に、下の「プライバシー設定」で内容を確認してください。承認は、このVaultファイルにだけ適用されます。";
+
+export function describePublication(status) {
+  const text = PUBLICATION_TEXT[status?.publication];
+  if (!text) return "";
+  const revision = status.publicationPolicyRevision;
+  return status.publication === "confirmed" && Number.isSafeInteger(revision) ? `${text}（プライバシー設定 改訂${revision}の時点で承認）` : text;
+}
 
 export const REASON_TEXT = {
   network_path: "ネットワーク共有(UNC)上です",

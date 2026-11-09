@@ -1,5 +1,6 @@
 //! What the host and VisibleStore share: the privacy policy, the vault schema definition and the
-//! rules for page metadata and navigation facts.
+//! rules for page metadata and navigation facts, and the active vault's config and publication.
+pub mod active_vault;
 pub mod domain_approvals;
 pub mod navigation;
 pub mod page_metadata;

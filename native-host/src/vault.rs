@@ -3,19 +3,24 @@
 //! The vault (SQLite file) is independent of the host executable. Its path is persisted in
 //! `%LOCALAPPDATA%\Memocampus\config.json`. Vaults are only ever created by an explicit
 //! request, opened without SQLite's create flag, and existing files are never overwritten.
+//!
+//! Issue #51 (Slice B0): the config records the vault's mode (`plain` / `encrypted`) and whether
+//! it is published to MCP (see `active_vault`). This version opens plain vaults only; an encrypted
+//! one is refused with a key or mode error that never counts as proof that nobody writes to it.
 
 use rusqlite::backup::{Backup, StepResult};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::images;
+use memocampus_native_host::active_vault::{self, Publication, PublicationState, VaultMode};
 use memocampus_native_host::schema::{self, SchemaError};
 
-pub const CONFIG_VERSION: u32 = 1;
+pub use memocampus_native_host::active_vault::{Config, CONFIG_VERSION};
 const DEFAULT_VAULT_NAME: &str = "memocampus.sqlite3";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(3);
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -40,6 +45,16 @@ pub enum VaultError {
     BackupFailed,
     Io,
     Db,
+    /// The vault's key could not be obtained (no key store entry, protector failure, mismatch).
+    KeyUnavailable,
+    /// The key exists but is not unlocked in this process (needs the user, e.g. a recovery phrase).
+    Locked,
+    /// A key was applied but the vault refuses it: never proof that the file is unusable.
+    DecryptFailed,
+    /// The file contradicts the mode the config records (e.g. plain SQLite in encrypted mode).
+    ModeMismatch,
+    /// The config names an encrypted vault, which this version cannot open.
+    EncryptionUnsupported,
 }
 
 impl VaultError {
@@ -62,6 +77,11 @@ impl VaultError {
             Self::BackupFailed => "backup_failed",
             Self::Io => "io_error",
             Self::Db => "db_error",
+            Self::KeyUnavailable => "key_unavailable",
+            Self::Locked => "vault_locked",
+            Self::DecryptFailed => "vault_decrypt_failed",
+            Self::ModeMismatch => "vault_mode_mismatch",
+            Self::EncryptionUnsupported => "vault_encryption_unsupported",
         }
     }
 }
@@ -108,16 +128,6 @@ impl Environment {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Config {
-    pub version: u32,
-    pub active_vault: String,
-    /// The user explicitly accepted location warnings (sync folder, removable drive, ...).
-    #[serde(default)]
-    pub location_approved: bool,
-}
-
 #[derive(Debug, PartialEq)]
 pub enum Active {
     Override(PathBuf),
@@ -125,43 +135,172 @@ pub enum Active {
     NotConfigured,
 }
 
-/// Resolves the active vault path without touching the vault itself.
+/// Resolves the active vault path without touching the vault itself. A version 1 config is read
+/// as a plain vault with no publication decision (see `migrate_legacy_config`).
 pub fn resolve(env: &Environment) -> Result<Active, VaultError> {
     if let Some(path) = &env.db_override {
         return Ok(Active::Override(path.clone()));
     }
-    let bytes = match fs::read(env.config_path()?) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Active::NotConfigured),
-        Err(_) => return Err(VaultError::Io),
-    };
-    let config: Config = serde_json::from_slice(&bytes).map_err(|_| VaultError::ConfigInvalid)?;
-    if config.version != CONFIG_VERSION || !Path::new(&config.active_vault).is_absolute() {
-        return Err(VaultError::ConfigInvalid);
+    match active_vault::read_config(env.app_dir()?) {
+        Ok(Some(config)) => Ok(Active::Configured(config)),
+        Ok(None) => Ok(Active::NotConfigured),
+        Err(active_vault::ConfigError::Io) => Err(VaultError::Io),
+        Err(active_vault::ConfigError::Invalid) => Err(VaultError::ConfigInvalid),
     }
-    Ok(Active::Configured(config))
 }
 
-/// Atomically replaces `config.json` (write to a unique temp file, flush, rename).
+/// The steps of `write_config`, for fault injection in tests.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfigStep {
+    Create,
+    Write,
+    Sync,
+    /// The process dies after the temp file is complete, before the replace: the temp file stays.
+    CrashBeforeReplace,
+    Replace,
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CONFIG_FAULT: std::cell::Cell<Option<ConfigStep>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn inject(step: ConfigStep) -> io::Result<()> {
+    if CONFIG_FAULT.with(std::cell::Cell::get) == Some(step) {
+        return Err(io::Error::other("injected"));
+    }
+    Ok(())
+}
+
+/// Replaces `config.json` as one step: a unique temp file is written and flushed, renamed over
+/// the old file through its own handle, and flushed again after the rename. Readers see the old or
+/// the new file, never a mixture, and on any failure the old file stays in place. Always writes
+/// the current version.
+///
+/// On Windows the rename uses POSIX semantics (`FileRenameInfoEx`): the name switches atomically
+/// even while readers (the MCP server, other host processes) have the old file open. A classic
+/// `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` fails with
+/// `ERROR_ACCESS_DENIED` in that case (measured in Slice B0: most replaces failed under concurrent
+/// readers), and `MOVEFILE_WRITE_THROUGH` only matters for moves done as copy and delete.
+///
+/// Durability: the flush after the rename asks NTFS to commit the file, including the journaled
+/// rename. Whether a given disk honours that across a power cut is outside the program's control
+/// (write caches without power-loss protection); this is not verified by an actual power cut.
 pub fn write_config(env: &Environment, config: &Config) -> Result<(), VaultError> {
     let target = env.config_path()?;
     let dir = env.app_dir()?;
     fs::create_dir_all(dir).map_err(|_| VaultError::Io)?;
+    let config = Config {
+        version: CONFIG_VERSION,
+        ..config.clone()
+    };
     let temp = dir.join(format!("config.json.{}.tmp", uuid::Uuid::new_v4()));
+    #[allow(unused_mut)]
+    let mut crashed = false;
     let result = (|| {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)?;
-        file.write_all(&serde_json::to_vec_pretty(config).map_err(io::Error::other)?)?;
+        #[cfg(test)]
+        inject(ConfigStep::Create)?;
+        let mut file = create_renamable(&temp)?;
+        #[cfg(test)]
+        inject(ConfigStep::Write)?;
+        file.write_all(&config.to_bytes())?;
+        #[cfg(test)]
+        inject(ConfigStep::Sync)?;
         file.sync_all()?;
-        drop(file);
-        fs::rename(&temp, &target)
+        #[cfg(test)]
+        if inject(ConfigStep::CrashBeforeReplace).is_err() {
+            crashed = true;
+            return Err(io::Error::other("injected crash"));
+        }
+        #[cfg(test)]
+        inject(ConfigStep::Replace)?;
+        replace_by_handle(file, &temp, &target)
     })();
-    if result.is_err() {
+    if result.is_err() && !crashed {
         let _ = fs::remove_file(&temp);
     }
     result.map_err(|_| VaultError::Io)
+}
+
+/// A new file opened so that it can later be renamed through its own handle.
+#[cfg(windows)]
+fn create_renamable(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const DELETE: u32 = 0x0001_0000;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .access_mode(GENERIC_WRITE | DELETE)
+        .open(path)
+}
+
+#[cfg(not(windows))]
+fn create_renamable(path: &Path) -> io::Result<File> {
+    OpenOptions::new().write(true).create_new(true).open(path)
+}
+
+/// Renames the open `file` (at `from`) to `to`, replacing it atomically, then flushes it.
+#[cfg(windows)]
+fn replace_by_handle(file: File, from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileRenameInfoEx, SetFileInformationByHandle, FILE_RENAME_INFO,
+    };
+    const FILE_RENAME_FLAG_REPLACE_IF_EXISTS: u32 = 0x1;
+    const FILE_RENAME_FLAG_POSIX_SEMANTICS: u32 = 0x2;
+    const ERROR_INVALID_FUNCTION: i32 = 1;
+    const ERROR_NOT_SUPPORTED: i32 = 50;
+    const ERROR_INVALID_PARAMETER: i32 = 87;
+    let name: Vec<u16> = to.as_os_str().encode_wide().collect();
+    let offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let size = offset + (name.len() + 1) * 2;
+    // u64 storage keeps the struct's alignment; zeroed, so the name is NUL-terminated.
+    let mut buffer = vec![0u64; size.div_ceil(8)];
+    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    // SAFETY: `buffer` holds `size` bytes, enough for the struct and the name with its NUL.
+    let renamed = unsafe {
+        (*info).Anonymous.Flags =
+            FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
+        (*info).RootDirectory = std::ptr::null_mut();
+        (*info).FileNameLength = (name.len() * 2) as u32;
+        std::ptr::copy_nonoverlapping(
+            name.as_ptr(),
+            std::ptr::addr_of_mut!((*info).FileName).cast::<u16>(),
+            name.len(),
+        );
+        SetFileInformationByHandle(
+            file.as_raw_handle(),
+            FileRenameInfoEx,
+            info.cast(),
+            size as u32,
+        )
+    };
+    if renamed == 0 {
+        let error = io::Error::last_os_error();
+        // File systems without POSIX rename semantics (FAT, older Windows): the standard replace.
+        match error.raw_os_error() {
+            Some(ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED | ERROR_INVALID_PARAMETER) => {
+                fs::rename(from, to)?
+            }
+            _ => return Err(error),
+        }
+    }
+    file.sync_all()
+}
+
+#[cfg(not(windows))]
+fn replace_by_handle(file: File, from: &Path, to: &Path) -> io::Result<()> {
+    drop(file);
+    fs::rename(from, to)?;
+    if let Some(dir) = to.parent() {
+        File::open(dir)?.sync_all()?;
+    }
+    Ok(())
 }
 
 /// Serializes vault management across the short-lived host processes. The OS releases the
@@ -248,17 +387,100 @@ pub enum OpenCause {
     /// The named object is missing or differs from the schema definition.
     SchemaMismatch(&'static str),
     IntegrityCheckFailed,
+    /// The key could not be obtained.
+    Key(KeyError),
+    /// The first bytes of the file contradict the recorded mode.
+    ModeMismatch,
+}
+
+/// Why no key is available for an encrypted vault. Never carries key material. This version only
+/// ever produces `NotSupported`; the others are what key sources report from Slice S2 on, and
+/// tests inject them.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyError {
+    /// This version has no way to unlock encrypted vaults.
+    NotSupported,
+    /// No key store entry for the vault.
+    Missing,
+    /// The OS protector (DPAPI) refused the entry: another user, damaged profile or blob.
+    ProtectorFailed,
+    /// An entry exists but belongs to another vault (vault id, salt or check value differ).
+    Mismatch,
+    /// The key needs the user (e.g. a recovery phrase) before it can be used.
+    Locked,
+}
+
+impl KeyError {
+    fn kind(self) -> VaultError {
+        match self {
+            Self::NotSupported => VaultError::EncryptionUnsupported,
+            Self::Missing | Self::ProtectorFailed | Self::Mismatch => VaultError::KeyUnavailable,
+            Self::Locked => VaultError::Locked,
+        }
+    }
+}
+
+/// A vault key. Opaque: no `Debug` output of its bytes, never serialized.
+pub struct VaultKey(#[allow(dead_code)] [u8; 32]);
+
+impl std::fmt::Debug for VaultKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("VaultKey(..)")
+    }
+}
+
+/// Where the key of an encrypted vault comes from (DPAPI key store from Slice S2 on).
+pub trait KeySource {
+    fn key_for(&self, vault: &Path) -> Result<VaultKey, KeyError>;
+}
+
+/// This version's key source: encrypted vaults cannot be unlocked.
+pub struct NoKeys;
+
+impl KeySource for NoKeys {
+    fn key_for(&self, _: &Path) -> Result<VaultKey, KeyError> {
+        Err(KeyError::NotSupported)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenFailure {
     pub kind: VaultError,
     pub cause: OpenCause,
+    /// The mode the open was attempted in (from the config).
+    pub mode: VaultMode,
 }
 
 impl OpenFailure {
     fn new(kind: VaultError, cause: OpenCause) -> Self {
-        Self { kind, cause }
+        Self {
+            kind,
+            cause,
+            mode: VaultMode::Plain,
+        }
+    }
+
+    fn in_mode(self, mode: VaultMode) -> Self {
+        Self { mode, ..self }
+    }
+
+    fn key(error: KeyError) -> Self {
+        Self::new(error.kind(), OpenCause::Key(error)).in_mode(VaultMode::Encrypted)
+    }
+
+    /// The key-independent cases in which a switch away from this vault must hold an exclusive
+    /// handle on the file instead of its write lock (see `switch_active_with`): this process
+    /// cannot open the vault the way a writer holding the key would.
+    pub fn needs_handle_fence(&self) -> bool {
+        matches!(
+            self.kind,
+            VaultError::KeyUnavailable
+                | VaultError::Locked
+                | VaultError::DecryptFailed
+                | VaultError::ModeMismatch
+                | VaultError::EncryptionUnsupported
+        )
     }
 
     fn from_io(error: &io::Error) -> Self {
@@ -273,12 +495,20 @@ impl OpenFailure {
     /// is definitively unusable; lock contention is `Busy`, permission and I/O problems are `Io`,
     /// and anything else is an unexplained `Db` error.
     fn from_sqlite(error: &rusqlite::Error) -> Self {
+        Self::from_sqlite_in(error, VaultMode::Plain)
+    }
+
+    /// `from_sqlite` for a connection opened in `mode`. With a key applied, "not a database" means
+    /// the key was refused (`DecryptFailed`), not that the file is unusable: SQLCipher answers a
+    /// wrong key and a missing key alike with `SQLITE_NOTADB` (PoC A-8.2).
+    fn from_sqlite_in(error: &rusqlite::Error, mode: VaultMode) -> Self {
         use rusqlite::ErrorCode;
         let rusqlite::Error::SqliteFailure(inner, _) = error else {
-            return Self::new(VaultError::Db, OpenCause::Driver);
+            return Self::new(VaultError::Db, OpenCause::Driver).in_mode(mode);
         };
         let kind = match inner.code {
             ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked => VaultError::Busy,
+            ErrorCode::NotADatabase if mode == VaultMode::Encrypted => VaultError::DecryptFailed,
             ErrorCode::NotADatabase | ErrorCode::DatabaseCorrupt => VaultError::Invalid,
             ErrorCode::CannotOpen
             | ErrorCode::SystemIoFailure
@@ -293,14 +523,24 @@ impl OpenFailure {
                 extended: inner.extended_code,
             },
         )
+        .in_mode(mode)
     }
 
     /// True only when no writer can possibly be using the vault: it does not exist, or its own
     /// contents prove it is not a Memocampus vault (writers run the same checks and are refused).
     /// Both the classification and the cause must agree, so a misclassified transient error can
     /// never qualify.
+    ///
+    /// Only a plain vault's contents can prove anything: a process that cannot key an encrypted
+    /// vault learns nothing about processes that can (HIGH-4). There, only absence qualifies.
     pub fn proves_unwritable(&self) -> bool {
         use rusqlite::ErrorCode;
+        if self.mode != VaultMode::Plain {
+            return matches!(
+                (&self.kind, &self.cause),
+                (VaultError::Missing, OpenCause::NotFound)
+            );
+        }
         match (&self.kind, &self.cause) {
             (VaultError::Missing, OpenCause::NotFound) => true,
             (
@@ -381,6 +621,58 @@ pub fn open_vault_detailed(path: &Path) -> Result<Connection, OpenFailure> {
     Ok(db)
 }
 
+/// Opens the vault in the mode its config records. Plain: `open_vault_detailed`. Encrypted: the
+/// file must not be plain SQLite, and the key must be obtainable; this version then refuses
+/// (`EncryptionUnsupported`) without ever handing the file to SQLite, so it can neither misread
+/// nor initialize it.
+pub fn open_vault_in(
+    path: &Path,
+    mode: VaultMode,
+    keys: &dyn KeySource,
+) -> Result<Connection, OpenFailure> {
+    match mode {
+        VaultMode::Plain => open_vault_detailed(path),
+        VaultMode::Encrypted => Err(open_encrypted(path, keys)),
+    }
+}
+
+const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
+
+fn open_encrypted(path: &Path, keys: &dyn KeySource) -> OpenFailure {
+    let encrypted = |failure: OpenFailure| failure.in_mode(VaultMode::Encrypted);
+    let mut file = match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => match File::open(path) {
+            Ok(file) => file,
+            Err(error) => return encrypted(OpenFailure::from_io(&error)),
+        },
+        Ok(_) => return encrypted(OpenFailure::new(VaultError::Invalid, OpenCause::NotAFile)),
+        Err(error) => return encrypted(OpenFailure::from_io(&error)),
+    };
+    // A SQLCipher file starts with its random salt; plain SQLite (or an empty file) contradicts
+    // the recorded mode. Never resolved by switching modes.
+    let mut head = [0u8; 16];
+    let mut read = 0;
+    while read < head.len() {
+        match io::Read::read(&mut file, &mut head[read..]) {
+            Ok(0) => break,
+            Ok(n) => read += n,
+            Err(error) => return encrypted(OpenFailure::from_io(&error)),
+        }
+    }
+    drop(file);
+    if read < head.len() || &head == SQLITE_MAGIC {
+        return encrypted(OpenFailure::new(
+            VaultError::ModeMismatch,
+            OpenCause::ModeMismatch,
+        ));
+    }
+    match keys.key_for(path) {
+        Err(error) => OpenFailure::key(error),
+        // Keyed opening (SQLCipher) arrives with Slice S2; until then a key changes nothing.
+        Ok(_key) => OpenFailure::key(KeyError::NotSupported),
+    }
+}
+
 /// `open_vault` plus a full structural check, for when the user picks a file to open.
 pub fn open_vault_checked(path: &Path) -> Result<Connection, VaultError> {
     let db = open_vault(path)?;
@@ -441,39 +733,329 @@ pub fn create_vault(path: &Path) -> Result<(), VaultError> {
 /// configuration unchanged; the caller may retry.
 pub fn switch_active(
     env: &Environment,
-    _lock: &ConfigLock,
+    lock: &ConfigLock,
     new_path: &Path,
     location_approved: bool,
 ) -> Result<(), VaultError> {
-    let fence = match resolve(env) {
+    switch_active_with(env, lock, new_path, location_approved, &NoKeys)
+}
+
+/// What keeps writers off the old vault while the config is replaced.
+enum Fence {
+    /// Nothing can be writing to the old vault.
+    None,
+    /// Its write lock (`BEGIN IMMEDIATE`): every writer is waited for and then blocked.
+    WriteLock(Connection),
+    /// An open handle without any sharing: it can only be taken while no process has the file
+    /// open, and while it is held nobody can open it. It needs no key (Slice A, PoC A-7.1).
+    Handle(#[allow(dead_code)] File),
+}
+
+/// Takes the exclusive handle. A file that vanished needs no fence (nothing recreates vaults).
+fn handle_fence(path: &Path) -> Result<Fence, VaultError> {
+    match open_unshared(path) {
+        Ok(file) => Ok(Fence::Handle(file)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Fence::None),
+        Err(error) if is_sharing_violation(&error) => Err(VaultError::Busy),
+        Err(_) => Err(VaultError::Io),
+    }
+}
+
+#[cfg(windows)]
+fn open_unshared(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    // Read access only, never created: the file is not changed in any way.
+    OpenOptions::new().read(true).share_mode(0).open(path)
+}
+
+/// Without Windows share modes there is no key-independent fence: refuse rather than switch
+/// unfenced (non-Windows is out of scope, residual risk R10).
+#[cfg(not(windows))]
+fn open_unshared(_: &Path) -> io::Result<File> {
+    Err(io::Error::from_raw_os_error(32))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests only: runs while the switch holds its fence, before the config is replaced.
+    pub(crate) static WHILE_FENCED: std::cell::RefCell<Option<Box<dyn FnMut()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// `switch_active` with the key source used to open an encrypted old vault.
+///
+/// The fence over the old vault (see `switch_active`) is chosen by what opening it shows:
+/// - opened: its write lock;
+/// - proven unwritable (absent, or a plain file that is no vault): none;
+/// - not openable by this process for a key or mode reason: the exclusive handle, which fails
+///   while any process (with or without the key) has the file open;
+/// - anything else (lock contention, I/O): the switch is refused, config unchanged.
+///
+/// The new config names `new_path` as a plain vault. Its publication is pending, unless the new
+/// vault is the very file (same identity) whose publication was already confirmed.
+pub fn switch_active_with(
+    env: &Environment,
+    _lock: &ConfigLock,
+    new_path: &Path,
+    location_approved: bool,
+    keys: &dyn KeySource,
+) -> Result<(), VaultError> {
+    let (fence, previous) = match resolve(env) {
         Ok(Active::Configured(config)) => {
-            match open_vault_detailed(Path::new(&config.active_vault)) {
-                Ok(db) => Some(db),
-                Err(failure) if failure.proves_unwritable() => None,
+            let path = PathBuf::from(&config.active_vault);
+            let fence = match open_vault_in(&path, config.mode, keys) {
+                Ok(db) => Fence::WriteLock(db),
+                Err(failure) if failure.proves_unwritable() => Fence::None,
+                Err(failure) if failure.needs_handle_fence() => handle_fence(&path)?,
                 Err(failure) => return Err(failure.kind),
-            }
+            };
+            (fence, Some(config))
         }
         // Nothing resolvable is active, so no writer can be using an old vault.
-        Ok(Active::NotConfigured) | Err(VaultError::ConfigInvalid) => None,
+        Ok(Active::NotConfigured) | Err(VaultError::ConfigInvalid) => (Fence::None, None),
         Ok(Active::Override(_)) => return Err(VaultError::ManagementDisabled),
         Err(error) => return Err(error),
     };
-    if let Some(db) = &fence {
+    if let Fence::WriteLock(db) = &fence {
         db.execute_batch("BEGIN IMMEDIATE")
             .map_err(|_| VaultError::Busy)?;
     }
-    let result = write_config(
-        env,
-        &Config {
-            version: CONFIG_VERSION,
-            active_vault: new_path.to_string_lossy().into_owned(),
-            location_approved,
+    #[cfg(test)]
+    WHILE_FENCED.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().as_mut() {
+            hook();
+        }
+    });
+    let token = active_vault::vault_token(new_path).ok();
+    let publication = token.map(
+        |token| match previous.and_then(|config| config.publication) {
+            Some(kept) if kept.vault_token == token => kept,
+            _ => Publication {
+                vault_token: token,
+                state: PublicationState::Pending,
+                policy_revision: None,
+            },
         },
     );
-    if let Some(db) = &fence {
+    let config = Config {
+        publication,
+        ..Config::new(
+            new_path.to_string_lossy().into_owned(),
+            location_approved,
+            VaultMode::Plain,
+        )
+    };
+    let result = write_config(env, &config);
+    if let Fence::WriteLock(db) = &fence {
         let _ = db.execute_batch("ROLLBACK");
     }
+    drop(fence);
     result
+}
+
+/// A publication decision by the user (`vault_publication_confirm` / `_revoke`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublicationChange {
+    /// Publish to MCP, recording the policy revision the user saw.
+    Confirm { policy_revision: u64 },
+    /// Back to pending: MCP reads nothing from it.
+    Revoke,
+}
+
+/// Records a publication decision for the active vault, which must be the vault the user saw
+/// (`expected_token`, from `vault_status`); otherwise `Switched` and nothing is written. Runs under
+/// the config lock, like every switch, so a decision can never land on another vault.
+///
+/// Confirming needs the vault to open (a plain vault passing every check) and takes its identity
+/// while it is open. Revoking only needs its identity: making a vault pending is always safe.
+pub fn set_publication(
+    env: &Environment,
+    _lock: &ConfigLock,
+    expected_token: &str,
+    change: PublicationChange,
+) -> Result<Config, VaultError> {
+    let config = match resolve(env)? {
+        Active::Configured(config) => config,
+        Active::NotConfigured => return Err(VaultError::NotConfigured),
+        Active::Override(_) => return Err(VaultError::ManagementDisabled),
+    };
+    let path = PathBuf::from(&config.active_vault);
+    let token = match change {
+        PublicationChange::Confirm { .. } => {
+            let db = open_vault_in(&path, config.mode, &NoKeys).map_err(VaultError::from)?;
+            let token = vault_token(&path)?;
+            drop(db);
+            token
+        }
+        PublicationChange::Revoke => vault_token(&path)?,
+    };
+    if token != expected_token {
+        return Err(VaultError::Switched);
+    }
+    let (state, policy_revision) = match change {
+        PublicationChange::Confirm { policy_revision } => {
+            (PublicationState::Confirmed, Some(policy_revision))
+        }
+        PublicationChange::Revoke => (PublicationState::Pending, None),
+    };
+    let updated = Config {
+        publication: Some(Publication {
+            vault_token: token,
+            state,
+            policy_revision,
+        }),
+        ..config
+    };
+    write_config(env, &updated)?;
+    Ok(updated)
+}
+
+/// What `withdraw_publication` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Withdrawal {
+    /// Nothing was published: no config, no decision, already pending, an invalid config (which
+    /// MCP refuses anyway) or vault management disabled.
+    NothingPublished,
+    /// A confirmed publication was set back to pending.
+    Withdrawn,
+    /// A version 1 config, which a later start would have migrated as confirmed, was rewritten as
+    /// version 2 with no publication decision.
+    LegacyClosed,
+}
+
+/// Sets the active vault's publication back to pending, whatever vault it is (Issue #51, F-02):
+/// run before a policy is (re)initialized, so an approval given under one policy never carries
+/// over to a new one. Only one publication is ever stored, and it is the active vault's, so no
+/// other vault's decision can be touched; its token is kept as recorded.
+///
+/// Takes the config lock (waiting as a switch does). Any failure to read or write the config is
+/// an error, and the caller must then not initialize.
+pub fn withdraw_publication(env: &Environment) -> Result<Withdrawal, VaultError> {
+    if !env.management_enabled() {
+        return Ok(Withdrawal::NothingPublished);
+    }
+    let _lock = ConfigLock::acquire(env)?;
+    let config = match resolve(env) {
+        Ok(Active::Configured(config)) => config,
+        Ok(_) | Err(VaultError::ConfigInvalid) => return Ok(Withdrawal::NothingPublished),
+        Err(error) => return Err(error),
+    };
+    let (updated, outcome) = if config.is_legacy() {
+        let updated = Config::new(
+            config.active_vault,
+            config.location_approved,
+            VaultMode::Plain,
+        );
+        (updated, Withdrawal::LegacyClosed)
+    } else {
+        match &config.publication {
+            Some(publication) if publication.state == PublicationState::Confirmed => {
+                let publication = Publication {
+                    vault_token: publication.vault_token.clone(),
+                    state: PublicationState::Pending,
+                    policy_revision: None,
+                };
+                let updated = Config {
+                    publication: Some(publication),
+                    ..config
+                };
+                (updated, Withdrawal::Withdrawn)
+            }
+            _ => return Ok(Withdrawal::NothingPublished),
+        }
+    };
+    write_config(env, &updated)?;
+    Ok(outcome)
+}
+
+/// The global policy as `migrate_legacy_config` needs to know it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyReadiness {
+    /// Initialized, valid and supported, at this revision.
+    Ready(u64),
+    /// Definitively not usable: never initialized, damaged or unsupported.
+    NotReady,
+    /// Cannot tell now (locked, I/O): decide later.
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Migration {
+    /// No version 1 config (or vault management is disabled).
+    NotNeeded,
+    /// Rewritten as version 2 with this publication.
+    Migrated(Option<Publication>),
+    /// Something could not be decided now; the version 1 config is kept and tried again later.
+    Deferred,
+}
+
+/// Upgrades a version 1 config to version 2 (Issue #51, PO decision P3). The active vault keeps
+/// its MCP access (`confirmed`) only if it opens as a valid vault **and** the global policy is
+/// ready; otherwise it is recorded as `pending`, which the user confirms in the side panel. A
+/// vault that cannot be checked now (busy, I/O) or a policy that cannot be read now defers the
+/// migration; nothing is decided from a transient failure. Never waits for the config lock and
+/// never changes a vault.
+pub fn migrate_legacy_config(
+    env: &Environment,
+    policy: impl FnOnce() -> PolicyReadiness,
+) -> Migration {
+    if !env.management_enabled() {
+        return Migration::NotNeeded;
+    }
+    match resolve(env) {
+        Ok(Active::Configured(config)) if config.is_legacy() => {}
+        _ => return Migration::NotNeeded,
+    }
+    let Ok(lock) = ConfigLock::acquire_within(env, Duration::ZERO) else {
+        return Migration::Deferred;
+    };
+    // Again under the lock: another process may have migrated or switched meanwhile.
+    let config = match resolve(env) {
+        Ok(Active::Configured(config)) if config.is_legacy() => config,
+        _ => return Migration::NotNeeded,
+    };
+    let path = PathBuf::from(&config.active_vault);
+    let token = match open_vault_detailed(&path) {
+        Ok(db) => {
+            let token = vault_token(&path).ok();
+            drop(db);
+            match token {
+                Some(token) => Some(token),
+                None => return Migration::Deferred,
+            }
+        }
+        Err(failure) if failure.proves_unwritable() => None,
+        Err(_) => return Migration::Deferred,
+    };
+    let state = match (token.is_some(), policy()) {
+        (_, PolicyReadiness::Unknown) => return Migration::Deferred,
+        (true, PolicyReadiness::Ready(revision)) => {
+            Some((PublicationState::Confirmed, Some(revision)))
+        }
+        (true, PolicyReadiness::NotReady) => Some((PublicationState::Pending, None)),
+        (false, _) => None,
+    };
+    let publication = token
+        .zip(state)
+        .map(|(vault_token, (state, policy_revision))| Publication {
+            vault_token,
+            state,
+            policy_revision,
+        });
+    let migrated = Config {
+        publication: publication.clone(),
+        ..Config::new(
+            config.active_vault,
+            config.location_approved,
+            VaultMode::Plain,
+        )
+    };
+    let result = write_config(env, &migrated);
+    drop(lock);
+    match result {
+        Ok(()) => Migration::Migrated(publication),
+        Err(_) => Migration::Deferred,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -513,49 +1095,11 @@ pub struct VaultTicket {
     pub token: String,
 }
 
-/// Identifies a vault file independently of how its path is spelled (case, `\\?\` prefix,
-/// junctions): SHA-256 over the volume serial number and file index on Windows. Only the hash
-/// leaves the host, never the path. Replacing the file (e.g. restoring a backup) yields a new token.
+/// Identifies a vault file independently of how its path is spelled (see
+/// `active_vault::vault_token`). Only the hash leaves the host, never the path. Replacing the file
+/// (e.g. restoring a backup) yields a new token.
 pub fn vault_token(path: &Path) -> Result<String, VaultError> {
-    use sha2::{Digest, Sha256};
-    let identity = file_identity(path)?;
-    Ok(Sha256::digest(identity)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
-}
-
-#[cfg(windows)]
-fn file_identity(path: &Path) -> Result<Vec<u8>, VaultError> {
-    use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::Storage::FileSystem::{
-        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
-    };
-    let file = File::open(path).map_err(|error| OpenFailure::from_io(&error).kind)?;
-    // SAFETY: the handle is valid while `file` lives and the struct is plain data.
-    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
-    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
-        return Err(VaultError::Io);
-    }
-    let mut identity = b"memocampus-vault-identity-v1\0".to_vec();
-    for part in [
-        info.dwVolumeSerialNumber,
-        info.nFileIndexHigh,
-        info.nFileIndexLow,
-    ] {
-        identity.extend_from_slice(&part.to_le_bytes());
-    }
-    Ok(identity)
-}
-
-#[cfg(not(windows))]
-fn file_identity(path: &Path) -> Result<Vec<u8>, VaultError> {
-    use std::os::unix::fs::MetadataExt;
-    let metadata = fs::metadata(path).map_err(|error| OpenFailure::from_io(&error).kind)?;
-    let mut identity = b"memocampus-vault-identity-v1\0".to_vec();
-    identity.extend_from_slice(&metadata.dev().to_le_bytes());
-    identity.extend_from_slice(&metadata.ino().to_le_bytes());
-    Ok(identity)
+    active_vault::vault_token(path).map_err(|error| OpenFailure::from_io(&error).kind)
 }
 
 /// Holds the connection to the active vault for one host process.
@@ -572,7 +1116,9 @@ fn file_identity(path: &Path) -> Result<Vec<u8>, VaultError> {
 ///   anyway; the revalidation matters for hosts that serve several requests.
 pub struct Session {
     pub env: Environment,
-    connection: Option<(String, Connection)>,
+    /// The open vault: its path and the mode it was opened in, as the config named them.
+    connection: Option<(String, VaultMode, Connection)>,
+    keys: Box<dyn KeySource>,
     /// Tests only: runs each time the active vault was resolved and opened (`open`), before its
     /// connection is used: the window in which another process may switch the active vault.
     #[cfg(test)]
@@ -584,8 +1130,18 @@ impl Session {
         Self {
             env,
             connection: None,
+            keys: Box::new(NoKeys),
             #[cfg(test)]
             after_open: None,
+        }
+    }
+
+    /// Tests only: a session whose encrypted vaults get their keys from `keys`.
+    #[cfg(test)]
+    pub(crate) fn with_keys(env: Environment, keys: Box<dyn KeySource>) -> Self {
+        Self {
+            keys,
+            ..Self::new(env)
         }
     }
 
@@ -593,11 +1149,11 @@ impl Session {
         self.connection = None;
     }
 
-    /// Path of the active vault as recorded in the config (or the override).
-    pub fn active_path(&self) -> Result<String, VaultError> {
+    /// Path and mode of the active vault. The override (`MEMOCAMPUS_DB`) is always plain.
+    pub fn active_target(&self) -> Result<(String, VaultMode), VaultError> {
         match resolve(&self.env)? {
-            Active::Override(path) => Ok(path.to_string_lossy().into_owned()),
-            Active::Configured(config) => Ok(config.active_vault),
+            Active::Override(path) => Ok((path.to_string_lossy().into_owned(), VaultMode::Plain)),
+            Active::Configured(config) => Ok((config.active_vault, config.mode)),
             Active::NotConfigured => Err(VaultError::NotConfigured),
         }
     }
@@ -605,8 +1161,11 @@ impl Session {
     /// Opens the configured vault, first dropping a cached connection that no longer matches
     /// the config (see the type-level notes for what this does and does not guarantee).
     fn open(&mut self) -> Result<(&str, &mut Connection), VaultError> {
-        if let Some((cached, _)) = &self.connection {
-            if self.active_path().ok().as_deref() != Some(cached.as_str()) {
+        if let Some((cached, mode, _)) = &self.connection {
+            let current = self.active_target().ok();
+            if current.as_ref().map(|(path, mode)| (path.as_str(), *mode))
+                != Some((cached.as_str(), *mode))
+            {
                 self.reset();
             }
         }
@@ -626,19 +1185,23 @@ impl Session {
 
     fn connect(&mut self) -> Result<(), VaultError> {
         if self.connection.is_none() {
-            let path = self.active_path()?;
-            let db = open_vault(Path::new(&path))?;
-            self.connection = Some((path, db));
+            let (path, mode) = self.active_target()?;
+            let db = open_vault_in(Path::new(&path), mode, self.keys.as_ref())?;
+            self.connection = Some((path, mode, db));
         }
         Ok(())
     }
 
     fn connected(&mut self) -> (&str, &mut Connection) {
-        let (path, db) = self
+        let (path, _, db) = self
             .connection
             .as_mut()
             .expect("connection was just opened");
         (path.as_str(), db)
+    }
+
+    fn connected_mode(&self) -> Option<VaultMode> {
+        self.connection.as_ref().map(|(_, mode, _)| *mode)
     }
 
     pub fn read<T>(&mut self, f: impl FnOnce(&Connection) -> T) -> Result<T, VaultError> {
@@ -735,7 +1298,7 @@ impl Session {
     ) -> Result<T, E> {
         let overridden = self.env.db_override.is_some();
         let env = self.env.clone();
-        let (path, db) = if revalidate {
+        let (path, _) = if revalidate {
             self.open()?
         } else {
             self.open_cached()?
@@ -745,12 +1308,15 @@ impl Session {
             self.reset();
             return Err(VaultError::Switched.into());
         }
+        let mode = self.connected_mode();
+        let (_, db) = self.connected();
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| VaultError::Busy)?;
         if !overridden {
             match resolve(&env)? {
-                Active::Configured(config) if config.active_vault == path => {}
+                Active::Configured(config)
+                    if config.active_vault == path && Some(config.mode) == mode => {}
                 _ => {
                     drop(tx);
                     self.reset();
@@ -1650,3 +2216,6 @@ pub mod tests {
         assert!(largest > 0, "backups ran while data was being written");
     }
 }
+
+#[cfg(test)]
+mod secure_vault_tests;

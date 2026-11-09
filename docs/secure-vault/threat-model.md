@@ -60,6 +60,7 @@
 | Encrypted vault misread as plain (HIGH-5) | mode from config; VisibleStore mode-aware | design |
 | Stale MCP keeps reading the old plain vault after conversion (HIGH-1) | follow-active resolution per call; fixed-path mode refused unless active | design |
 | Restored vault exposed to MCP under a different or empty policy (HIGH-3) | publication gate: `pending` until confirmed; never auto-overwrite global policy | design |
+| Approval given under one policy carried over to a policy initialized again after a loss (review F-02) | `policy_initialize`/`policy_start` withdraw the active vault's publication (`confirmed` → `pending`) under the policy lock before writing; a failed withdrawal writes no policy; a failed policy write leaves `pending`. Ordinary rule edits keep the approval; each read applies the current policy | [TEST] `slice-b0.md` §10; hand-made valid policy files are not detected |
 | Secrets leak through logs, IPC, MCP or errors | fixed error codes; key never formatted; canary tests | design |
 | Plaintext temp files during secure backup | raw ciphertext copy under SHARED; stream encryption for C; `temp_store = MEMORY` | [POC A-4.2] (plain); SQLCipher [DOC] |
 | Silent loss of capture during conversion | `vault_maintenance` is temporary, so events stay queued; watchdog cancels before overflow; policy evaluation unaffected | design (§8) |
@@ -96,6 +97,6 @@
 | R5 | DPAPI accepted 128/2,096 single-bit-modified blobs (same plaintext) | mitigated by kcv and vault-id entropy |
 | R6 | A crash during restore of C over A leaves a plaintext `.partial` | listed at the next start; deletion only with the user's consent |
 | R7 | SQLCipher, OpenSSL and the SQLite 3.45.3 downgrade: Rust suites pass on it [POC A-1.5]; Node/E2E and dogfood still open | Slice S0 gate |
-| R8 | The config rename is not write-through; after a power cut the previous config may reappear | design fix: `MOVEFILE_WRITE_THROUGH` (architecture §8.2) |
+| R8 | The config rename is not write-through; after a power cut the previous config may reappear | Slice B0: POSIX rename by handle + flush after the rename (`slice-b0.md`); crash points simulated, a real power cut NOT VERIFIED; a disk ignoring flushes stays a residual risk |
 | R9 | L3 (pre-enqueue policy check failure) silently skips a visit today | pre-existing; conversion must not trigger it. Fixing it in general is a separate issue. |
 | R10 | Non-Windows | design isolates DPAPI behind a key-protector interface; no non-Windows implementation is designed or verified |

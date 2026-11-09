@@ -59,6 +59,15 @@ fn visit(db: &Connection, id: &str, url: &str, title: &str, at: &str) {
     .unwrap();
 }
 
+/// A plain vault read directly, without the publication gate.
+fn plain(path: &Path) -> Target {
+    Target {
+        path: path.to_path_buf(),
+        mode: VaultMode::Plain,
+        token: None,
+    }
+}
+
 fn day(n: u32) -> String {
     format!("2026-10-{n:02}T00:00:00.000Z")
 }
@@ -70,7 +79,7 @@ impl Fixture {
         let vault = dir.join("v.sqlite3");
         let app = dir.join("app");
         create_vault(&vault, APP_ID, SUPPORTED_SCHEMA);
-        let store = VisibleStore::new(vault.clone(), app.clone()).unwrap();
+        let store = VisibleStore::ungated(vault.clone(), app.clone()).unwrap();
         let fixture = Self {
             dir,
             vault,
@@ -616,7 +625,7 @@ fn external_ids_are_opaque_stable_per_store_and_expose_no_internal_id() {
         .unwrap();
     assert_eq!(first[..8], ids(&f.store)[..]);
     // Another store (a restarted server) cannot correlate them.
-    let other = VisibleStore::new(f.vault.clone(), f.app.clone()).unwrap();
+    let other = VisibleStore::ungated(f.vault.clone(), f.app.clone()).unwrap();
     assert!(ids(&other).iter().all(|id| !first.contains(id)));
 }
 
@@ -629,10 +638,10 @@ fn a_missing_vault_is_an_error_and_nothing_is_created() {
     assert_failed(f.store.search_visits(&ALL), VisibleError::VaultUnavailable);
     assert!(!f.vault.exists());
     let nested = f.dir.join("no-such-dir").join("v.sqlite3");
-    let store = VisibleStore::new(nested.clone(), f.app.clone()).unwrap();
+    let store = VisibleStore::ungated(nested.clone(), f.app.clone()).unwrap();
     assert_failed(store.search_visits(&ALL), VisibleError::VaultUnavailable);
     assert!(!nested.parent().unwrap().exists());
-    let directory = VisibleStore::new(f.dir.clone(), f.app.clone()).unwrap();
+    let directory = VisibleStore::ungated(f.dir.clone(), f.app.clone()).unwrap();
     assert_failed(
         directory.search_visits(&ALL),
         VisibleError::VaultUnavailable,
@@ -700,7 +709,7 @@ fn every_other_schema_version_or_application_id_is_refused() {
             "CANARY maybe incognito",
             &day(1),
         );
-        let store = VisibleStore::new(path, f.app.clone()).unwrap();
+        let store = VisibleStore::ungated(path, f.app.clone()).unwrap();
         assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
     }
 }
@@ -733,7 +742,7 @@ fn another_schema_shape_is_refused_even_at_version_4() {
             .unwrap()
             .execute_batch(&sql.replace(from, to))
             .unwrap();
-        let store = VisibleStore::new(path, f.app.clone()).unwrap();
+        let store = VisibleStore::ungated(path, f.app.clone()).unwrap();
         assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
     }
 }
@@ -760,7 +769,7 @@ fn a_schema_3_vault_relabelled_as_4_is_refused_and_its_rows_stay_hidden() {
     );
     drop(db);
     let before = fs::read(&path).unwrap();
-    let store = VisibleStore::new(path.clone(), f.app.clone()).unwrap();
+    let store = VisibleStore::ungated(path.clone(), f.app.clone()).unwrap();
     assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
     assert_eq!(fs::read(&path).unwrap(), before);
 }
@@ -839,7 +848,7 @@ fn page_metadata_reaches_a_reader_only_with_a_public_visit_and_a_vault_without_i
         .unwrap()
         .execute_batch(&format!("{}{}", &sql[..start], &sql[end..]))
         .unwrap();
-    let store = VisibleStore::new(path, f.app.clone()).unwrap();
+    let store = VisibleStore::ungated(path, f.app.clone()).unwrap();
     assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
     assert_failed(store.check_vault(), VisibleError::VaultSchemaMismatch);
 }
@@ -861,7 +870,7 @@ fn a_vault_with_a_public_flag_set_still_answers_visits_only_from_the_visits_gate
 fn non_databases_and_damaged_files_fail_closed() {
     let f = Fixture::new();
     f.seed();
-    let store_for = |path: PathBuf| VisibleStore::new(path, f.app.clone()).unwrap();
+    let store_for = |path: PathBuf| VisibleStore::ungated(path, f.app.clone()).unwrap();
 
     let empty = f.dir.join("empty.sqlite3");
     fs::write(&empty, b"").unwrap();
@@ -871,11 +880,13 @@ fn non_databases_and_damaged_files_fail_closed() {
     );
     assert_eq!(fs::metadata(&empty).unwrap().len(), 0);
 
+    // No SQLite header in plain mode: a mode mismatch (perhaps an encrypted vault the config
+    // misdescribes), never taken for a schema or damage problem (Issue #51 B0-4).
     let text = f.dir.join("text.sqlite3");
     fs::write(&text, "not a database CANARY ".repeat(50)).unwrap();
     assert_failed(
         store_for(text).search_visits(&ALL),
-        VisibleError::VaultSchemaMismatch,
+        VisibleError::VaultModeMismatch,
     );
 
     // A file that claims to be SQLite in its header only.
@@ -966,7 +977,7 @@ fn the_wal_checks_hold_independently() {
     wal.push("-wal");
     fs::write(&wal, b"leftover").unwrap();
     assert_eq!(
-        snapshot::check_file(&other.vault),
+        snapshot::check_file(&other.vault, VaultMode::Plain),
         Err(VisibleError::VaultUnsupported)
     );
 }
@@ -1127,7 +1138,7 @@ fn a_hot_journal_is_an_error_and_the_vault_stays_untouched() {
     fs::copy(f.dir.join("source.sqlite3-journal"), &journal).unwrap();
     crashed.execute_batch("ROLLBACK").unwrap();
     let (vault_bytes, journal_bytes) = (fs::read(&hot).unwrap(), fs::read(&journal).unwrap());
-    let store = VisibleStore::new(hot.clone(), f.app.clone()).unwrap();
+    let store = VisibleStore::ungated(hot.clone(), f.app.clone()).unwrap();
     assert_failed(store.search_visits(&ALL), VisibleError::VaultUnavailable);
     assert_eq!(fs::read(&hot).unwrap(), vault_bytes);
     assert_eq!(fs::read(&journal).unwrap(), journal_bytes);
@@ -1152,10 +1163,7 @@ fn a_replaced_vault_is_read_fresh_and_old_data_never_survives() {
 
     // Replaced by something unusable: no fallback to what was just served.
     fs::write(&f.vault, "garbage ".repeat(100)).unwrap();
-    assert_failed(
-        f.store.search_visits(&ALL),
-        VisibleError::VaultSchemaMismatch,
-    );
+    assert_failed(f.store.search_visits(&ALL), VisibleError::VaultModeMismatch);
     fs::remove_file(&f.vault).unwrap();
     assert_failed(f.store.search_visits(&ALL), VisibleError::VaultUnavailable);
     assert!(!f.vault.exists());
@@ -1199,11 +1207,11 @@ fn an_uninitialized_policy_means_no_data_and_creates_nothing() {
     let f = Fixture::new();
     f.seed();
     let empty = f.dir.join("no-app");
-    let store = VisibleStore::new(f.vault.clone(), empty.clone()).unwrap();
+    let store = VisibleStore::ungated(f.vault.clone(), empty.clone()).unwrap();
     assert_failed(store.search_visits(&ALL), VisibleError::PolicyUnavailable);
     assert!(!empty.exists());
     assert_failed(
-        VisibleStore::new(f.vault.clone(), "relative".into()).map(|_| ()),
+        VisibleStore::ungated(f.vault.clone(), "relative".into()).map(|_| ()),
         VisibleError::PolicyUnavailable,
     );
 }
@@ -2311,7 +2319,7 @@ fn image_and_source_ids_are_opaque_of_two_kinds_and_stable_per_store() {
     assert_eq!(sources_of(&f, &image.id).unwrap().items[0].id, source.id);
     // A source ID is no image ID, and another store's IDs mean nothing here.
     assert_failed(sources_of(&f, &source.id), VisibleError::NotFound);
-    let other = VisibleStore::new(f.vault.clone(), f.app.clone()).unwrap();
+    let other = VisibleStore::ungated(f.vault.clone(), f.app.clone()).unwrap();
     assert_ne!(
         other.search_images(&ALL_IMAGES).unwrap().items[0].id,
         image.id
@@ -2459,7 +2467,7 @@ fn image_reads_fail_closed_and_no_earlier_answer_is_reused() {
     fs::write(&policy, &good).unwrap();
     assert_eq!(image_page(&f).total, 1);
 
-    let uninitialized = VisibleStore::new(f.vault.clone(), f.dir.join("empty-app")).unwrap();
+    let uninitialized = VisibleStore::ungated(f.vault.clone(), f.dir.join("empty-app")).unwrap();
     assert_failed(
         uninitialized.search_images(&ALL_IMAGES),
         VisibleError::PolicyUnavailable,
@@ -2472,7 +2480,7 @@ fn image_reads_fail_closed_and_no_earlier_answer_is_reused() {
     assert!(!f.vault.exists(), "nothing was created");
 
     fs::write(&f.vault, vec![b'x'; 4096]).unwrap();
-    assert_both(VisibleError::VaultSchemaMismatch);
+    assert_both(VisibleError::VaultModeMismatch);
 
     fs::remove_file(&f.vault).unwrap();
     create_vault(&f.vault, APP_ID, 3);
@@ -2837,7 +2845,7 @@ fn perf_report() {
     stop.store(true, Ordering::Relaxed);
     let (worst, commits, failures) = worker.join().unwrap();
 
-    let raw = snapshot::read_visits(&f.vault, &mut |_| {}).unwrap();
+    let raw = snapshot::read_visits(&plain(&f.vault), &mut |_| {}).unwrap();
     let raw_bytes: usize = raw
         .iter()
         .map(|r| r.event_id.len() + r.url.len() + r.title.len() + r.visited_at.len())
@@ -2977,7 +2985,7 @@ fn perf_images() {
     stop.store(true, Ordering::Relaxed);
     let (worst, commits, failures) = worker.join().unwrap();
 
-    let raw = snapshot::read_image_saves(&f.vault, &mut |_| {}).unwrap();
+    let raw = snapshot::read_image_saves(&plain(&f.vault), &mut |_| {}).unwrap();
     let start = Instant::now();
     let policy = compiled(&policy);
     let compile = start.elapsed();
@@ -3705,7 +3713,7 @@ fn cursors_are_checked_before_any_read_and_belong_to_one_store() {
     f.seed();
     let page = f.store.search_visits(&ALL).unwrap();
     let cursor = f.store.cursor_after(&page.items[0]).unwrap();
-    let other = VisibleStore::new(f.vault.clone(), f.app.clone()).unwrap();
+    let other = VisibleStore::ungated(f.vault.clone(), f.app.clone()).unwrap();
     let (ms, rest) = cursor.split_once('.').unwrap();
     let (id, mac) = rest.split_once('.').unwrap();
     let mut flipped = mac.to_owned();
@@ -3891,12 +3899,12 @@ fn checking_the_vault_reads_nothing_and_reports_what_a_read_would() {
     // The policy is not needed to check the vault.
     fs::remove_file(f.app.join("policy.json")).unwrap();
     f.store.check_vault().unwrap();
-    let missing = VisibleStore::new(f.dir.join("missing.sqlite3"), f.app.clone()).unwrap();
+    let missing = VisibleStore::ungated(f.dir.join("missing.sqlite3"), f.app.clone()).unwrap();
     assert_failed(missing.check_vault(), VisibleError::VaultUnavailable);
     assert!(!f.dir.join("missing.sqlite3").exists());
     let junk = f.dir.join("junk.sqlite3");
     fs::write(&junk, b"not a database at all, padded beyond one hundred bytes of header so that the read is complete .....").unwrap();
-    let junk = VisibleStore::new(junk, f.app.clone()).unwrap();
+    let junk = VisibleStore::ungated(junk, f.app.clone()).unwrap();
     assert_failed(junk.check_vault(), VisibleError::VaultSchemaMismatch);
 }
 
@@ -4009,7 +4017,7 @@ fn navigation_events_never_reach_a_reader_and_a_vault_without_them_is_refused() 
         .unwrap()
         .execute_batch(&sql.replace("PRAGMA user_version = 7;", "PRAGMA user_version = 5;"))
         .unwrap();
-    let store = VisibleStore::new(path, f.app.clone()).unwrap();
+    let store = VisibleStore::ungated(path, f.app.clone()).unwrap();
     assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
     assert_failed(store.check_vault(), VisibleError::VaultSchemaMismatch);
 
@@ -4023,7 +4031,7 @@ fn navigation_events_never_reach_a_reader_and_a_vault_without_them_is_refused() 
         .unwrap()
         .execute_batch(&schema_6)
         .unwrap();
-    let store = VisibleStore::new(path, f.app.clone()).unwrap();
+    let store = VisibleStore::ungated(path, f.app.clone()).unwrap();
     assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
     assert_failed(store.check_vault(), VisibleError::VaultSchemaMismatch);
 }
@@ -4072,4 +4080,352 @@ fn image_tags_never_reach_a_reader() {
     let text = format!("{after:?}{sources_before:?}");
     assert!(!text.contains("-tag"), "{text}");
     assert_eq!(f.store.check_vault(), Ok(()));
+}
+
+// --- Issue #51, Slice B0: publication gate (B0-1, B0-2) and vault mode (B0-4) ------------------
+
+/// Names `vault` as the active vault of `app` in `mode`, with a publication `state` for its file.
+fn activate(app: &Path, vault: &Path, mode: &str, state: Option<&str>) {
+    let mut config = serde_json::json!({"version": 2, "activeVault": vault, "mode": mode});
+    if let Some(state) = state {
+        config["publication"] = serde_json::json!({
+            "vaultToken": active_vault::vault_token(vault).unwrap(),
+            "state": state,
+        });
+    }
+    fs::create_dir_all(app).unwrap();
+    fs::write(app.join("config.json"), config.to_string()).unwrap();
+}
+
+/// The fixture's vault (public rows 1 and 2, private canaries) and a second vault `b` with one
+/// public row of its own.
+fn two_vaults(f: &Fixture) -> PathBuf {
+    f.seed();
+    let b = f.dir.join("b.sqlite3");
+    create_vault(&b, APP_ID, SUPPORTED_SCHEMA);
+    visit(&writer(&b), "b-1", "https://b.public.test/", "B", &day(3));
+    b
+}
+
+#[test]
+fn a_following_store_reads_whichever_vault_is_active_and_published_now() {
+    let f = Fixture::new();
+    let b = two_vaults(&f);
+    let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+    let urls = |store: &VisibleStore| -> Result<Vec<String>, VisibleError> {
+        let page = store.search_visits(&ALL)?;
+        assert_clean(&page);
+        Ok(page.items.into_iter().map(|item| item.url).collect())
+    };
+    assert_eq!(urls(&store), Err(VisibleError::VaultNotConfigured));
+    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+    assert_eq!(urls(&store).unwrap().len(), 2);
+    activate(&f.app, &b, "plain", Some("confirmed"));
+    assert_eq!(
+        urls(&store).unwrap(),
+        ["https://b.public.test/"],
+        "the old vault still exists and is never read"
+    );
+    assert!(f.vault.exists());
+    // Back to A, but A is not confirmed in this config: nothing.
+    activate(&f.app, &f.vault, "plain", Some("pending"));
+    assert_eq!(urls(&store), Err(VisibleError::VaultPublicationPending));
+    activate(&f.app, &f.vault, "plain", None);
+    assert_eq!(urls(&store), Err(VisibleError::VaultPublicationPending));
+    let day_request = VisitsByDay {
+        date: "2026-10-01",
+        utc_offset: "+00:00",
+        ..VisitsByDay::default()
+    };
+    for (name, read) in [
+        (
+            "domains",
+            store.domain_stats(&DomainStats::default()).map(|_| ()),
+        ),
+        ("images", store.search_images(&ALL_IMAGES).map(|_| ())),
+        ("day", store.get_visits_by_day(&day_request).map(|_| ())),
+        ("check", store.check_vault()),
+    ] {
+        assert_eq!(read, Err(VisibleError::VaultPublicationPending), "{name}");
+    }
+}
+
+#[test]
+fn a_pinned_store_reads_only_while_its_file_is_the_published_active_vault() {
+    let f = Fixture::new();
+    let b = two_vaults(&f);
+    let pinned = VisibleStore::pinned(f.vault.clone(), f.app.clone()).unwrap();
+    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+    assert_eq!(pinned.search_visits(&ALL).unwrap().total, 2);
+    pinned.check_vault().unwrap();
+    activate(&f.app, &b, "plain", Some("confirmed"));
+    assert_failed(pinned.search_visits(&ALL), VisibleError::VaultNotActive);
+    assert_failed(pinned.check_vault(), VisibleError::VaultNotActive);
+    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+    if cfg!(windows) {
+        // The pinned path need not be spelled like the config's.
+        let spelled = PathBuf::from(f.vault.to_string_lossy().to_uppercase());
+        let other_spelling = VisibleStore::pinned(spelled, f.app.clone()).unwrap();
+        assert_eq!(other_spelling.search_visits(&ALL).unwrap().total, 2);
+    }
+    let missing = VisibleStore::pinned(f.dir.join("none.sqlite3"), f.app.clone()).unwrap();
+    assert_failed(missing.search_visits(&ALL), VisibleError::VaultNotActive);
+    assert!(!f.dir.join("none.sqlite3").exists());
+}
+
+#[test]
+fn the_gate_refuses_before_the_policy_and_fails_closed_on_every_problem() {
+    let f = Fixture::new();
+    f.seed();
+    let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+    let vault_before = fs::read(&f.vault).unwrap();
+    // Gate first: a pending vault is refused as pending even without a policy.
+    activate(&f.app, &f.vault, "plain", Some("pending"));
+    let away = f.dir.join("policy.json.away");
+    fs::rename(f.app.join("policy.json"), &away).unwrap();
+    assert_failed(
+        store.search_visits(&ALL),
+        VisibleError::VaultPublicationPending,
+    );
+    // Confirmed, but no policy: still nothing.
+    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+    assert_failed(store.search_visits(&ALL), VisibleError::PolicyUnavailable);
+    fs::rename(&away, f.app.join("policy.json")).unwrap();
+    assert_eq!(store.search_visits(&ALL).unwrap().total, 2);
+    // A version 1 config is never published, whatever it names.
+    let legacy = serde_json::json!({"version": 1, "activeVault": f.vault}).to_string();
+    fs::write(f.app.join("config.json"), legacy).unwrap();
+    assert_failed(
+        store.search_visits(&ALL),
+        VisibleError::VaultPublicationPending,
+    );
+    let relative = r#"{"version":2,"activeVault":"relative","mode":"plain"}"#;
+    for text in ["{\"version\":2,", "", relative] {
+        fs::write(f.app.join("config.json"), text).unwrap();
+        assert_failed(store.search_visits(&ALL), VisibleError::ConfigInvalid);
+    }
+    fs::remove_file(f.app.join("config.json")).unwrap();
+    assert_failed(store.search_visits(&ALL), VisibleError::VaultNotConfigured);
+    // The published vault disappears: unavailable, and nothing is created in its place.
+    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+    let moved = f.dir.join("moved.sqlite3");
+    fs::rename(&f.vault, &moved).unwrap();
+    assert_failed(store.search_visits(&ALL), VisibleError::VaultUnavailable);
+    assert!(!f.vault.exists());
+    // A different file at the same path is another vault: its approval is not inherited.
+    fs::copy(&moved, &f.vault).unwrap();
+    assert_failed(
+        store.search_visits(&ALL),
+        VisibleError::VaultPublicationPending,
+    );
+    fs::remove_file(&f.vault).unwrap();
+    fs::rename(&moved, &f.vault).unwrap();
+    assert_eq!(store.search_visits(&ALL).unwrap().total, 2);
+    assert_eq!(
+        fs::read(&f.vault).unwrap(),
+        vault_before,
+        "the gate never writes the vault"
+    );
+}
+
+#[test]
+fn a_switch_or_revocation_during_a_read_discards_the_read() {
+    for at in [
+        Stage::Admitted,
+        Stage::PolicyLoaded,
+        Stage::SchemaChecked,
+        Stage::VaultClosed,
+    ] {
+        for revoke in [false, true] {
+            let f = Fixture::new();
+            let b = two_vaults(&f);
+            activate(&f.app, &f.vault, "plain", Some("confirmed"));
+            let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+            let mut done = false;
+            let result = store.search_visits_staged(&ALL, &mut |stage| {
+                if stage == at && !done {
+                    done = true;
+                    if revoke {
+                        activate(&f.app, &f.vault, "plain", Some("pending"));
+                    } else {
+                        activate(&f.app, &b, "plain", Some("confirmed"));
+                    }
+                }
+            });
+            assert!(done);
+            assert_eq!(
+                result.err(),
+                Some(VisibleError::VaultSwitched),
+                "{at:?} revoke={revoke}"
+            );
+            // The next read follows the new state.
+            let next = store.search_visits(&ALL);
+            if revoke {
+                assert_failed(next, VisibleError::VaultPublicationPending);
+            } else {
+                assert_eq!(next.unwrap().items[0].url, "https://b.public.test/");
+            }
+        }
+    }
+}
+
+/// Issue #51, F-02. The host re-initializes a lost policy in this order: the publication is set
+/// back to pending, then the new (default, more permissive) policy is written. A reader sees
+/// nothing at every point of it, including a read that passed the gate before the withdrawal.
+#[test]
+fn a_policy_reinitialized_after_a_loss_is_never_read_under_the_old_approval() {
+    let lose_policy = |app: &Path| {
+        for name in ["policy.json", "policy.initialized"] {
+            fs::remove_file(app.join(name)).unwrap();
+        }
+    };
+    let f = Fixture::new();
+    f.seed();
+    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+    let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+    assert_eq!(store.search_visits(&ALL).unwrap().total, 2);
+
+    // Lost policy: nothing, whatever the publication says.
+    lose_policy(&f.app);
+    assert_failed(store.search_visits(&ALL), VisibleError::PolicyUnavailable);
+    // Withdrawn, not yet initialized.
+    activate(&f.app, &f.vault, "plain", Some("pending"));
+    assert_failed(
+        store.search_visits(&ALL),
+        VisibleError::VaultPublicationPending,
+    );
+    // Initialized: still pending until the user confirms again.
+    f.policy_store().initialize().unwrap();
+    assert_failed(
+        store.search_visits(&ALL),
+        VisibleError::VaultPublicationPending,
+    );
+
+    // A read admitted under the old approval (with no policy) while both steps happen: the new
+    // policy loads, but the gate checked again after the read sees the withdrawal.
+    lose_policy(&f.app);
+    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+    let mut done = false;
+    let result = store.search_visits_staged(&ALL, &mut |stage| {
+        if stage == Stage::Admitted && !done {
+            done = true;
+            activate(&f.app, &f.vault, "plain", Some("pending"));
+            f.policy_store().initialize().unwrap();
+        }
+    });
+    assert!(done);
+    assert_eq!(result.err(), Some(VisibleError::VaultSwitched));
+
+    // What the withdrawal prevents: the same new policy under the old approval publishes a row
+    // that only the lost policy hid (layer B).
+    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+    let exposed = store.search_visits(&ALL).unwrap();
+    assert!(exposed
+        .items
+        .iter()
+        .any(|item| item.url.starts_with("https://b-layer.test/")));
+}
+
+#[test]
+fn a_switch_away_and_back_during_a_read_still_reads_the_one_published_vault() {
+    let f = Fixture::new();
+    let b = two_vaults(&f);
+    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+    let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+    let page = store
+        .search_visits_staged(&ALL, &mut |stage| {
+            if stage == Stage::SchemaChecked {
+                activate(&f.app, &b, "plain", Some("confirmed"));
+                activate(&f.app, &f.vault, "plain", Some("confirmed"));
+            }
+        })
+        .unwrap();
+    assert_clean(&page);
+    assert_eq!(page.total, 2);
+}
+
+#[test]
+fn a_file_replaced_between_the_gate_and_the_open_is_never_read() {
+    let f = Fixture::new();
+    let b = two_vaults(&f);
+    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+    let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+    let aside = f.dir.join("aside.sqlite3");
+    let result = store.search_visits_staged(&ALL, &mut |stage| {
+        if stage == Stage::Admitted {
+            // Same path, another file (B's content) after the gate took A's identity.
+            fs::rename(&f.vault, &aside).unwrap();
+            fs::copy(&b, &f.vault).unwrap();
+        }
+    });
+    assert_eq!(result.err(), Some(VisibleError::VaultSwitched));
+}
+
+#[test]
+fn the_mode_comes_from_the_config_and_a_contradicting_file_is_never_misread() {
+    let f = Fixture::new();
+    f.seed();
+    let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+    let encrypted = f.dir.join("encrypted.sqlite3");
+    let salt_first: Vec<u8> = (0..8192u32).map(|i| (i * 31 + 7) as u8).collect();
+    fs::write(&encrypted, &salt_first).unwrap();
+
+    activate(&f.app, &encrypted, "encrypted", Some("confirmed"));
+    assert_failed(
+        store.search_visits(&ALL),
+        VisibleError::VaultEncryptionUnsupported,
+    );
+    assert_failed(
+        store.check_vault(),
+        VisibleError::VaultEncryptionUnsupported,
+    );
+    // A plain SQLite file recorded as encrypted, and a salt-first file recorded as plain.
+    activate(&f.app, &f.vault, "encrypted", Some("confirmed"));
+    assert_failed(store.search_visits(&ALL), VisibleError::VaultModeMismatch);
+    activate(&f.app, &encrypted, "plain", Some("confirmed"));
+    assert_failed(store.search_visits(&ALL), VisibleError::VaultModeMismatch);
+    // Unknown modes are not configs.
+    for mode in ["sqlcipher", "Plain", "", "auto"] {
+        activate(&f.app, &f.vault, mode, Some("confirmed"));
+        assert_failed(store.search_visits(&ALL), VisibleError::ConfigInvalid);
+    }
+    // An empty file cannot be an encrypted vault either.
+    let empty = f.dir.join("empty.sqlite3");
+    fs::write(&empty, b"").unwrap();
+    let ungated =
+        VisibleStore::ungated_in(empty.clone(), f.app.clone(), VaultMode::Encrypted).unwrap();
+    assert_failed(ungated.search_visits(&ALL), VisibleError::VaultModeMismatch);
+    // Plain mode keeps every existing behaviour.
+    activate(&f.app, &f.vault, "plain", Some("confirmed"));
+    assert_eq!(store.search_visits(&ALL).unwrap().total, 2);
+    assert_eq!(
+        fs::read(&encrypted).unwrap(),
+        salt_first,
+        "never opened by SQLite"
+    );
+    assert_eq!(fs::metadata(&empty).unwrap().len(), 0);
+    for suffix in ["-journal", "-wal", "-shm"] {
+        let mut name = encrypted.as_os_str().to_owned();
+        name.push(suffix);
+        assert!(!Path::new(&name).exists());
+    }
+}
+
+#[test]
+fn no_reader_can_write_the_config_or_a_publication_decision() {
+    // Issue #51: publication decisions are made only by the Native Host for the side panel. The
+    // read path for MCP reads `config.json` through `active_vault` and has no way to write it.
+    for (name, source) in source_files() {
+        for banned in [
+            "to_bytes",
+            "fs::write",
+            "OpenOptions",
+            "File::create",
+            "fs::rename",
+            "remove_file",
+            "CONFIG_FILE",
+        ] {
+            assert!(!source.contains(banned), "{name}: {banned}");
+        }
+    }
 }

@@ -543,6 +543,12 @@ button.secondary { font-size: 12px; white-space: nowrap; }
 .vault-location[data-verdict="needs_approval"], .vault-approval { border-color: #b06000; }
 .vault-location[data-verdict="rejected"] { color: var(--error-fg); background: var(--error-bg); border-color: transparent; }
 .vault-location ul, .vault-approval ul { margin: 2px 0; padding-left: 18px; }
+.vault-publication { display: grid; gap: 6px; margin: 6px 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+.vault-publication[data-state="pending"] { border-color: #b06000; }
+.vault-publication-state { font-weight: 600; }
+.vault-publication button { text-align: left; padding: 5px 10px; }
+.vault-publication .vault-approval { display: grid; gap: 6px; padding: 6px 8px; border: 1px solid #b06000; border-radius: 6px; }
+.vault-publication .vault-approval[hidden] { display: none; }
 .vault-actions { display: grid; gap: 6px; margin: 8px 0; }
 .vault-actions button, .vault-manual-actions button { text-align: left; padding: 5px 10px; }
 .vault-manual { margin: 6px 0; }

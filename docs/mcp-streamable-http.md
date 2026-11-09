@@ -46,9 +46,12 @@ Notifications are answered 202 with no body [verified].
 ## 3. Starting it
 
 ```powershell
-memocampus-mcp.exe --vault "C:\Users\<you>\AppData\Local\Memocampus\memocampus.sqlite3" `
-  --transport streamable-http --listen 127.0.0.1:8765
+memocampus-mcp.exe --transport streamable-http --listen 127.0.0.1:8765
 ```
+
+- Which vault (Issue #51, Slice B0): without `--vault` the server follows the active vault of the side panel, for every
+  request, and only while it is approved for MCP there. `--vault "<path>"` is optional and accepted only while that file is
+  the approved active vault (`vault_not_active` otherwise). HTTP and stdio apply the same gate ([secure-vault/slice-b0.md](secure-vault/slice-b0.md)).
 
 - Without `--transport`, or with `--transport stdio`, the server is the stdio server exactly as before [verified: the stdio
   suite is unchanged and passes].
@@ -88,7 +91,7 @@ memocampus-mcp.exe --vault "C:\Users\<you>\AppData\Local\Memocampus\memocampus.s
   only when given explicitly, as one exact name and port per option (repeatable for different values, at most 8, HTTP only):
 
   ```powershell
-  memocampus-mcp.exe --vault "<vault>" --transport streamable-http --listen 127.0.0.1:8765 `
+  memocampus-mcp.exe --transport streamable-http --listen 127.0.0.1:8765 `
     --allow-host i137.taild78809.ts.net:8443
   ```
 

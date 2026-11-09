@@ -396,6 +396,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // The vault is resolved from config.json and opened lazily; nothing is created implicitly.
     let mut session = vault::Session::new(vault::Environment::from_process());
+    // A config from before Issue #51 becomes version 2 once (PO decision P3). It never waits for a
+    // lock and never touches a vault's contents; whatever it cannot decide now is retried later.
+    let _ = vault::migrate_legacy_config(&session.env, || manage::policy_readiness(&session.env));
     // Upload state lives only as long as this process, i.e. one connectNative port: when Chrome
     // closes the port, the process exits and any unconfirmed image bytes are gone with it.
     let mut uploads = image_protocol::Uploads::default();
@@ -436,7 +439,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &value,
                 ))?;
             }
-            Some("vault_status" | "vault_create" | "vault_open" | "vault_backup") => {
+            Some(
+                "vault_status"
+                | "vault_create"
+                | "vault_open"
+                | "vault_backup"
+                | "vault_publication_confirm"
+                | "vault_publication_revoke",
+            ) => {
                 write_message(&manage::handle(
                     &mut session,
                     &dialog::NativeDialogs,

@@ -16,6 +16,19 @@ use std::time::{Duration, Instant};
 const EXE: &str = env!("CARGO_BIN_EXE_memocampus-mcp");
 const WAIT: Duration = Duration::from_secs(20);
 
+/// Names `vault` as the active vault in `app/config.json`, as the Native Host writes it, with a
+/// publication `state` ("confirmed" / "pending") for its file, or none (Issue #51).
+fn publish(app: &Path, vault: &Path, state: Option<&str>) {
+    let mut config = json!({"version": 2, "activeVault": vault, "mode": "plain"});
+    if let Some(state) = state {
+        config["publication"] = json!({
+            "vaultToken": memocampus_native_host::active_vault::vault_token(vault).unwrap(),
+            "state": state,
+        });
+    }
+    fs::write(app.join("config.json"), config.to_string()).unwrap();
+}
+
 struct Env {
     dir: PathBuf,
     vault: PathBuf,
@@ -38,6 +51,7 @@ impl Env {
             .unwrap()
             .execute_batch(&schema::create_sql())
             .unwrap();
+        publish(&app, &vault, Some("confirmed"));
         let env = Self { dir, vault, app };
         env.policy().initialize().unwrap();
         env.rule(true, "never.test");
@@ -86,6 +100,34 @@ impl Env {
 
     fn start(&self) -> Client {
         Client::start(self.command(&self.vault), "2025-06-18")
+    }
+
+    /// The server without `--vault`: it follows the active vault (Issue #51).
+    fn following(&self) -> Command {
+        let mut command = Command::new(EXE);
+        command
+            .env("MEMOCAMPUS_APP_DIR", &self.app)
+            .env("LOCALAPPDATA", self.dir.join("localappdata"))
+            .env_remove("MEMOCAMPUS_DB")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command
+    }
+
+    /// A second vault with one public visit of its own.
+    fn second_vault(&self) -> PathBuf {
+        let b = self.dir.join("b.sqlite3");
+        let db = Connection::open(&b).unwrap();
+        db.execute_batch(&schema::create_sql()).unwrap();
+        visit(
+            &db,
+            "b1",
+            "https://b.public.test/",
+            "B",
+            "2026-11-05T00:00:00.000Z",
+        );
+        b
     }
 }
 
@@ -521,7 +563,17 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
             String::from_utf8(output.stderr).unwrap(),
         )
     };
+    // Each file is made the active, confirmed vault first, so that what is refused is the file
+    // itself (Issue #51: anything else is refused by the publication gate before it is opened).
     let missing = env.dir.join("missing.sqlite3");
+    let published = memocampus_native_host::active_vault::vault_token(&env.vault).unwrap();
+    fs::write(
+        env.app.join("config.json"),
+        json!({"version": 2, "activeVault": missing, "mode": "plain",
+               "publication": {"vaultToken": published, "state": "confirmed"}})
+        .to_string(),
+    )
+    .unwrap();
     let (code, stdout, stderr) = run(&["--vault".as_ref(), missing.as_os_str()]);
     assert_eq!((code, stdout.as_str()), (Some(2), ""));
     assert_eq!(
@@ -544,6 +596,7 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
         ))
         .unwrap();
     let before = fs::read(&old).unwrap();
+    publish(&env.app, &old, Some("confirmed"));
     let (code, stdout, stderr) = run(&["--vault".as_ref(), old.as_os_str()]);
     assert_eq!(
         (code, stdout.as_str(), stderr.trim()),
@@ -571,6 +624,7 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
         .execute_batch(&schema_5)
         .unwrap();
     let before = fs::read(&old).unwrap();
+    publish(&env.app, &old, Some("confirmed"));
     let (code, stdout, stderr) = run(&["--vault".as_ref(), old.as_os_str()]);
     assert_eq!(
         (code, stdout.as_str(), stderr.trim()),
@@ -592,6 +646,7 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
         .execute_batch(&schema_6)
         .unwrap();
     let before = fs::read(&old).unwrap();
+    publish(&env.app, &old, Some("confirmed"));
     let (code, stdout, stderr) = run(&["--vault".as_ref(), old.as_os_str()]);
     assert_eq!(
         (code, stdout.as_str(), stderr.trim()),
@@ -610,6 +665,7 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
         .unwrap()
         .query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))
         .unwrap();
+    publish(&env.app, &wal, Some("confirmed"));
     let (code, _, stderr) = run(&["--vault".as_ref(), wal.as_os_str()]);
     assert_eq!(
         (code, stderr.trim()),
@@ -618,18 +674,55 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
 
     let junk = env.dir.join("junk.sqlite3");
     fs::write(&junk, vec![b'x'; 4096]).unwrap();
+    publish(&env.app, &junk, Some("confirmed"));
     let (code, _, stderr) = run(&["--vault".as_ref(), junk.as_os_str()]);
+    // No SQLite header in plain mode: a mode mismatch, never taken for damage (Issue #51 B0-4).
     assert_eq!(
         (code, stderr.trim()),
         (
             Some(2),
-            "memocampus-mcp: vault refused: vault_schema_mismatch"
+            "memocampus-mcp: vault refused: vault_mode_mismatch"
         )
     );
 
+    // The publication gate, with and without a path (Issue #51): a usable vault is still refused
+    // unless it is the active one and confirmed for MCP.
+    let refused = |args: &[&std::ffi::OsStr], code: &str| {
+        let (exit, stdout, stderr) = run(args);
+        assert_eq!(
+            (exit, stdout.as_str(), stderr.trim()),
+            (
+                Some(2),
+                "",
+                format!("memocampus-mcp: vault refused: {code}").as_str()
+            ),
+            "{args:?}"
+        );
+    };
+    publish(&env.app, &env.vault, Some("pending"));
+    refused(
+        &["--vault".as_ref(), env.vault.as_os_str()],
+        "vault_publication_pending",
+    );
+    refused(&[], "vault_publication_pending");
+    publish(&env.app, &env.vault, None);
+    refused(&[], "vault_publication_pending");
+    publish(&env.app, &junk, Some("confirmed"));
+    refused(
+        &["--vault".as_ref(), env.vault.as_os_str()],
+        "vault_not_active",
+    );
+    fs::write(env.app.join("config.json"), b"{\"version\":2,").unwrap();
+    refused(&[], "config_invalid");
+    fs::remove_file(env.app.join("config.json")).unwrap();
+    refused(&[], "vault_not_configured");
+    refused(
+        &["--vault".as_ref(), env.vault.as_os_str()],
+        "vault_not_configured",
+    );
+
     for args in [
-        &[][..],
-        &["--vault".as_ref()],
+        &["--vault".as_ref()][..],
         &["--vault".as_ref(), "vault.sqlite3".as_ref()],
         &["vault.sqlite3".as_ref()],
     ] {
@@ -1455,10 +1548,11 @@ fn a_vault_that_disappears_or_is_replaced_is_reported_and_never_served_from_memo
         );
     }
     assert!(!env.vault.exists(), "nothing is created in its place");
+    // Another file at that path is another vault, which nobody approved for MCP (Issue #51).
     fs::write(&env.vault, vec![0u8; 4096]).unwrap();
     assert_eq!(
         client.error("memocampus_search_visits", json!({"query": ""})),
-        json!({"error": "vault_schema_mismatch"})
+        json!({"error": "vault_publication_pending"})
     );
     fs::remove_file(&env.vault).unwrap();
     fs::rename(&moved, &env.vault).unwrap();
@@ -1793,7 +1887,7 @@ fn a_refused_start_is_logged_with_its_stage_and_os_error_but_not_the_path() {
         (
             &json!(false),
             &json!("vault_check"),
-            &json!("vault_unavailable")
+            &json!("vault_not_active")
         )
     );
     assert_eq!(failure["vault_file"]["exists"], false);
@@ -1847,4 +1941,114 @@ fn a_log_that_cannot_be_written_changes_nothing_for_the_client() {
         "no policy without the app dir"
     );
     assert!(output.stdout.is_empty());
+}
+
+// --- Issue #51, Slice B0: the active vault and its publication ---------------------------------
+
+fn urls_of(client: &mut Client) -> Vec<String> {
+    urls(&client.ok("memocampus_search_visits", json!({"query": ""})))
+}
+
+#[test]
+fn a_running_server_follows_the_active_vault_and_never_reads_the_one_switched_away_from() {
+    let env = Env::new();
+    visit(
+        &env.writer(),
+        "a1",
+        "https://a.public.test/",
+        "A",
+        "2026-11-05T00:00:00.000Z",
+    );
+    let b = env.second_vault();
+    let mut following = Client::start(env.following(), "2025-06-18");
+    let mut pinned = env.start();
+    assert_eq!(urls_of(&mut following), ["https://a.public.test/"]);
+    assert_eq!(urls_of(&mut pinned), ["https://a.public.test/"]);
+
+    // The user switches to B and approves it in the side panel.
+    publish(&env.app, &b, Some("confirmed"));
+    assert_eq!(urls_of(&mut following), ["https://b.public.test/"]);
+    assert!(env.vault.exists(), "A is still there");
+    for (name, arguments) in [
+        ("memocampus_search_visits", json!({"query": ""})),
+        (
+            "memocampus_get_visits_by_day",
+            json!({"date": "2026-11-05"}),
+        ),
+        ("memocampus_get_domain_stats", json!({})),
+        ("memocampus_search_images", json!({})),
+    ] {
+        assert_eq!(
+            pinned.error(name, arguments),
+            json!({"error": "vault_not_active"}),
+            "a server started with A's path reads nothing once A is not active: {name}"
+        );
+    }
+
+    // Pending again (revoked, or a newly opened vault): nothing.
+    publish(&env.app, &b, Some("pending"));
+    assert_eq!(
+        following.error("memocampus_search_visits", json!({"query": ""})),
+        json!({"error": "vault_publication_pending"})
+    );
+    // Back to A, confirmed: both serve A again.
+    publish(&env.app, &env.vault, Some("confirmed"));
+    assert_eq!(urls_of(&mut following), ["https://a.public.test/"]);
+    assert_eq!(urls_of(&mut pinned), ["https://a.public.test/"]);
+    // Without a policy, a confirmed vault still gives nothing.
+    let away = env.dir.join("policy.json.away");
+    fs::rename(env.app.join("policy.json"), &away).unwrap();
+    assert_eq!(
+        following.error("memocampus_search_visits", json!({"query": ""})),
+        json!({"error": "policy_unavailable"})
+    );
+    fs::rename(&away, env.app.join("policy.json")).unwrap();
+    // A damaged or missing config: nothing.
+    fs::write(env.app.join("config.json"), b"{").unwrap();
+    assert_eq!(
+        following.error("memocampus_search_visits", json!({"query": ""})),
+        json!({"error": "config_invalid"})
+    );
+    fs::remove_file(env.app.join("config.json")).unwrap();
+    assert_eq!(
+        pinned.error("memocampus_search_visits", json!({"query": ""})),
+        json!({"error": "vault_not_configured"})
+    );
+    assert_eq!(following.finish(), "");
+    assert_eq!(pinned.finish(), "");
+}
+
+#[test]
+fn a_server_cannot_be_started_on_a_vault_that_is_not_the_published_active_one() {
+    let env = Env::new();
+    let b = env.second_vault();
+    let started = |mut command: Command| {
+        let output = command.stdin(Stdio::null()).output().unwrap();
+        (
+            output.status.code(),
+            String::from_utf8(output.stderr).unwrap().trim().to_owned(),
+        )
+    };
+    assert_eq!(
+        started(env.command(&b)),
+        (
+            Some(2),
+            "memocampus-mcp: vault refused: vault_not_active".into()
+        )
+    );
+    publish(&env.app, &b, None);
+    assert_eq!(
+        started(env.following()),
+        (
+            Some(2),
+            "memocampus-mcp: vault refused: vault_publication_pending".into()
+        )
+    );
+    assert_eq!(
+        started(env.command(&b)),
+        (
+            Some(2),
+            "memocampus-mcp: vault refused: vault_publication_pending".into()
+        )
+    );
 }
