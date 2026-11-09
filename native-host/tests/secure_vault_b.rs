@@ -151,6 +151,38 @@ fn files(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     out
 }
 
+/// Whether two paths name the same existing file, by the host's vault token (volume serial number
+/// and file index): independent of how the path is spelled (8.3 short names, case, `\\?\` prefix).
+fn same_file(a: &Path, b: &Path) -> bool {
+    let token = |path: &Path| {
+        active_vault::vault_token(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    };
+    token(a) == token(b)
+}
+
+/// `<path>.pending`, the name a vault has while its creation awaits confirmation.
+fn pending(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.pending", path.display()))
+}
+
+/// The Windows 8.3 short form of an existing path (the same path if the volume has none).
+#[cfg(windows)]
+fn short_path(path: &Path) -> PathBuf {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut buffer = vec![0u16; 4096];
+    // SAFETY: `wide` is NUL-terminated and `buffer` is writable for its length.
+    let length =
+        unsafe { GetShortPathNameW(wide.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) }
+            as usize;
+    assert!(
+        length > 0 && length < buffer.len(),
+        "GetShortPathNameW failed"
+    );
+    PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length]))
+}
+
 fn contains(bytes: &[u8], text: &str) -> bool {
     bytes.windows(text.len()).any(|w| w == text.as_bytes())
 }
@@ -180,7 +212,10 @@ fn an_encrypted_vault_is_created_only_after_its_phrase_is_confirmed() {
     assert!(sidecar::pending_path_for(&target).exists());
     let shown = status(&app);
     assert_eq!(shown["state"], "not_configured");
-    assert_eq!(shown["creationPending"], target.to_string_lossy().as_ref());
+    // The host reports the canonical path, which may be spelled differently from `target` (the
+    // runner's TEMP is an 8.3 short path): compare the files, not the strings.
+    let creating = PathBuf::from(shown["creationPending"].as_str().unwrap());
+    assert!(same_file(&pending(&creating), &pending(&target)));
     assert_eq!(shown["encryptionAvailable"], true);
     assert!(
         !shown.to_string().contains(&words[3]),
@@ -219,7 +254,7 @@ fn an_encrypted_vault_is_created_only_after_its_phrase_is_confirmed() {
     assert_eq!(done["status"]["creationPending"], json!(null));
     let active = config(&app).unwrap();
     assert_eq!(active.mode, VaultMode::Encrypted);
-    assert_eq!(Path::new(&active.active_vault), target);
+    assert!(same_file(Path::new(&active.active_vault), &target));
     assert_eq!(active.publication.unwrap().state, PublicationState::Pending);
     assert!(target.exists() && sidecar::path_for(&target).exists());
     assert!(!PathBuf::from(format!("{}.pending", target.display())).exists());
@@ -612,4 +647,41 @@ fn an_unreadable_creation_record_can_still_be_discarded_and_blocks_nothing_else(
     assert_eq!(status(&app)["creationPending"], json!(null));
     init_policy(&app);
     create(&app, &target);
+}
+
+#[cfg(windows)]
+#[test]
+fn a_vault_named_by_its_8_3_short_path_is_the_same_file_and_a_copy_is_not() {
+    let tmp = TempDir::new();
+    let app = tmp.app();
+    init_policy(&app);
+    let long_dir = tmp.0.join("Memocampus long directory name");
+    std::fs::create_dir_all(&long_dir).unwrap();
+    let short_dir = short_path(&long_dir);
+    if short_dir.file_name() == long_dir.file_name() {
+        eprintln!("SKIPPED: this volume generates no 8.3 short names");
+        return;
+    }
+    let (short, long) = (short_dir.join("enc.sqlite3"), long_dir.join("enc.sqlite3"));
+    assert_ne!(short, long);
+
+    let phrase = begin(&app, &short);
+    let creating = PathBuf::from(status(&app)["creationPending"].as_str().unwrap());
+    assert_ne!(
+        creating, short,
+        "spelled differently: a string comparison would fail"
+    );
+    assert!(same_file(&pending(&creating), &pending(&short)));
+    assert!(same_file(&pending(&creating), &pending(&long)));
+
+    let done = commit(&app, &phrase);
+    assert_eq!(done["ok"], true, "{done}");
+    let active = PathBuf::from(config(&app).unwrap().active_vault);
+    assert!(same_file(&active, &short) && same_file(&active, &long));
+    // Another file, even a byte-for-byte copy in the same directory, is not the same file.
+    let copy = long_dir.join("copy.sqlite3");
+    std::fs::copy(&long, &copy).unwrap();
+    assert_eq!(std::fs::read(&copy).unwrap(), std::fs::read(&long).unwrap());
+    assert!(!same_file(&active, &copy));
+    assert!(!same_file(&active, &short_path(&copy)));
 }
