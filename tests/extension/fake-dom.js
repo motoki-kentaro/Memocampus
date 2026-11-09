@@ -161,6 +161,7 @@ export function createDocument() {
     "gallery-filter", "gallery-tags-empty", "gallery-tag-picker", "gallery-tag-picker-more",
     "visit-calendar", "visit-date-chip",
     "vault-creation-pending", "vault-recovery-offer", "vault-onboarding", "vault-phrase-check", "vault-recovery",
+    "vault-backup-password-fields", "vault-backup-phrase-row", "vault-restore", "vault-restore-password-row", "vault-restore-phrase-row", "vault-restored", "vault-restored-policy-details",
   ]) {
     document.querySelector(`#${id}`).hidden = true;
   }
@@ -178,6 +179,7 @@ export function createDocument() {
   }
   document.querySelector("#item-scope-url").checked = true;
   document.querySelector("#vault-encryption-encrypted").checked = true;
+  document.querySelector("#vault-backup-normal").checked = true;
   document.$ = (selector) => document.querySelector(selector);
   return document;
 }
@@ -338,8 +340,19 @@ const PNG_THUMBNAIL = Buffer.from("89504e470d0a1a0a0000000d494844520000000400000
  * Native host stand-in: `vaults` maps a vault path to its pages; `active` is the open vault.
  * `images` maps a vault path to its image summaries (newest first) for the Image tab.
  */
-export function createHost({ vaults, active, statusDelay = 0, images = {}, policyStatus = null, capabilities = ["navigation_v1"], forward = null, encryption = false }) {
+export function createHost({ vaults, active, statusDelay = 0, images = {}, policyStatus = null, capabilities = ["navigation_v1"], forward = null, encryption = false, restore = false }) {
   const host = {
+    /**
+     * Issue #51 Slice C: backups by protection and restore, as the real host handles them (see
+     * native-host `manage::backup_restore_tests`). `backupFiles` maps a backup path to what restoring
+     * it needs and gives; `restorePending` is the restored vault waiting for the user's decision.
+     */
+    restore,
+    backupFiles: {},
+    backupFormats: [],
+    restoreDialog: "C:\\Backups\\memocampus-backup.mcbackup",
+    restoreTargetDialog: "C:\\Restored\\memocampus-restored.sqlite3",
+    restorePending: null,
     /** Issue #51 Slice B: encrypted vaults, as the real host handles them (see native-host tests). */
     encryption,
     creation: null, // { path, phrase } while a creation waits for its confirmation
@@ -383,6 +396,7 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
     status() {
       const base = { managementEnabled: true, overridden: false, defaultPath: "C:\\Vaults\\memocampus.sqlite3", defaultExists: false, locationApproved: false };
       if (host.encryption) Object.assign(base, { encryptionAvailable: true, creationPending: host.creation?.path ?? null });
+      if (host.restore) base.restorePending = host.restorePending;
       if (!host.active) return { ...base, state: "not_configured", vaultPath: null, counts: null, location: null };
       if (host.locked.has(host.active)) return { ...base, state: "key_unavailable", vaultPath: host.active, vaultToken: null, counts: null, mode: "encrypted", publication: "pending", recoveryAvailable: true, location: null };
       const confirmed = host.published.has(host.active);
@@ -539,9 +553,20 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
         return new Promise((resolve) => setTimeout(() => {
           host.backupDuring?.();
           if (!host.active || tokenOf(host.active) !== expected) return resolve(fail("vault_switched"));
-          const backupPath = `C:\\Backups\\memocampus-backup-${host.backups.length}.sqlite3`;
+          const password = message.protection === "password";
+          if (password && (typeof message.password !== "string" || [...message.password].length < 8)) return resolve(fail("backup_password_too_short"));
+          const encrypted = host.encrypted.has(host.active);
+          if (encrypted) {
+            // As the real host: the phrase must recover this vault (review finding C-03).
+            const words = String(message.recoveryPhrase ?? "").trim().split(/\s+/).filter(Boolean);
+            if (words.length !== 12) return resolve(fail("recovery_phrase_invalid"));
+            if (words.join(" ").toLowerCase() !== host.phraseFor(host.active)) return resolve(fail("recovery_phrase_rejected"));
+          }
+          const format = encrypted ? (password ? "D" : "B") : password ? "C" : "A";
+          const backupPath = `C:\\Backups\\memocampus-backup-${host.backups.length}.${format === "A" ? "sqlite3" : "mcbackup"}`;
           host.backups.push({ vault: host.active, backupPath });
-          resolve(reply({ type: "vault_result", backupPath, vaultPath: host.active, vaultToken: expected }));
+          host.backupFormats.push({ format, protection: message.protection ?? null, password: message.password ?? null });
+          resolve(reply({ type: "vault_result", backupPath, vaultPath: host.active, vaultToken: expected, format, policyCopy: format !== "A" }));
         }, host.backupDelay));
       }
       if (message.type === "vault_publication_confirm" || message.type === "vault_publication_revoke") {
@@ -593,6 +618,52 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
         host.active = message.path;
         host.published.delete(message.path);
         return reply({ type: "vault_result", path: message.path, status: host.status() });
+      }
+      if (message.type === "vault_restore_inspect") {
+        const fail = (error, extra = {}) => ({ ok: false, type: "vault_result", requestId: message.requestId, error, ...extra });
+        const backupPath = message.path ?? host.restoreDialog;
+        if (!backupPath) return fail("cancelled");
+        const file = host.backupFiles[backupPath];
+        if (!file) return fail("backup_unsupported_format", { backupPath });
+        return reply({ type: "vault_result", backupPath, format: file.format, mode: file.mode, needsPassword: Boolean(file.password), needsPhrase: Boolean(file.phrase), policyCopy: file.policyCopy ? true : file.format === "D" ? null : false, size: 4096 });
+      }
+      if (message.type === "vault_restore") {
+        const fail = (error, extra = {}) => ({ ok: false, type: "vault_result", requestId: message.requestId, error, ...extra });
+        if (host.restorePending) return fail("vault_restore_pending", { path: host.restorePending.path });
+        const file = host.backupFiles[message.backupPath];
+        if (!file) return fail("backup_unsupported_format");
+        if (file.password && !message.password) return fail("backup_password_required");
+        if (file.phrase) {
+          const words = String(message.recoveryPhrase ?? "").trim().split(/\s+/).filter(Boolean);
+          if (words.length !== 12) return fail("recovery_phrase_invalid", { reason: "word_count", count: words.length });
+        }
+        if (file.password && message.password !== file.password) return fail("backup_password_rejected");
+        if (file.phrase && String(message.recoveryPhrase).trim().split(/\s+/).join(" ").toLowerCase() !== file.phrase) return fail("recovery_phrase_rejected");
+        const path = message.path ?? host.restoreTargetDialog;
+        if (!path) return fail("cancelled");
+        if (host.vaults[path]) return fail("file_exists", { path });
+        host.vaults[path] = file.pages ?? [];
+        host.restorePending = { path, phase: "restored", format: file.format, mode: file.mode, vaultToken: tokenOf(path) };
+        const policyCopy = file.policyCopy ?? (file.format === "A" ? { state: "not_supported" } : { state: "absent" });
+        return reply({ type: "vault_result", path, backupPath: message.backupPath, format: file.format, mode: file.mode, vaultToken: tokenOf(path), counts: { visits: host.vaults[path].length, snapshots: 0, images: 0 }, policyCopy, status: host.status() });
+      }
+      if (message.type === "vault_restore_activate") {
+        const fail = (error, extra = {}) => ({ ok: false, type: "vault_result", requestId: message.requestId, error, ...extra });
+        const pending = host.restorePending;
+        if (!pending) return fail("vault_restore_not_pending");
+        if (pending.phase === "restoring") return fail("vault_restore_incomplete", { path: pending.path });
+        if (message.expectedVaultToken !== pending.vaultToken) return fail("vault_switched");
+        host.restorePending = null;
+        host.active = pending.path;
+        if (pending.mode === "encrypted") host.encrypted.add(pending.path);
+        host.published.delete(pending.path);
+        return reply({ type: "vault_result", path: pending.path, status: host.status() });
+      }
+      if (message.type === "vault_restore_discard") {
+        const pending = host.restorePending;
+        if (pending && pending.path !== host.active) delete host.vaults[pending.path];
+        host.restorePending = null;
+        return reply({ type: "vault_result", status: host.status() });
       }
       if (message.type === "vault_open") {
         if (host.locked.has(message.path)) {

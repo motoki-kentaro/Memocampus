@@ -638,3 +638,8 @@ button.danger { color: var(--error-fg); border-color: var(--error-fg); font-weig
   .item-dialog, .hit-state, select.item-action { border-color: CanvasText; }
   button.danger { border-color: CanvasText; }
 }
+
+/* Issue #51 Slice C: backup password and restore secrets. */
+.vault-secret-fields label { display: block; margin: 4px 0; }
+.vault-secret-fields input, .vault-secret-fields textarea { width: 100%; box-sizing: border-box; }
+.vault-policy-copy { max-height: 240px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all; }

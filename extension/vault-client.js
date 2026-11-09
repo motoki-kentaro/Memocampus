@@ -78,6 +78,96 @@ export function checkAnswers(words, answers) {
   return answers.length > 0 && answers.every(({ position, word }) => typeof word === "string" && words[position - 1] === word.trim().toLowerCase());
 }
 
+/** Issue #51 Slice C: backup formats. A plain vault's normal backup is A; see `backupFormat`. */
+export function backupFormat(mode, protection) {
+  const encrypted = mode === "encrypted";
+  if (protection === "password") return encrypted ? "D" : "C";
+  return encrypted ? "B" : "A";
+}
+
+export const BACKUP_FORMAT_NOTE = {
+  A: "形式A: 通常のSQLiteファイルとして保存します（暗号化なし）。プライバシー設定のコピーは含みません。",
+  B: "形式B: 暗号化したまま1つのファイルに保存します。復元には12単語のリカバリーフレーズが必要です（このPCの鍵は不要）。作成時に、お手元のフレーズでこのVaultを復旧できることを確認します。プライバシー設定のコピーを暗号化して含みます。",
+  C: "形式C: バックアップ全体をパスワードで暗号化します。復元にはこのパスワードが必要です。元のVault自体は暗号化されません。プライバシー設定のコピーを含みます。",
+  D: "形式D: 暗号化Vaultを、さらにパスワードで保護します。復元にはパスワードと12単語のリカバリーフレーズの両方が必要です。作成時に、お手元のフレーズでこのVaultを復旧できることを確認します。プライバシー設定のコピーを含みます。",
+};
+
+export const PASSWORD_MIN_CHARS = 8;
+
+export const PASSWORD_NOTE =
+  `パスワードは${PASSWORD_MIN_CHARS}文字以上にしてください。パスワードはどこにも保存しません。忘れると、このバックアップは復元できません（Memocampusは再発行できません）。`;
+
+export const BACKUP_PHRASE_NOTE =
+  "暗号化Vaultのバックアップは、復元にリカバリーフレーズが必要です。書き留めたフレーズを入力してください。このVaultを復旧できるフレーズでなければ、バックアップは作成しません。フレーズは保存しません。";
+
+/** Null when `text` has the shape of a 12-word phrase (the host checks the words and the vault). */
+export function checkBackupPhrase(text) {
+  const words = typeof text === "string" ? text.trim().split(/\s+/).filter(Boolean) : [];
+  return words.length === 12 ? null : `リカバリーフレーズを12単語で入力してください（${words.length}単語でした）。`;
+}
+
+/** Null when the two entries make a usable backup password, otherwise what is wrong. */
+export function checkBackupPassword(password, confirmation) {
+  if (typeof password !== "string" || [...password].length < PASSWORD_MIN_CHARS) return `パスワードは${PASSWORD_MIN_CHARS}文字以上で入力してください。`;
+  if (password !== confirmation) return "確認用のパスワードが一致しません。";
+  return null;
+}
+
+export const RESTORE_FORMAT_TEXT = {
+  A: "形式A（平文Vaultの通常バックアップ）。暗号化されていません。プライバシー設定のコピーは含まれません。",
+  B: "形式B（暗号化Vaultの通常バックアップ）。復元には12単語のリカバリーフレーズが必要です。",
+  C: "形式C（パスワード保護）。復元にはバックアップのパスワードが必要です。",
+  D: "形式D（暗号化Vault＋パスワード保護）。復元にはパスワードと12単語のリカバリーフレーズの両方が必要です。",
+};
+
+export const RESTORE_NOTE =
+  "復元は常に新しいVaultとして作成します。既存のファイルやVaultは上書きしません。" +
+  "現在のVaultは、復元したVaultを「使い始める」まで変わりません。復元したVaultのMCPへの公開は、未承認から始まります。";
+
+/** What the user is asked before a restore (`vault_restore_inspect` answer). */
+export function describeRestoreSource(info) {
+  const lines = [`復元するバックアップ: ${info.backupPath}`, RESTORE_FORMAT_TEXT[info.format] || "形式を確認できません。"];
+  if (info.policyCopy === true) lines.push("プライバシー設定のコピーが含まれています（復元後に内容を確認できます。自動では適用しません）。");
+  lines.push(RESTORE_NOTE);
+  return lines.join("\n");
+}
+
+/** The restored vault, for the user's confirmation before it becomes active. */
+export function describeRestored(restored) {
+  const counts = restored?.counts;
+  const lines = [`復元しました（まだ使用していません）: ${restored?.path ?? ""}`];
+  lines.push(restored?.mode === "encrypted" ? "暗号化Vault（このWindowsユーザーで鍵を保存しました）" : "平文のVault");
+  if (counts && Number.isSafeInteger(counts.visits)) {
+    lines.push(`閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件・画像 ${counts.images.toLocaleString("ja-JP")}件`);
+  }
+  lines.push("「使い始める」を押すと、このVaultをActive Vaultにします。MCPへの公開は未承認のままです。");
+  return lines.join("\n");
+}
+
+/** The policy copy a restore found: never applied, only shown. */
+export function describePolicyCopy(copy) {
+  switch (copy?.state) {
+    case "valid":
+      return `このバックアップには、プライバシー設定のコピー（改訂${Number(copy.revision) || "?"}）が含まれています。現在のプライバシー設定には自動で適用しません。内容を確認し、必要なら「プライバシー設定」で同じ設定にしてください。`;
+    case "invalid":
+      return "プライバシー設定のコピーを読み取れません（破損または未対応の版）。適用はしません。";
+    case "absent":
+      return "このバックアップには、プライバシー設定のコピーは含まれていません。";
+    case "not_supported":
+      return "形式Aのバックアップには、プライバシー設定のコピーは含まれません。";
+    default:
+      return "";
+  }
+}
+
+/** A restore recorded by the host but not activated (`status.restorePending`). */
+export function describeRestorePending(pending) {
+  if (pending?.phase === "restored" || pending?.phase === "verified") {
+    return `復元済みで、まだ使用していないVaultがあります:\n${pending.path}\n使い始めるか、破棄してください。`;
+  }
+  return `中断された復元があります${pending?.path ? `:\n${pending.path}` : ""}\n途中のファイルを破棄してから、もう一度復元してください。`;
+}
+
 /** MCP access to the vault shown (Issue #51): `status.publication` from a host that knows it. */
 export const PUBLICATION_TEXT = {
   confirmed: "MCPへの公開: 承認済み",

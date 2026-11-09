@@ -574,7 +574,7 @@ fn a_wrong_phrase_never_replaces_a_key_entry_and_a_right_one_repairs_a_damaged_e
 }
 
 #[test]
-fn an_encrypted_vault_is_never_backed_up_in_the_clear_and_switches_both_ways() {
+fn an_encrypted_vault_is_backed_up_only_encrypted_and_switches_both_ways() {
     let tmp = TempDir::new();
     let app = tmp.app();
     init_policy(&app);
@@ -584,20 +584,22 @@ fn an_encrypted_vault_is_never_backed_up_in_the_clear_and_switches_both_ways() {
         true
     );
     let target = tmp.0.join("enc.sqlite3");
-    create(&app, &target);
+    let phrase = create(&app, &target);
     let token = status(&app)["vaultToken"].clone();
     let dir = tmp.0.join("backups");
     std::fs::create_dir_all(&dir).unwrap();
-    let refused = one(
+    // Slice C: a normal backup of an encrypted vault is format B, still encrypted (Slice B refused
+    // it, `vault_backup_encrypted_unsupported`, rather than write a plain copy).
+    let backed_up = one(
         &app,
-        json!({ "type": "vault_backup", "directory": dir, "expectedVaultToken": token }),
+        json!({ "type": "vault_backup", "directory": dir, "expectedVaultToken": token,
+                "recoveryPhrase": phrase }),
     );
-    assert_eq!(refused["error"], "vault_backup_encrypted_unsupported");
-    assert_eq!(
-        std::fs::read_dir(&dir).unwrap().count(),
-        0,
-        "nothing written"
-    );
+    assert_eq!(backed_up["format"], "B", "{backed_up}");
+    let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
+    assert_eq!(names.len(), 1, "one complete file, nothing partial");
+    let bytes = std::fs::read(names[0].path()).unwrap();
+    assert!(!contains(&bytes, "SQLite format 3"), "never a plain copy");
     // Publication decisions work as for a plain vault.
     let confirmed = one(
         &app,

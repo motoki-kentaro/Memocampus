@@ -19,8 +19,16 @@ The vault (SQLite file) is independent of the host executable. Its path is store
 protected with Windows DPAPI for your Windows user, so the vault opens without a password. When you create it, the panel shows a
 12-word **recovery phrase once** and asks for three of its words before the vault is created: write it down. With the phrase and the
 `<vault>.mckey` file next to the vault, the vault can be opened by another Windows user or on another PC (**リカバリーフレーズで復旧**);
-without both, nobody can. Encrypted vaults cannot be backed up from the app yet (later slice); the backup button refuses rather than
-write a plain copy.
+without both, nobody can.
+
+**Backups and restore** (Issue #51, [docs/secure-vault/slice-c.md](docs/secure-vault/slice-c.md)). **バックアップを作成…** writes one
+file: a plain vault's normal backup is a plain SQLite file (format A, as before); an encrypted vault's normal backup stays encrypted
+(format B, `.mcbackup`, restored with the recovery phrase only, no key of the original PC needed; the panel asks for the phrase
+when the backup is made and refuses one that does not recover the vault); **パスワードで保護する** encrypts
+the whole backup with a password you choose (Argon2id; format C for a plain vault, format D for an encrypted one, which then needs
+the password **and** the phrase). The password is stored nowhere. B, C and D carry a copy of the privacy policy, which a restore
+shows but never applies. **バックアップから復元…** always creates a **new** vault (it never overwrites a file or the active vault),
+verifies it, and makes it active only when you choose **このVaultを使い始める**; MCP access starts unconfirmed.
 
 The database previously stored next to the executable (`native-host/target/release/memocampus.sqlite3`) is no longer used and is left untouched.
 

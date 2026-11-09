@@ -106,6 +106,10 @@ replace (POSIX rename instead of `MOVEFILE_WRITE_THROUGH`). Its differences are 
 
 ### S3 — backups and restore (Phase C)
 
+> Status: implemented as Slice C (`slice-c.md`). Differences: B is a Backup API snapshot, not a raw copy (DC1); C over B is
+> format D (DC4). "No plaintext temp file": met after review finding C-01 (C streams the vault's pages, no work file;
+> `slice-c.md` §3.1); a plain vault in WAL mode gets no C backup. B and D need the phrase when made (C-03, §3.2).
+
 - **Scope.**
   - Normal backups A (as today) and B (raw ciphertext copy).
   - Password backups C over A and C over B.

@@ -122,7 +122,8 @@ Messages (side panel → host; the service worker relays none of them):
   detection). A refused key is `vault_decrypt_failed`; none of the key errors proves the file unwritable, so a switch away
   uses the B0 exclusive-handle fence; an unlocked encrypted vault is fenced by its write lock [TEST
   `keyed::switching_away_from_an_unlocked_encrypted_vault_takes_its_write_lock`].
-- `vault_backup` of an encrypted vault is refused (`vault_backup_encrypted_unsupported`) before any dialog or file
+- (Superseded by Slice C, `slice-c.md`: an encrypted vault's normal backup is now format B, still encrypted.) In Slice B,
+  `vault_backup` of an encrypted vault is refused (`vault_backup_encrypted_unsupported`) before any dialog or file
   [TEST `an_encrypted_vault_is_never_backed_up_in_the_clear_…`].
 - VisibleStore: the gate (B0) admits `{path, mode, token, vaultId}`; the read unlocks with the app directory's key store,
   opens read-only with the key, checks `journal_mode = delete` and no `-wal`/`-shm`, then the identity (token) while SQLite

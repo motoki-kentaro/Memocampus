@@ -10,11 +10,23 @@ pub trait Dialogs {
     /// Where to export an image. Starts in Documents with `file_name`; the dialog itself asks
     /// before an existing file is chosen.
     fn choose_export_file(&self, file_name: &str, extension: &str) -> Option<PathBuf>;
+    /// Issue #51 Slice C: the backup file to restore from. (Defaults to "cancelled" so that test
+    /// doubles that never restore need not implement it.)
+    fn choose_backup_file(&self) -> Option<PathBuf> {
+        None
+    }
+    /// Issue #51 Slice C: where a restored vault is created (a new file; the dialog asks before an
+    /// existing one is chosen, and the host refuses it anyway).
+    fn choose_restore_target(&self, _default_name: &str) -> Option<PathBuf> {
+        None
+    }
 }
 
 pub struct NativeDialogs;
 
 const VAULT_EXTENSIONS: [&str; 3] = ["sqlite3", "sqlite", "db"];
+/// Format A backups are plain SQLite files; B, C and D are `.mcbackup` containers.
+const BACKUP_EXTENSIONS: [&str; 4] = ["mcbackup", "sqlite3", "sqlite", "db"];
 
 impl Dialogs for NativeDialogs {
     fn choose_new_vault(&self, default_dir: &Path, default_name: &str) -> Option<PathBuf> {
@@ -42,6 +54,27 @@ impl Dialogs for NativeDialogs {
         let owner = owner::OwnerWindow::create();
         let dialog = rfd::FileDialog::new().set_title("バックアップの保存先フォルダ");
         owner::with_parent(dialog, owner.as_ref()).pick_folder()
+    }
+
+    fn choose_backup_file(&self) -> Option<PathBuf> {
+        let owner = owner::OwnerWindow::create();
+        let dialog = rfd::FileDialog::new()
+            .set_title("復元するMemocampusバックアップ")
+            .add_filter("Memocampus バックアップ", &BACKUP_EXTENSIONS)
+            .add_filter("すべてのファイル", &["*"]);
+        owner::with_parent(dialog, owner.as_ref()).pick_file()
+    }
+
+    fn choose_restore_target(&self, default_name: &str) -> Option<PathBuf> {
+        let owner = owner::OwnerWindow::create();
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("復元先（新しいVault）の保存先")
+            .add_filter("Memocampus Vault", &VAULT_EXTENSIONS)
+            .set_file_name(default_name);
+        if let Some(dir) = documents_dir().filter(|dir| dir.is_dir()) {
+            dialog = dialog.set_directory(dir);
+        }
+        owner::with_parent(dialog, owner.as_ref()).save_file()
     }
 
     fn choose_export_file(&self, file_name: &str, extension: &str) -> Option<PathBuf> {

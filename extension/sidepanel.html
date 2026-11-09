@@ -165,12 +165,28 @@
           <label><input id="vault-encryption-plain" type="radio" name="vault-encryption" value="plain"> 暗号化しない</label>
           <p id="vault-encryption-note" class="vault-meta"></p>
         </fieldset>
+        <fieldset id="vault-backup-options" class="vault-encryption">
+          <legend>バックアップの保護</legend>
+          <label><input id="vault-backup-normal" type="radio" name="vault-backup-protection" value="normal" checked> 通常</label>
+          <label><input id="vault-backup-password" type="radio" name="vault-backup-protection" value="password"> パスワードで保護する</label>
+          <p id="vault-backup-note" class="vault-meta"></p>
+          <div id="vault-backup-password-fields" class="vault-secret-fields" hidden>
+            <label>パスワード <input id="vault-backup-password-input" type="password" autocomplete="new-password" spellcheck="false"></label>
+            <label>パスワード（確認） <input id="vault-backup-password-confirm" type="password" autocomplete="new-password" spellcheck="false"></label>
+            <p id="vault-backup-password-note" class="vault-meta"></p>
+          </div>
+          <div id="vault-backup-phrase-row" class="vault-secret-fields" hidden>
+            <label>リカバリーフレーズ（12単語） <textarea id="vault-backup-phrase" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea></label>
+            <p id="vault-backup-phrase-note" class="vault-meta"></p>
+          </div>
+        </fieldset>
         <div class="vault-actions">
           <button id="vault-create-default" type="button">既定の場所に新規作成</button>
           <p id="vault-default-path" class="vault-meta"></p>
           <button id="vault-create-pick" type="button">場所を選んで新規作成…</button>
           <button id="vault-open-pick" type="button">既存のVaultを開く…</button>
           <button id="vault-backup-pick" type="button">バックアップを作成…</button>
+          <button id="vault-restore-pick" type="button">バックアップから復元…</button>
         </div>
         <details class="vault-manual">
           <summary>パスを直接入力</summary>
@@ -201,6 +217,25 @@
           <textarea id="vault-recovery-input" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="リカバリーフレーズ（12単語）"></textarea>
           <button id="vault-recovery-submit" type="button">復旧して開く</button>
           <button id="vault-recovery-cancel" type="button">やめる</button>
+        </div>
+        <div id="vault-restore" class="vault-approval" role="alertdialog" aria-labelledby="vault-restore-title" hidden>
+          <p id="vault-restore-title"></p>
+          <div class="vault-secret-fields">
+            <label id="vault-restore-password-row" hidden>バックアップのパスワード <input id="vault-restore-password" type="password" autocomplete="off" spellcheck="false"></label>
+            <label id="vault-restore-phrase-row" hidden>リカバリーフレーズ（12単語）<textarea id="vault-restore-phrase" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea></label>
+          </div>
+          <button id="vault-restore-submit" type="button">復元先を選んで復元…</button>
+          <button id="vault-restore-cancel" type="button">やめる</button>
+        </div>
+        <div id="vault-restored" class="vault-approval" role="alertdialog" aria-labelledby="vault-restored-title" hidden>
+          <p id="vault-restored-title"></p>
+          <p id="vault-restored-policy" class="vault-meta"></p>
+          <details id="vault-restored-policy-details" hidden>
+            <summary>プライバシー設定のコピーを表示</summary>
+            <pre id="vault-restored-policy-json" class="vault-policy-copy"></pre>
+          </details>
+          <button id="vault-restore-activate" type="button">このVaultを使い始める（MCPへの公開は未承認）</button>
+          <button id="vault-restore-discard" type="button">復元したVaultを破棄する</button>
         </div>
         <div id="vault-approval" class="vault-approval" role="alertdialog" aria-labelledby="vault-approval-title" hidden>
           <p id="vault-approval-title"></p>
