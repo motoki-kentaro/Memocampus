@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -19,6 +19,19 @@ const EXE: &str = env!("CARGO_BIN_EXE_memocampus-mcp");
 const WAIT: Duration = Duration::from_secs(20);
 const LEGACY: &str = "2025-11-25";
 const MODERN: &str = "2026-07-28";
+
+/// Names `vault` as the active vault in `app/config.json`, as the Native Host writes it, with a
+/// publication `state` ("confirmed" / "pending") for its file, or none (Issue #51).
+fn publish(app: &Path, vault: &Path, state: Option<&str>) {
+    let mut config = json!({"version": 2, "activeVault": vault, "mode": "plain"});
+    if let Some(state) = state {
+        config["publication"] = json!({
+            "vaultToken": memocampus_native_host::active_vault::vault_token(vault).unwrap(),
+            "state": state,
+        });
+    }
+    fs::write(app.join("config.json"), config.to_string()).unwrap();
+}
 
 struct Env {
     dir: PathBuf,
@@ -42,6 +55,7 @@ impl Env {
             .unwrap()
             .execute_batch(&schema::create_sql())
             .unwrap();
+        publish(&app, &vault, Some("confirmed"));
         let env = Self { dir, vault, app };
         let store = PolicyStore::new(env.app.clone()).unwrap();
         store.initialize().unwrap();
@@ -101,6 +115,20 @@ impl Env {
         command
             .arg("--vault")
             .arg(&self.vault)
+            .args(args)
+            .env("MEMOCAMPUS_APP_DIR", &self.app)
+            .env("LOCALAPPDATA", self.dir.join("localappdata"))
+            .env_remove("MEMOCAMPUS_DB")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command
+    }
+
+    /// As `command`, without `--vault`: following the active vault (Issue #51).
+    fn command_following(&self, args: &[&str]) -> Command {
+        let mut command = Command::new(EXE);
+        command
             .args(args)
             .env("MEMOCAMPUS_APP_DIR", &self.app)
             .env("LOCALAPPDATA", self.dir.join("localappdata"))
@@ -1323,5 +1351,149 @@ fn an_extra_host_that_is_not_one_exact_name_and_port_refuses_the_start() {
     assert!(
         !env.app.join("mcp-http-token").exists(),
         "refused before anything is created"
+    );
+}
+
+// --- Issue #51, Slice B0: the same gate on both transports -------------------------------------
+
+/// `stdio_answers` for a server without `--vault`.
+fn stdio_following(env: &Env, requests: &[Value]) -> Vec<Value> {
+    let mut child = env
+        .command_following(&[])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut send = |value: &Value| {
+        stdin.write_all(value.to_string().as_bytes()).unwrap();
+        stdin.write_all(b"\n").unwrap();
+        stdin.flush().unwrap();
+    };
+    send(
+        &json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": LEGACY, "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}}),
+    );
+    let mut line = String::new();
+    out.read_line(&mut line).unwrap();
+    send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+    let mut answers = Vec::new();
+    for request in requests {
+        send(request);
+        let mut line = String::new();
+        out.read_line(&mut line).unwrap();
+        answers.push(serde_json::from_str(&line).unwrap());
+    }
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    answers
+}
+
+/// An HTTP server without `--vault`.
+fn start_following(env: &Env) -> Server {
+    let mut command =
+        env.command_following(&["--transport", "streamable-http", "--listen", "127.0.0.1:0"]);
+    let mut child = command.spawn().unwrap();
+    let stderr = lines_of(child.stderr.take().unwrap());
+    let mut seen = Vec::new();
+    let port = loop {
+        let line = stderr
+            .recv_timeout(WAIT)
+            .expect("the server reports its address");
+        seen.push(line.clone());
+        if let Some(rest) = line.strip_prefix("memocampus-mcp: listening on http://127.0.0.1:") {
+            break rest.strip_suffix("/mcp").unwrap().parse().unwrap();
+        }
+    };
+    Server {
+        child,
+        port,
+        stderr,
+        seen,
+    }
+}
+
+/// The `{"error": code}` of each failed tool call.
+fn tool_errors(answers: &[Value]) -> Vec<Value> {
+    answers
+        .iter()
+        .map(|answer| {
+            assert_eq!(answer["result"]["isError"], true, "{answer}");
+            serde_json::from_str(answer["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn both_transports_follow_the_same_active_vault_and_refuse_alike() {
+    let env = Env::new();
+    env.seed();
+    let b = env.dir.join("b.sqlite3");
+    let db = Connection::open(&b).unwrap();
+    db.execute_batch(&schema::create_sql()).unwrap();
+    db.execute(
+        "INSERT INTO visits VALUES ('b1', 'https://b.public.test/', 'B', '2026-11-05T00:00:00.000Z')",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    let requests = vec![
+        call_body(1, "memocampus_search_visits", &json!({"query": ""})),
+        call_body(2, "memocampus_get_domain_stats", &json!({})),
+        call_body(3, "memocampus_search_images", &json!({})),
+        call_body(
+            4,
+            "memocampus_get_visits_by_day",
+            &json!({"date": "2026-11-05", "utc_offset": "+00:00"}),
+        ),
+    ];
+    // Long-running HTTP servers, started while A is the active, confirmed vault.
+    let following = start_following(&env);
+    let pinned = Server::start(&env, "127.0.0.1:0");
+    let token = env.token();
+    let over_http = |server: &Server| -> Vec<Value> {
+        requests
+            .iter()
+            .map(|request| {
+                let reply = post(server, &token, request);
+                assert_eq!(reply.status, 200, "{}", reply.body);
+                reply.json()
+            })
+            .collect()
+    };
+    let same = |left: &[Value], right: &[Value]| {
+        assert_eq!(left.len(), right.len());
+        for (left, right) in left.iter().zip(right) {
+            assert_eq!(without_process_keys(left), without_process_keys(right));
+        }
+    };
+
+    // A active and confirmed: the same answers everywhere.
+    let a_stdio = stdio_following(&env, &requests);
+    same(&over_http(&following), &a_stdio);
+    same(&over_http(&pinned), &a_stdio);
+    assert_eq!(a_stdio[1]["result"]["structuredContent"]["total_visits"], 3);
+
+    // Switched to B and confirmed: the following servers read B, the one pinned to A nothing.
+    publish(&env.app, &b, Some("confirmed"));
+    let b_stdio = stdio_following(&env, &requests);
+    same(&over_http(&following), &b_stdio);
+    assert_eq!(b_stdio[1]["result"]["structuredContent"]["total_visits"], 1);
+    for answer in tool_errors(&over_http(&pinned)) {
+        assert_eq!(answer, json!({"error": "vault_not_active"}));
+    }
+
+    // B pending: both transports refuse every tool with the same code and no data.
+    publish(&env.app, &b, Some("pending"));
+    let http = tool_errors(&over_http(&following));
+    assert_eq!(http.len(), requests.len());
+    for answer in &http {
+        assert_eq!(*answer, json!({"error": "vault_publication_pending"}));
+    }
+    // (A stdio server refuses to start in this state; see stdio_mcp.rs.)
+    let stdio = env.command_following(&[]).output().unwrap();
+    assert_eq!(stdio.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8(stdio.stderr).unwrap().trim(),
+        "memocampus-mcp: vault refused: vault_publication_pending"
     );
 }

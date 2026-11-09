@@ -1,7 +1,14 @@
-//! `memocampus-mcp --vault <absolute path>`: the user's Memocampus vault as a read-only MCP server
+//! `memocampus-mcp [--vault <absolute path>]`: the user's Memocampus vault as a read-only MCP server
 //! over stdio (Issue #8, Slice 1), or, only when asked for with
 //! `--transport streamable-http [--listen 127.0.0.1:<port>]`, over Streamable HTTP on loopback
 //! (`http`). Both serve the same handler (`server::Memocampus`) over the same `VisibleStore`.
+//!
+//! Which vault (Issue #51, Slice B0): without `--vault` the server follows the active vault that
+//! the Native Host's `config.json` names, resolved again for every tool call, and reads it only
+//! while its publication to MCP is confirmed. With `--vault` it reads that file only while it is
+//! that same confirmed active vault (`vault_not_active` otherwise), so a server started with an
+//! old path never keeps reading a vault the user switched away from. Both transports share this.
+//! There is no way to read an unpublished vault, and nothing here can publish one.
 //!
 //! In stdio mode stdout carries the MCP protocol only, and the only other output is one line on
 //! stderr when the server cannot start: a fixed code, never a URL, title or other content of the
@@ -24,9 +31,12 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: memocampus-mcp --vault <absolute path to the vault .sqlite3 file> \
+const USAGE: &str =
+    "usage: memocampus-mcp [--vault <absolute path to the active vault .sqlite3 file>] \
 [--transport stdio | --transport streamable-http [--listen 127.0.0.1:<port>] \
-[--allow-host <dns name>:<port>]...]";
+[--allow-host <dns name>:<port>]...]\n\
+Without --vault the active vault chosen in the Memocampus side panel is followed. Either way, only \
+a vault approved for MCP in the side panel is read.";
 
 fn fail(message: &str) -> ExitCode {
     eprintln!("memocampus-mcp: {message}");
@@ -81,7 +91,8 @@ enum Transport {
 
 #[derive(Debug, PartialEq)]
 struct Options {
-    vault: PathBuf,
+    /// None: follow the active vault.
+    vault: Option<PathBuf>,
     transport: Transport,
     /// `--allow-host`, HTTP only; empty unless given.
     allow_hosts: Vec<http::AllowedHost>,
@@ -127,7 +138,7 @@ impl ArgError {
     }
 }
 
-/// `--vault <path>` (required, absolute), `--transport <stdio|streamable-http>` and `--listen
+/// `--vault <path>` (optional, absolute), `--transport <stdio|streamable-http>` and `--listen
 /// <address>`, each at most once, and `--allow-host <name>:<port>` (HTTP only) repeatable for
 /// different values, in any order. Anything else refuses the start: a setting that is not
 /// understood is never guessed at.
@@ -159,8 +170,8 @@ fn options(mut args: impl Iterator<Item = OsString>) -> Result<Options, ArgError
             return Err(ArgError::Usage);
         }
     }
-    let vault = PathBuf::from(vault.ok_or(ArgError::Usage)?);
-    if !vault.is_absolute() {
+    let vault = vault.map(PathBuf::from);
+    if vault.as_ref().is_some_and(|vault| !vault.is_absolute()) {
         return Err(ArgError::NotAbsolute);
     }
     let http = match transport.as_ref().map(|value| value.to_str()) {
@@ -236,10 +247,15 @@ fn run() -> (ExitCode, Option<&'static str>) {
         Transport::Stdio => "stdio",
         Transport::Http(_) => "streamable-http",
     };
+    let source = if vault.is_some() {
+        "pinned"
+    } else {
+        "follow_active"
+    };
     diag::event(
         "vault_init_start",
         true,
-        json!({"transport": transport_name}),
+        json!({"transport": transport_name, "vault_source": source}),
     );
     let store = match VisibleStore::from_process(vault.clone()) {
         Ok(store) => store,
@@ -250,13 +266,14 @@ fn run() -> (ExitCode, Option<&'static str>) {
             return (fail_logged("vault_init", fields, &message), None);
         }
     };
-    // Fixed for the life of the process and checked once now, so a wrong path or an old vault is
-    // reported before any client connects. Every tool call checks it again.
+    // Checked once now, so a wrong path, an unpublished or an old vault is reported before any
+    // client connects. Every tool call passes the same gate and checks again.
     if let Err(error) = store.check_vault() {
-        let fields = diag::with(
-            json!({"step": "vault_check", "error": error.code()}),
-            diag::vault_file(&vault),
-        );
+        let fields = json!({"step": "vault_check", "error": error.code()});
+        let fields = match &vault {
+            Some(vault) => diag::with(fields, diag::vault_file(vault)),
+            None => fields,
+        };
         diag::event("vault_init_failure", false, fields.clone());
         let message = format!("vault refused: {}", error.code());
         return (fail_logged("vault_init", fields, &message), None);
@@ -394,19 +411,64 @@ mod tests {
     }
 
     #[test]
-    fn only_an_absolute_vault_path_is_accepted() {
+    fn nothing_in_the_server_can_change_the_active_vault_or_its_publication() {
+        // Issue #51: only the Native Host (for the side panel) writes `config.json`.
+        let main = include_str!("main.rs");
+        let main = &main[..main.find("#[cfg(test)]").unwrap()]; // not this test's own text
+        for (name, source) in [
+            ("main.rs", main),
+            ("server.rs", include_str!("server.rs")),
+            ("http.rs", include_str!("http.rs")),
+            ("diag.rs", include_str!("diag.rs")),
+            ("token.rs", include_str!("token.rs")),
+            ("observed.rs", include_str!("observed.rs")),
+            ("dates.rs", include_str!("dates.rs")),
+        ] {
+            let code: String = source
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .collect();
+            for banned in [
+                "config.json",
+                "active_vault",
+                "vault_publication",
+                "to_bytes",
+            ] {
+                assert!(!code.contains(banned), "{name}: {banned}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_vault_path_is_optional_and_only_ever_absolute() {
         let absolute = absolute();
         assert_eq!(
             parse(&["--vault", absolute]).unwrap(),
             Options {
-                vault: PathBuf::from(absolute),
+                vault: Some(PathBuf::from(absolute)),
                 transport: Transport::Stdio,
                 allow_hosts: Vec::new(),
             }
         );
+        // No path: the active vault is followed (Issue #51).
+        assert_eq!(
+            parse(&[]).unwrap(),
+            Options {
+                vault: None,
+                transport: Transport::Stdio,
+                allow_hosts: Vec::new(),
+            }
+        );
+        assert_eq!(
+            parse(&["--transport", "streamable-http"]).unwrap().vault,
+            None
+        );
+        assert_eq!(
+            parse(&["--vault", "vault.sqlite3"]).unwrap_err(),
+            ArgError::NotAbsolute
+        );
         for bad in [
-            &[][..],
-            &["--vault"],
+            &["--vault"][..],
             &["vault.sqlite3"],
             &["--vault", "vault.sqlite3"],
             &["--vault", absolute, "--vault", absolute],
@@ -489,7 +551,7 @@ mod tests {
                 ArgError::Usage,
             ),
             (vec!["--vault", v, "--transport"], ArgError::Usage),
-            (vec!["--transport", sh], ArgError::Usage),
+            (vec!["--transport", sh, "--vault"], ArgError::Usage),
             (vec!["--vault", v, "--auth", "none"], ArgError::Usage),
         ] {
             assert_eq!(parse(&args).unwrap_err(), error, "{args:?}");

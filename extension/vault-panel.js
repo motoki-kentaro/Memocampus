@@ -2,7 +2,9 @@
 // only sends requests and renders the host's answers.
 
 import { SearchError } from "./search-client.js";
-import { LOCATION_NOTE, VERDICT_TEXT, describeReasons, describeStatus, formatCounts, vaultRequest } from "./vault-client.js";
+import { LOCATION_NOTE, PUBLICATION_NOTE, PUBLICATION_REVIEW, VERDICT_TEXT, describePublication, describeReasons, describeStatus, formatCounts, vaultRequest } from "./vault-client.js";
+
+const PUBLICATION_TYPES = new Set(["vault_publication_confirm", "vault_publication_revoke"]);
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -29,9 +31,19 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   const approveButton = $("#vault-approve");
   const approveCancel = $("#vault-approve-cancel");
   const messageText = $("#vault-message");
+  // MCP publication of the vault shown (Issue #51): decided here, never through MCP.
+  const publicationBox = $("#vault-publication");
+  const publicationState = $("#vault-publication-state");
+  const publicationNote = $("#vault-publication-note");
+  const publicationConfirm = $("#vault-publication-confirm");
+  const publicationRevoke = $("#vault-publication-revoke");
+  const publicationReview = $("#vault-publication-review");
+  const publicationReviewTitle = $("#vault-publication-review-title");
+  const publicationApprove = $("#vault-publication-approve");
+  const publicationCancel = $("#vault-publication-cancel");
   $("#vault-note").textContent = LOCATION_NOTE;
 
-  const actionButtons = [createDefault, createPick, openPick, backupPick, ...document.querySelectorAll("[data-manual]")];
+  const actionButtons = [createDefault, createPick, openPick, backupPick, publicationConfirm, publicationRevoke, publicationApprove, ...document.querySelectorAll("[data-manual]")];
   let status = null;
   // Each status asked for; only the latest answer is shown (an older one arriving late never
   // replaces it, so the vault shown and the token a backup sends always come from one answer).
@@ -53,10 +65,13 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
       createDefault.disabled = status.defaultExists === true;
       backupPick.disabled = !backupSource();
       document.querySelector('[data-manual="vault_backup"]').disabled = !backupSource();
+      publicationConfirm.disabled = !backupSource() || status.publication !== "pending";
+      publicationApprove.disabled = publicationConfirm.disabled;
+      publicationRevoke.disabled = !backupSource() || status.publication !== "confirmed";
     }
   }
 
-  /** The vault a backup would be of: the one shown, if it is ready and named by a token. */
+  /** The vault a backup or a publication decision is about: the one shown, if it is ready and named by a token. */
   function backupSource() {
     if (status?.state !== "ready" || typeof status.vaultToken !== "string" || !/^[0-9a-f]{64}$/.test(status.vaultToken)) return null;
     return { vaultPath: status.vaultPath, vaultToken: status.vaultToken };
@@ -78,6 +93,19 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
       verdictText.textContent = `${VERDICT_TEXT[location.verdict] || location.verdict}${approvedNote}`;
       fillList(reasonsList, describeReasons(location.reasons));
     }
+
+    const publication = status?.publication;
+    // Hidden for an older host (no field) and wherever MCP cannot read anything (null).
+    publicationBox.hidden = publication !== "confirmed" && publication !== "pending";
+    if (!publicationBox.hidden) {
+      publicationBox.dataset.state = publication;
+      publicationState.textContent = describePublication(status);
+      const usable = status.state === "ready";
+      publicationNote.textContent = publication === "pending" && !usable ? `${PUBLICATION_NOTE.pending}\n${PUBLICATION_NOTE.unusable}` : PUBLICATION_NOTE[publication];
+      publicationConfirm.hidden = publication !== "pending" || !usable;
+      publicationRevoke.hidden = publication !== "confirmed";
+    }
+    if (publication !== "pending") publicationReview.hidden = true;
 
     if (status?.defaultPath) {
       defaultPathText.textContent = status.defaultExists
@@ -131,40 +159,49 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
 
   function successMessage(type, response) {
     if (type === "vault_backup") return `バックアップを作成しました。\nバックアップ元: ${response.vaultPath}\n保存先: ${response.backupPath}`;
+    if (type === "vault_publication_confirm") return "このVaultをMCPに公開しました。プライバシー設定を通過した記録だけが読まれます。";
+    if (type === "vault_publication_revoke") return "このVaultのMCPへの公開を停止しました。MCPクライアントには内容を返しません。";
     if (type === "vault_create") return `新しいVaultを作成し、使用を開始しました:\n${response.path}`;
     return `Vaultを開きました:\n${response.path}`;
   }
 
   async function run(type, params = {}) {
     if (busy) return;
-    // A backup names the vault shown (Issue #48): the host refuses it if another vault is active.
-    const source = type === "vault_backup" ? backupSource() : null;
-    if (type === "vault_backup" && !source) {
-      setMessage("バックアップするVaultを確認できないため、開始しませんでした。表示を更新します。");
+    // A backup (Issue #48) and a publication decision (Issue #51) name the vault shown: the host
+    // refuses them if another vault is active.
+    const isPublication = PUBLICATION_TYPES.has(type);
+    const namesShown = type === "vault_backup" || isPublication;
+    const source = namesShown ? backupSource() : null;
+    if (namesShown && !source) {
+      setMessage(isPublication ? "対象のVaultを確認できないため、MCPへの公開の設定は変更していません。表示を更新します。" : "バックアップするVaultを確認できないため、開始しませんでした。表示を更新します。");
       await refresh();
       return;
     }
     if (source) params = { ...params, expectedVaultToken: source.vaultToken };
     busy = true;
     approvalBox.hidden = true;
+    publicationReview.hidden = true;
     pendingApproval = null;
     updateButtons();
-    const usesDialog = !params.path && !params.directory && !params.useDefault;
+    const usesDialog = !isPublication && !params.path && !params.directory && !params.useDefault;
     setMessage(usesDialog ? "Windowsのダイアログで選択してください。\n表示されない場合はタスクバーを確認してください。" : "処理中…");
     try {
       const response = await vaultRequest(type, params, { send });
-      if (source && response.vaultToken !== source.vaultToken) {
+      if (type === "vault_backup" && response.vaultToken !== source.vaultToken) {
         // The host only backs up the vault named; an answer naming another is reported, not trusted.
         setMessage(`バックアップ元が表示中のVaultと一致しません。作成されたファイルを確認してください。\nバックアップ元: ${response.vaultPath}\n保存先: ${response.backupPath}`);
         return;
       }
       setMessage(successMessage(type, response));
       if (response.status) showStatus(response.status);
-      if (type !== "vault_backup") onVaultChanged();
+      if (type !== "vault_backup" && !isPublication) onVaultChanged();
     } catch (error) {
       const response = error instanceof SearchError ? error.response : null;
       if (source && error.code === "vault_switched") {
-        setMessage(`表示していたVault（${source.vaultPath}）は、もうActiveではありません。バックアップは作成していません。\n表示を最新の状態に更新しました。確認してから、もう一度実行してください。`);
+        const unchanged = isPublication ? "MCPへの公開の設定は変更していません。" : "バックアップは作成していません。";
+        setMessage(`表示していたVault（${source.vaultPath}）は、もうActiveではありません。${unchanged}\n表示を最新の状態に更新しました。確認してから、もう一度実行してください。`);
+      } else if (isPublication && typeof error.code === "string" && error.code.startsWith("policy_")) {
+        setMessage("プライバシー設定を読み取れない（未初期化・破損・使用中など）ため、MCPへの公開を承認していません。下の「プライバシー設定」を確認してください。");
       } else if (error.code === "location_needs_approval" && response?.path) {
         setMessage("");
         showApproval(type, params, response);
@@ -206,6 +243,20 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     pendingApproval = null;
     setMessage("キャンセルしました。");
   });
+  // Confirming takes two steps: what publishing means and which vault, then the approval itself.
+  publicationConfirm.addEventListener("click", () => {
+    const source = backupSource();
+    if (busy || !source || status?.publication !== "pending") return;
+    publicationReviewTitle.textContent = `${PUBLICATION_REVIEW}\n対象: ${source.vaultPath}`;
+    publicationReview.hidden = false;
+    publicationApprove.focus();
+  });
+  publicationApprove.addEventListener("click", () => void run("vault_publication_confirm"));
+  publicationCancel.addEventListener("click", () => {
+    publicationReview.hidden = true;
+    setMessage("キャンセルしました。MCPへの公開は承認していません。");
+  });
+  publicationRevoke.addEventListener("click", () => void run("vault_publication_revoke"));
 
   return {
     refresh,

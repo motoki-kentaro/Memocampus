@@ -69,6 +69,10 @@ impl PolicyStore {
         }
         Ok(Self { dir: app_dir })
     }
+    /// The application directory this store reads (also where `config.json` lives).
+    pub fn app_dir(&self) -> &Path {
+        &self.dir
+    }
     pub fn policy_path(&self) -> PathBuf {
         self.dir.join("policy.json")
     }
@@ -194,6 +198,16 @@ impl PolicyStore {
     /// `initialize` with a policy of the caller's, at revision 1. It is checked whole, and its
     /// size, before anything is written, since the marker is never rolled back.
     pub fn initialize_with(&self, policy: &Policy) -> Result<Snapshot, StoreError> {
+        self.initialize_with_then(policy, || Ok(()))
+    }
+    /// `initialize_with`, running `before_write` under the policy's exclusive lock once every
+    /// check has passed and just before the first byte is written (Issue #51, F-02: the MCP
+    /// publication is withdrawn there). If it fails, nothing is written and its error is returned.
+    pub fn initialize_with_then(
+        &self,
+        policy: &Policy,
+        before_write: impl FnOnce() -> Result<(), StoreError>,
+    ) -> Result<Snapshot, StoreError> {
         let mut first = policy.clone();
         first.revision = 1;
         if !fits(&first) {
@@ -213,6 +227,7 @@ impl PolicyStore {
                 Err(_) => return Err(StoreError::Io),
             }
         }
+        before_write()?;
         let mut marker = OpenOptions::new()
             .write(true)
             .create_new(true)

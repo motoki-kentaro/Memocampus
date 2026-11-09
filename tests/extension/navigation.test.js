@@ -21,6 +21,7 @@ import { describeQueueStatus } from "../../extension/queue-text.js";
 import { evaluatePolicy } from "../../extension/policy.js";
 import defaults from "../../extension/policy-defaults.json" with { type: "json" };
 import { extensionDir } from "./fake-dom.js";
+import { confirmPublication, startMcp } from "./real-processes.js";
 
 const T0 = Date.UTC(2026, 10, 6, 12, 0, 0);
 const at = (seconds) => T0 + seconds * 1000;
@@ -1306,7 +1307,9 @@ test("end to end without SPA visits: no private title or page in the vault or MC
   const vault = path.join(appDir, "memocampus.sqlite3");
   try {
     assert.equal((await call({ type: "policy_initialize", requestId: "p" })).ok, true);
-    assert.equal((await call({ type: "vault_create", requestId: "c", useDefault: true })).ok, true);
+    const created = await call({ type: "vault_create", requestId: "c", useDefault: true });
+    assert.equal(created.ok, true);
+    assert.equal(created.status.publication, "pending", "a new vault starts unpublished");
     let worker;
     let abaWhileReading = false;
     const readPage = async (options) => {
@@ -1369,31 +1372,12 @@ test("end to end without SPA visits: no private title or page in the vault or MC
       db.close();
     }
 
-    const mcp = spawn(MCP_BIN, ["--vault", vault], { env, stdio: ["pipe", "pipe", "pipe"] });
-    let buffer = "";
-    const waiting = new Map();
-    mcp.stdout.on("data", (chunk) => {
-      buffer += chunk;
-      let index;
-      while ((index = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, index);
-        buffer = buffer.slice(index + 1);
-        if (line.trim()) {
-          const message = JSON.parse(line);
-          waiting.get(message.id)?.(message);
-        }
-      }
-    });
-    let next = 0;
-    const rpc = (method, params) =>
-      new Promise((resolve) => {
-        const id = ++next;
-        waiting.set(id, resolve);
-        mcp.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-      });
+    // Issue #51: a new vault is pending; MCP reads it only after the side panel's confirmation.
+    await confirmPublication(call);
+    const mcp = startMcp(MCP_BIN, ["--vault", vault], { env });
+    const { rpc } = mcp;
     try {
-      await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "audit-e2e", version: "0" } });
-      mcp.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+      await mcp.initialize("audit-e2e");
       const { tools } = (await rpc("tools/list", {})).result;
       let answers = "";
       for (const query of ["", "Title", "a.test", PRIVATE_TITLE]) answers += JSON.stringify(await rpc("tools/call", { name: "memocampus_search_visits", arguments: query ? { query } : {} }));
@@ -1402,9 +1386,7 @@ test("end to end without SPA visits: no private title or page in the vault or MC
       assert.ok(!answers.includes(PRIVATE_TITLE), "the private title never reaches MCP");
       assert.ok(!JSON.stringify(tools).toLowerCase().includes("navigation"), "no tool reads navigations");
     } finally {
-      const exited = new Promise((resolve) => mcp.once("exit", resolve));
-      mcp.kill();
-      await exited;
+      await mcp.close();
     }
   } finally {
     closing = true;

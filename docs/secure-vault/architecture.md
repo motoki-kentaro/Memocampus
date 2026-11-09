@@ -354,6 +354,13 @@ sections: "policy" (JSON copy of policy + PSL approvals), then "vault-a" (raw SQ
     the vault [CODE].
   - It shows the difference between them.
   - The user confirms (records `{state: confirmed, policyRevision}`) or keeps the vault pending.
+- **Policy edits and policy initialization** (Slice B0, review finding F-02; `slice-b0.md` §10).
+  - Ordinary edits of the global policy keep a confirmation; every read applies the current policy.
+  - Initializing a policy (`policy_initialize`, `policy_start`, possible only when no policy and
+    no marker exist, e.g. after a loss) first sets the active vault's publication back to
+    `pending`, then writes the policy. A failed withdrawal writes no policy; a failed policy write
+    after it leaves `pending`. A later restore (S3) that brings a policy copy must follow the same
+    order.
 - **Why the gate is needed.**
   - Rows saved under `saveButNoMcp` and image `mcpPublic` flags travel inside the vault.
   - On a new PC the global policy may be missing or more permissive, so without the gate those rows
@@ -417,7 +424,7 @@ Preconditions:
 | P2 | Export to `target.partial`. Plain to encrypted: `ATTACH target KEY x'VK'; SELECT sqlcipher_export('t')`. Encrypted to plain: `ATTACH target KEY ''; sqlcipher_export`. **Then `PRAGMA t.application_id`/`t.user_version` from the source: `sqlcipher_export` does not copy them [POC A-4.3].** The Backup API cannot cross modes (refused) [POC A-4.3]. `temp_store = MEMORY` | partial target, which may be *openable but incomplete* after a crash [POC A-4.5]; source untouched |
 | P3 | Verify target: keyed `integrity_check`, `schema::check`, ids, per-table row counts and content digests equal to the source, read under the same fence | same |
 | P4 | fsync target; `rename_no_replace(target.partial, target)`; promote the key store entry and sidecar from `.pending` | complete target exists but is not active |
-| P5 | **Commit point**: `config.json` = `{activeVault: target, mode, activeVaultId, publication: pending→confirmed only if the source was confirmed (same data), maintenance: none}`, atomic, `MOVEFILE_WRITE_THROUGH` | target active |
+| P5 | **Commit point**: `config.json` = `{activeVault: target, mode, activeVaultId, publication: pending→confirmed only if the source was confirmed (same data), maintenance: none}`, atomic (POSIX rename by handle + flush, see below) | target active |
 | P6 | `ROLLBACK` the source fence; report; the extension flushes its queue into the target | done; source kept unchanged |
 
 - **Crash recovery.**
@@ -431,7 +438,12 @@ Preconditions:
     write-through on the rename and without flushing the directory.
   - After a power cut the old config can reappear. Writes made to the target after the switch would
     then be hidden, though not lost.
-  - **Finding**: use `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` for P0 and P5.
+  - ~~**Finding**: use `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` for P0 and P5.~~
+    **Corrected in Slice B0** (`slice-b0.md` §6, §8): that call fails with `ERROR_ACCESS_DENIED` while
+    readers hold `config.json` open (most replaces failed in a measurement), and `WRITE_THROUGH` only
+    affects moves done as copy and delete. `write_config` now renames the flushed temp file through
+    its own handle with POSIX semantics (`FileRenameInfoEx`) and flushes it again. Survival of a
+    real power cut is not verified.
 - **Concurrent actors.**
 
   | Actor | During conversion |

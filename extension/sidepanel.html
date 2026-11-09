@@ -141,6 +141,17 @@
           <p id="vault-verdict"></p>
           <ul id="vault-reasons"></ul>
         </div>
+        <div id="vault-publication" class="vault-publication" hidden>
+          <p id="vault-publication-state" class="vault-publication-state"></p>
+          <p id="vault-publication-note" class="vault-meta"></p>
+          <button id="vault-publication-confirm" type="button" hidden>MCPへの公開を確認して承認…</button>
+          <button id="vault-publication-revoke" type="button" hidden>MCPへの公開を停止</button>
+          <div id="vault-publication-review" class="vault-approval" role="alertdialog" aria-labelledby="vault-publication-review-title" hidden>
+            <p id="vault-publication-review-title"></p>
+            <button id="vault-publication-approve" type="button">確認した上で承認し、MCPに公開する</button>
+            <button id="vault-publication-cancel" type="button">やめる</button>
+          </div>
+        </div>
         <div class="vault-actions">
           <button id="vault-create-default" type="button">既定の場所に新規作成</button>
           <p id="vault-default-path" class="vault-meta"></p>

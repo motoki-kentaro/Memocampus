@@ -156,6 +156,7 @@ export function createDocument() {
   for (const id of [
     "url-item-status", "gallery-manage-section", "item-dialog", "item-dialog-urls", "item-dialog-scope", "item-dialog-ack", "item-dialog-error", "item-dialog-repreview", "item-dialog-settings",
     "panel-image", "panel-settings", "settings-attention", "error", "empty", "load-more", "open-vault-settings", "record-status", "queue-status", "policy-status", "policy-initialize", "vault-approval",
+    "vault-publication", "vault-publication-confirm", "vault-publication-revoke", "vault-publication-review",
     "gallery-new-dot", "gallery-error", "gallery-open-settings", "gallery-empty", "gallery-more", "gallery-details", "gallery-sources-more", "gallery-menu",
     "gallery-filter", "gallery-tags-empty", "gallery-tag-picker", "gallery-tag-picker-more",
     "visit-calendar", "visit-date-chip",
@@ -367,10 +368,16 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
     requests: [],
     openedTabs: [],
     runtimeListeners: [],
+    /** Issue #51: vaults confirmed for MCP, whether the policy can be read, and older hosts. */
+    published: new Set(),
+    policyReady: true,
+    knowsPublication: true,
     status() {
       const base = { managementEnabled: true, overridden: false, defaultPath: "C:\\Vaults\\memocampus.sqlite3", defaultExists: false, locationApproved: false };
       if (!host.active) return { ...base, state: "not_configured", vaultPath: null, counts: null, location: null };
-      return { ...base, state: "ready", vaultPath: host.active, vaultToken: tokenOf(host.active), counts: { visits: host.vaults[host.active].length, snapshots: 0 }, location: { verdict: "no_issue_detected", reasons: [] } };
+      const confirmed = host.published.has(host.active);
+      const publication = host.knowsPublication ? { mode: "plain", publication: confirmed ? "confirmed" : "pending", publicationPolicyRevision: confirmed ? 4 : null } : {};
+      return { ...base, state: "ready", vaultPath: host.active, vaultToken: tokenOf(host.active), counts: { visits: host.vaults[host.active].length, snapshots: 0 }, location: { verdict: "no_issue_detected", reasons: [] }, ...publication };
     },
     /** `tags[vault]` maps a blob id to its tag names; `tagError` makes the next tag write fail. */
     tags: {},
@@ -526,6 +533,19 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
           host.backups.push({ vault: host.active, backupPath });
           resolve(reply({ type: "vault_result", backupPath, vaultPath: host.active, vaultToken: expected }));
         }, host.backupDelay));
+      }
+      if (message.type === "vault_publication_confirm" || message.type === "vault_publication_revoke") {
+        // As the real host: only for the vault shown (its token), and confirming needs a policy.
+        const fail = (error) => ({ ok: false, type: "vault_result", requestId: message.requestId, error });
+        if (!host.knowsPublication) return fail("unknown_type");
+        const expected = message.expectedVaultToken;
+        if (typeof expected !== "string" || !/^[0-9a-f]{64}$/.test(expected)) return fail("invalid_vault_token");
+        if (!host.active) return fail("vault_not_configured");
+        if (message.type === "vault_publication_confirm" && !host.policyReady) return fail("policy_not_initialized");
+        if (tokenOf(host.active) !== expected) return fail("vault_switched");
+        if (message.type === "vault_publication_confirm") host.published.add(host.active);
+        else host.published.delete(host.active);
+        return reply({ type: "vault_result", status: host.status() });
       }
       if (message.type === "vault_open") {
         host.active = message.path;

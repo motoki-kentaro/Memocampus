@@ -8,6 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { confirmPublication, startMcp } from "./real-processes.js";
 
 const HOST_BIN = process.env.MEMOCAMPUS_TEST_HOST;
 const MCP_BIN = process.env.MEMOCAMPUS_TEST_MCP;
@@ -47,7 +48,9 @@ test("end to end with the real host and MCP: a URL hidden, published, deleted; a
   let mcp;
   try {
     assert.equal((await call({ type: "policy_initialize", requestId: "p" })).ok, true);
-    assert.equal((await call({ type: "vault_create", requestId: "c", useDefault: true })).ok, true);
+    const created = await call({ type: "vault_create", requestId: "c", useDefault: true });
+    assert.equal(created.ok, true);
+    assert.equal(created.status.publication, "pending", "a new vault starts unpublished");
     const db = new DatabaseSync(vault);
     try {
       db.exec("PRAGMA foreign_keys = ON;");
@@ -59,30 +62,11 @@ test("end to end with the real host and MCP: a URL hidden, published, deleted; a
       db.close();
     }
 
-    mcp = spawn(MCP_BIN, ["--vault", vault], { env, stdio: ["pipe", "pipe", "pipe"] });
-    let buffer = "";
-    const waiting = new Map();
-    mcp.stdout.on("data", (chunk) => {
-      buffer += chunk;
-      let index;
-      while ((index = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, index);
-        buffer = buffer.slice(index + 1);
-        if (line.trim()) {
-          const message = JSON.parse(line);
-          waiting.get(message.id)?.(message);
-        }
-      }
-    });
-    let next = 0;
-    const rpc = (method, params) =>
-      new Promise((resolve) => {
-        const id = ++next;
-        waiting.set(id, resolve);
-        mcp.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-      });
-    await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "items-e2e", version: "0" } });
-    mcp.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    // Issue #51: a new vault is pending; MCP reads it only after the side panel's confirmation.
+    await confirmPublication(call);
+    mcp = startMcp(MCP_BIN, ["--vault", vault], { env });
+    const { rpc } = mcp;
+    await mcp.initialize("items-e2e");
     const visible = async () => {
       const answer = JSON.stringify(await rpc("tools/call", { name: "memocampus_search_visits", arguments: { query: "" } }));
       return [A, A_OTHER_QUERY, B].filter((url) => answer.includes(JSON.stringify(url).slice(1, -1)));
@@ -140,11 +124,7 @@ test("end to end with the real host and MCP: a URL hidden, published, deleted; a
       check.close();
     }
   } finally {
-    if (mcp) {
-      const exited = new Promise((resolve) => mcp.once("exit", resolve));
-      mcp.kill();
-      await exited;
-    }
+    await mcp?.close();
     rmSync(appDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

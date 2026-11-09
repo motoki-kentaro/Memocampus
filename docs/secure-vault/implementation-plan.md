@@ -62,7 +62,11 @@ HIGH-4, HIGH-5 and R8 for plain vaults. S2 and later need A' and S0.
 - **Tests:** full suites; an open/backup regression on a synthetic schema 7 vault created by the old
   binary.
 
-### S1 — hardening, plain vaults only
+### S1 — hardening, plain vaults only (carried out as **Slice B0**, see `slice-b0.md`)
+
+B0 implements this slice except for P8's test flag (not needed) and with the corrected config
+replace (POSIX rename instead of `MOVEFILE_WRITE_THROUGH`). Its differences are listed in
+`slice-b0.md` §8.
 
 - **Scope.**
   - `config.json` v2 with `mode` and `publication`, migrated from v1. The current active vault is

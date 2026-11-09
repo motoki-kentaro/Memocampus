@@ -23,7 +23,12 @@
 //! change nothing; `policy_preset` returns a draft; `policy_apply` stores a draft in place of the
 //! policy of a given ETag; `policy_start` stores the first policy of a new install, which is what
 //! starts recording. Only the last two write, and only through `PolicyStore`.
+//!
+//! Issue #51 (F-02): a policy that is initialized (`policy_initialize`, `policy_start`; only ever
+//! when no policy and no marker exist) first withdraws the active vault's MCP publication.
+//! Ordinary edits (`policy_apply`, `policy_item_apply`, `policy_migrate`, domain approvals) keep it.
 
+use crate::vault;
 use memocampus_native_host::policy::{
     self, CompiledPolicy, Decision, DomainApprovals, Policy, Problem, RuleSpec, TypedRule,
 };
@@ -81,19 +86,57 @@ const BUSY_WAIT: Duration = Duration::from_millis(20);
 
 pub struct PolicyGate {
     store: Result<PolicyStore, StoreError>,
+    /// Where the MCP publication lives, withdrawn before a policy is initialized (Issue #51,
+    /// F-02). None only in tests that do not involve a vault.
+    vaults: Option<vault::Environment>,
 }
 
 impl PolicyGate {
     pub fn from_process() -> Self {
         Self {
             store: PolicyStore::from_process(),
+            vaults: Some(vault::Environment::from_process()),
         }
     }
 
     /// A gate over the policy of `store` (a test's own directory).
     #[cfg(test)]
     pub fn with_store(store: PolicyStore) -> Self {
-        Self { store: Ok(store) }
+        Self {
+            store: Ok(store),
+            vaults: None,
+        }
+    }
+
+    /// A gate over the policy of `store` and the vault config of `env` (a test's own directory).
+    #[cfg(test)]
+    pub fn with_store_in(store: PolicyStore, env: vault::Environment) -> Self {
+        Self {
+            store: Ok(store),
+            vaults: Some(env),
+        }
+    }
+
+    /// Initializes the policy store, withdrawing the active vault's MCP publication first (under
+    /// the policy's lock, before anything is written). A new policy is a new basis for what MCP
+    /// may see, so the user confirms again. If the withdrawal fails, nothing is initialized: the
+    /// publication may then still say confirmed, but with no policy MCP reads nothing.
+    fn initialize_store(
+        &self,
+        store: &PolicyStore,
+        policy: &Policy,
+    ) -> Result<Snapshot, StoreError> {
+        store.initialize_with_then(policy, || match &self.vaults {
+            None => Ok(()),
+            Some(env) => {
+                vault::withdraw_publication(env)
+                    .map(|_| ())
+                    .map_err(|error| match error {
+                        vault::VaultError::Busy => StoreError::Busy,
+                        _ => StoreError::Io,
+                    })
+            }
+        })
     }
 
     fn load(&self) -> Result<Snapshot, &'static str> {
@@ -434,7 +477,7 @@ impl PolicyGate {
             {
                 return Err(Refusal::Code(VERSION_MISMATCH));
             }
-            let started = store.initialize_with(&draft).map_err(|error| {
+            let started = self.initialize_store(store, &draft).map_err(|error| {
                 Refusal::Code(match error {
                     StoreError::AlreadyInitialized => ALREADY_INITIALIZED,
                     other => store_code(other),
@@ -447,12 +490,13 @@ impl PolicyGate {
     /// Never replaces anything: a damaged or lost policy is refused, not reset.
     fn initialize(&self) -> Result<Snapshot, &'static str> {
         let store = self.store.as_ref().map_err(|_| UNAVAILABLE)?;
-        store.initialize().map_err(|error| match error {
-            StoreError::AlreadyInitialized => ALREADY_INITIALIZED,
-            StoreError::Busy => BUSY,
-            StoreError::Invalid => INVALID,
-            _ => UNAVAILABLE,
-        })
+        self.initialize_store(store, &Policy::default())
+            .map_err(|error| match error {
+                StoreError::AlreadyInitialized => ALREADY_INITIALIZED,
+                StoreError::Busy => BUSY,
+                StoreError::Invalid => INVALID,
+                _ => UNAVAILABLE,
+            })
     }
 }
 

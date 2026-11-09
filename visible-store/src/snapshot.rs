@@ -1,7 +1,12 @@
 //! The only code that opens a vault. It reads under one read transaction with a read-only
 //! connection, and closes the connection before any row is judged.
+//!
+//! The mode comes from the caller (the config), never from the file (Issue #51 B0-4). A plain
+//! vault must carry the SQLite header; an encrypted one must not, and is never handed to SQLite
+//! by this version.
 
-use crate::{location, Stage, VisibleError};
+use crate::{location, Stage, Target, VaultMode, VisibleError};
+use memocampus_native_host::active_vault;
 use memocampus_native_host::schema::{self, SchemaError};
 use rusqlite::{Connection, ErrorCode, OpenFlags};
 use std::fs::File;
@@ -74,10 +79,15 @@ fn sidecar_exists(path: &Path, suffix: &str) -> bool {
 }
 
 /// Checked on the raw file first: merely reading a WAL database leaves `-wal` and `-shm` files.
-pub(crate) fn check_file(path: &Path) -> Result<(), VisibleError> {
+/// A plain vault without the SQLite header is a mode mismatch: it may be an encrypted vault the
+/// config misdescribes, so it is never called damaged or of the wrong schema.
+pub(crate) fn check_file(path: &Path, mode: VaultMode) -> Result<(), VisibleError> {
     let metadata = std::fs::metadata(path).map_err(|_| VisibleError::VaultUnavailable)?;
     if !metadata.is_file() {
         return Err(VisibleError::VaultUnavailable);
+    }
+    if mode == VaultMode::Encrypted {
+        return check_encrypted_file(path);
     }
     let mut header = [0u8; HEADER_LEN];
     File::open(path)
@@ -87,7 +97,7 @@ pub(crate) fn check_file(path: &Path) -> Result<(), VisibleError> {
             _ => VisibleError::VaultUnavailable,
         })?;
     if !header.starts_with(MAGIC) {
-        return Err(VisibleError::VaultSchemaMismatch);
+        return Err(VisibleError::VaultModeMismatch);
     }
     let versions = [header[18], header[19]];
     if versions.contains(&WAL) || sidecar_exists(path, "-wal") || sidecar_exists(path, "-shm") {
@@ -97,6 +107,21 @@ pub(crate) fn check_file(path: &Path) -> Result<(), VisibleError> {
         return Err(VisibleError::VaultSchemaMismatch);
     }
     Ok(())
+}
+
+/// An encrypted vault starts with its random salt, never the SQLite header (and is never empty).
+/// This version stops there: reading it needs a key and SQLCipher (Slice S2), so it is never
+/// opened, and certainly never as a plain database.
+fn check_encrypted_file(path: &Path) -> Result<(), VisibleError> {
+    let mut head = [0u8; 16];
+    match File::open(path).and_then(|mut file| file.read_exact(&mut head)) {
+        Ok(()) if head != *MAGIC => Err(VisibleError::VaultEncryptionUnsupported),
+        Ok(()) => Err(VisibleError::VaultModeMismatch),
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+            Err(VisibleError::VaultModeMismatch)
+        }
+        Err(_) => Err(VisibleError::VaultUnavailable),
+    }
 }
 
 fn scalar_i64(db: &Connection, sql: &str) -> Result<i64, VisibleError> {
@@ -191,8 +216,11 @@ fn read_nothing(_: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-pub(crate) fn check_vault(path: &Path, stage: &mut dyn FnMut(Stage)) -> Result<(), VisibleError> {
-    read_committed(path, stage, read_nothing)
+pub(crate) fn check_vault(
+    target: &Target,
+    stage: &mut dyn FnMut(Stage),
+) -> Result<(), VisibleError> {
+    read_committed(target, stage, read_nothing)
 }
 
 /// As with visits, a row with a value of another type is left out. For an optional URL that means
@@ -259,27 +287,29 @@ fn read_image_rows(db: &Connection) -> rusqlite::Result<Vec<RawImageSave>> {
 }
 
 pub(crate) fn read_visits(
-    path: &Path,
+    target: &Target,
     stage: &mut dyn FnMut(Stage),
 ) -> Result<Vec<RawVisit>, VisibleError> {
-    read_committed(path, stage, read_rows)
+    read_committed(target, stage, read_rows)
 }
 
 pub(crate) fn read_image_saves(
-    path: &Path,
+    target: &Target,
     stage: &mut dyn FnMut(Stage),
 ) -> Result<Vec<RawImageSave>, VisibleError> {
-    read_committed(path, stage, read_image_rows)
+    read_committed(target, stage, read_image_rows)
 }
 
-/// Returns what `read` finds in one committed state of the vault.
+/// Returns what `read` finds in one committed state of the vault. The file read is the one the
+/// gate admitted: its identity is taken while SQLite holds it open (on Windows without delete
+/// sharing, so it cannot be replaced meanwhile) and must equal the admitted one.
 fn read_committed<T>(
-    path: &Path,
+    target: &Target,
     stage: &mut dyn FnMut(Stage),
     read: fn(&Connection) -> rusqlite::Result<T>,
 ) -> Result<T, VisibleError> {
-    let canonical = location::resolve_local(path)?;
-    check_file(&canonical)?;
+    let canonical = location::resolve_local(&target.path)?;
+    check_file(&canonical, target.mode)?;
     // Without SQLITE_OPEN_URI a path can never carry `immutable=1`, which would skip locking.
     let db = Connection::open_with_flags(
         &canonical,
@@ -292,6 +322,12 @@ fn read_committed<T>(
         .map_err(|error| classify(&error))?;
     // This first read takes the shared lock, which pins every later read to one committed state.
     scalar_i64(&db, "SELECT count(*) FROM sqlite_master")?;
+    if let Some(expected) = &target.token {
+        match active_vault::vault_token(&canonical) {
+            Ok(token) if token == *expected => {}
+            _ => return Err(VisibleError::VaultSwitched),
+        }
+    }
     check_schema(&db)?;
     stage(Stage::SchemaChecked);
     let rows = read(&db).map_err(|error| classify(&error))?;
