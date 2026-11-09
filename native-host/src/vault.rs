@@ -1552,21 +1552,31 @@ fn failed<E>(_: E) -> VaultError {
     VaultError::BackupFailed
 }
 
-fn copy_and_verify(source: &Connection, temp: &Path) -> Result<(), VaultError> {
-    let mut target = Connection::open_with_flags(
-        temp,
-        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(failed)?;
+/// Row counts of every table a backup checks: `Counts`, image tables, other tables.
+pub type ContentCounts = (Counts, (i64, i64, i64), (i64, i64, i64));
+
+pub fn content_counts(db: &Connection) -> rusqlite::Result<ContentCounts> {
+    Ok((
+        counts(db)?,
+        images::table_counts(db)?,
+        backup_only_counts(db)?,
+    ))
+}
+
+/// Copies `source` into `target` with the SQLite Backup API under one read transaction on the
+/// source, so the copy is one snapshot even while other processes write (committed WAL content
+/// included). Returns the source's counts read in that same transaction. Both connections may be
+/// keyed (SQLCipher re-encrypts every page under the target's key); the Backup API refuses to copy
+/// between a plain and an encrypted database.
+pub fn snapshot_into(
+    source: &Connection,
+    target: &mut Connection,
+) -> Result<ContentCounts, VaultError> {
     source.execute_batch("BEGIN").map_err(failed)?;
     let copied = (|| {
         // Counting inside the transaction takes the shared lock that pins the snapshot.
-        let expected = (
-            counts(source).map_err(failed)?,
-            images::table_counts(source).map_err(failed)?,
-            backup_only_counts(source).map_err(failed)?,
-        );
-        let backup = Backup::new(source, &mut target).map_err(failed)?;
+        let expected = content_counts(source).map_err(failed)?;
+        let backup = Backup::new(source, target).map_err(failed)?;
         let deadline = Instant::now() + BUSY_TIMEOUT;
         loop {
             match backup.step(-1).map_err(failed)? {
@@ -1579,19 +1589,29 @@ fn copy_and_verify(source: &Connection, temp: &Path) -> Result<(), VaultError> {
         Ok(expected)
     })();
     let _ = source.execute_batch("COMMIT");
-    let expected = copied?;
+    copied
+}
+
+/// A copy just made: full `integrity_check`, the exact schema and the counts the source had.
+pub fn verify_copy(target: &Connection, expected: &ContentCounts) -> Result<(), VaultError> {
     let integrity: String = target
         .query_row("PRAGMA integrity_check", [], |row| row.get(0))
         .map_err(failed)?;
-    validate_schema(&target).map_err(failed)?;
-    let actual = (
-        counts(&target).map_err(failed)?,
-        images::table_counts(&target).map_err(failed)?,
-        backup_only_counts(&target).map_err(failed)?,
-    );
-    if integrity != "ok" || actual != expected {
+    schema::check(target).map_err(failed)?;
+    if integrity != "ok" || content_counts(target).map_err(failed)? != *expected {
         return Err(VaultError::BackupFailed);
     }
+    Ok(())
+}
+
+fn copy_and_verify(source: &Connection, temp: &Path) -> Result<(), VaultError> {
+    let mut target = Connection::open_with_flags(
+        temp,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(failed)?;
+    let expected = snapshot_into(source, &mut target)?;
+    verify_copy(&target, &expected)?;
     drop(target);
     OpenOptions::new()
         .write(true)

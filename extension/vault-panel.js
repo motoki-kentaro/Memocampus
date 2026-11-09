@@ -3,19 +3,29 @@
 
 import { SearchError } from "./search-client.js";
 import {
+  BACKUP_FORMAT_NOTE,
   ENCRYPTION_NOTE,
   LOCATION_NOTE,
   PHRASE_CHECK_TITLE,
   PHRASE_NOTE,
   PHRASE_TITLE,
+  BACKUP_PHRASE_NOTE,
+  PASSWORD_NOTE,
   PUBLICATION_NOTE,
   PUBLICATION_REVIEW,
   RECOVERY_TITLE,
   VERDICT_TEXT,
+  backupFormat,
   checkAnswers,
+  checkBackupPassword,
+  checkBackupPhrase,
   describePhraseProblem,
+  describePolicyCopy,
   describePublication,
   describeReasons,
+  describeRestorePending,
+  describeRestoreSource,
+  describeRestored,
   describeStatus,
   formatCounts,
   pickPositions,
@@ -24,7 +34,9 @@ import {
 
 const PUBLICATION_TYPES = new Set(["vault_publication_confirm", "vault_publication_revoke"]);
 /** Requests that may open a Windows dialog when no path is given. */
-const DIALOG_TYPES = new Set(["vault_create", "vault_open", "vault_backup", "vault_create_encrypted", "vault_recover"]);
+const DIALOG_TYPES = new Set(["vault_create", "vault_open", "vault_backup", "vault_create_encrypted", "vault_recover", "vault_restore_inspect", "vault_restore"]);
+/** Issue #51 Slice C: the steps that end a restore. */
+const RESTORE_END_TYPES = new Set(["vault_restore_activate", "vault_restore_discard"]);
 /** Creation of an encrypted vault ends (either way) with these. */
 const CREATION_END_TYPES = new Set(["vault_create_encrypted_commit", "vault_create_encrypted_cancel"]);
 
@@ -91,16 +103,49 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   const recoveryInput = $("#vault-recovery-input");
   const recoverySubmit = $("#vault-recovery-submit");
   const recoveryCancel = $("#vault-recovery-cancel");
+  // Issue #51 Slice C: backup protection and restore. Passwords and phrases live only in these
+  // inputs and in the one request that carries them; they are cleared when the step ends.
+  const backupNormal = $("#vault-backup-normal");
+  const backupPassword = $("#vault-backup-password");
+  const backupNote = $("#vault-backup-note");
+  const backupPasswordFields = $("#vault-backup-password-fields");
+  const backupPasswordInput = $("#vault-backup-password-input");
+  const backupPasswordConfirm = $("#vault-backup-password-confirm");
+  // Review finding C-03: an encrypted vault's backup (B, D) needs the phrase that recovers it.
+  const backupPhraseRow = $("#vault-backup-phrase-row");
+  const backupPhrase = $("#vault-backup-phrase");
+  $("#vault-backup-phrase-note").textContent = BACKUP_PHRASE_NOTE;
+  const restorePick = $("#vault-restore-pick");
+  const restoreBox = $("#vault-restore");
+  const restoreTitle = $("#vault-restore-title");
+  const restorePasswordRow = $("#vault-restore-password-row");
+  const restorePassword = $("#vault-restore-password");
+  const restorePhraseRow = $("#vault-restore-phrase-row");
+  const restorePhrase = $("#vault-restore-phrase");
+  const restoreSubmit = $("#vault-restore-submit");
+  const restoreCancel = $("#vault-restore-cancel");
+  const restoredBox = $("#vault-restored");
+  const restoredTitle = $("#vault-restored-title");
+  const restoredPolicy = $("#vault-restored-policy");
+  const restoredPolicyDetails = $("#vault-restored-policy-details");
+  const restoredPolicyJson = $("#vault-restored-policy-json");
+  const restoreActivate = $("#vault-restore-activate");
+  const restoreDiscard = $("#vault-restore-discard");
+  $("#vault-backup-password-note").textContent = PASSWORD_NOTE;
   encryptionNote.textContent = ENCRYPTION_NOTE;
   phraseNote.textContent = PHRASE_NOTE;
   phraseCheckTitle.textContent = PHRASE_CHECK_TITLE;
 
-  const actionButtons = [createDefault, createPick, openPick, backupPick, publicationConfirm, publicationRevoke, publicationApprove, ...document.querySelectorAll("[data-manual]")];
+  const actionButtons = [createDefault, createPick, openPick, backupPick, restorePick, publicationConfirm, publicationRevoke, publicationApprove, ...document.querySelectorAll("[data-manual]")];
   const creationButtons = [createDefault, createPick, openPick, document.querySelector('[data-manual="vault_create"]'), document.querySelector('[data-manual="vault_open"]')];
   // The phrase lives only here, in this page's memory, until the creation ends; it is never stored.
   let onboarding = null;
   let answerInputs = [];
   let recoveryTarget = null;
+  // The backup chosen for a restore (`vault_restore_inspect` answer), and the restored vault waiting
+  // for the user's decision (`vault_restore` answer, or `status.restorePending`).
+  let restoreSource = null;
+  let restored = null;
   let status = null;
   // Each status asked for; only the latest answer is shown (an older one arriving late never
   // replaces it, so the vault shown and the token a backup sends always come from one answer).
@@ -133,7 +178,55 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     encryptedChoice.disabled = busy || !canEncrypt;
     plainChoice.disabled = busy;
     if (!canEncrypt && status) plainChoice.checked = true;
-    for (const button of [phraseWritten, phraseConfirm, phraseBack, onboardingCancel, creationDiscard, recoveryStart, recoverySubmit, recoveryCancel]) button.disabled = busy;
+    for (const button of [phraseWritten, phraseConfirm, phraseBack, onboardingCancel, creationDiscard, recoveryStart, recoverySubmit, recoveryCancel, restoreSubmit, restoreCancel, restoreDiscard]) button.disabled = busy;
+    // One restore at a time: none starts while a restored vault waits for a decision.
+    if (status?.restorePending || restored) restorePick.disabled = true;
+    restoreActivate.disabled = busy || !restored?.vaultToken;
+    backupNormal.disabled = busy;
+    backupPassword.disabled = busy;
+  }
+
+  function protection() {
+    return backupPassword.checked ? "password" : "normal";
+  }
+
+  function clearBackupPassword() {
+    backupPasswordInput.value = "";
+    backupPasswordConfirm.value = "";
+  }
+
+  /** Forgets every backup secret typed (password and phrase). */
+  function clearBackupSecrets() {
+    clearBackupPassword();
+    backupPhrase.value = "";
+  }
+
+  function encryptedShown() {
+    return status?.mode === "encrypted";
+  }
+
+  /** The parameters of a backup as chosen, or null (with a message) when the password is not usable. */
+  function backupParams(extra = {}) {
+    const params = { ...extra, protection: protection() };
+    if (params.protection === "password") {
+      const problem = checkBackupPassword(backupPasswordInput.value, backupPasswordConfirm.value);
+      if (problem) {
+        setMessage(`${problem}\nバックアップは作成していません。`);
+        backupPasswordInput.focus();
+        return null;
+      }
+      params.password = backupPasswordInput.value;
+    }
+    if (encryptedShown()) {
+      const problem = checkBackupPhrase(backupPhrase.value);
+      if (problem) {
+        setMessage(`${problem}\nバックアップは作成していません。`);
+        backupPhrase.focus();
+        return null;
+      }
+      params.recoveryPhrase = backupPhrase.value;
+    }
+    return params;
   }
 
   function encryptedChosen() {
@@ -181,6 +274,14 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     if (publication !== "pending") publicationReview.hidden = true;
 
     encryptionBox.hidden = !status?.managementEnabled;
+    backupNote.textContent = BACKUP_FORMAT_NOTE[backupFormat(status?.mode, protection())];
+    backupPasswordFields.hidden = protection() !== "password";
+    backupPhraseRow.hidden = !encryptedShown();
+    if (backupPhraseRow.hidden) backupPhrase.value = "";
+    // A restore recorded by the host, but not shown in this page (e.g. the panel was reopened).
+    const pending = status?.restorePending ?? null;
+    if (!pending && restored?.fromStatus) closeRestored();
+    if (pending && !restored) showRestorePending(pending);
     const pendingPath = typeof status?.creationPending === "string" ? status.creationPending : null;
     creationPendingBox.hidden = pendingPath === null || Boolean(onboarding);
     if (!creationPendingBox.hidden) {
@@ -239,7 +340,13 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   }
 
   function successMessage(type, response) {
-    if (type === "vault_backup") return `バックアップを作成しました。\nバックアップ元: ${response.vaultPath}\n保存先: ${response.backupPath}`;
+    if (type === "vault_backup") {
+      const format = typeof response.format === "string" ? `（形式${response.format}）` : "";
+      const policy = response.policyCopy === true ? "\nプライバシー設定のコピーを含めました。" : "";
+      return `バックアップを作成しました${format}。\nバックアップ元: ${response.vaultPath}\n保存先: ${response.backupPath}${policy}`;
+    }
+    if (type === "vault_restore_activate") return `復元したVaultを使い始めました:\n${response.path}\nMCPへの公開は未承認です。必要なら下で承認してください。`;
+    if (type === "vault_restore_discard") return "復元したVault（または中断された復元）を破棄しました。Active Vaultは変更していません。";
     if (type === "vault_publication_confirm") return "このVaultをMCPに公開しました。プライバシー設定を通過した記録だけが読まれます。";
     if (type === "vault_publication_revoke") return "このVaultのMCPへの公開を停止しました。MCPクライアントには内容を返しません。";
     if (type === "vault_create") return `新しいVaultを作成し、使用を開始しました:\n${response.path}`;
@@ -281,14 +388,27 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
         startOnboarding(response);
         return;
       }
+      if (type === "vault_restore_inspect") {
+        startRestore(response);
+        return;
+      }
+      if (type === "vault_restore") {
+        // Restored, but not active: the user decides after seeing what was restored.
+        closeRestore();
+        showRestored(response);
+        setMessage("復元が完了しました。内容を確認して、使い始めるか破棄してください。");
+        return;
+      }
+      if (RESTORE_END_TYPES.has(type)) closeRestored();
       if (CREATION_END_TYPES.has(type)) clearOnboarding();
       if (type === "vault_recover") closeRecovery();
       setMessage(successMessage(type, response));
       if (response.status) showStatus(response.status);
-      if (type !== "vault_backup" && !isPublication && type !== "vault_create_encrypted_cancel") onVaultChanged();
+      if (type !== "vault_backup" && !isPublication && type !== "vault_create_encrypted_cancel" && type !== "vault_restore_discard") onVaultChanged();
     } catch (error) {
       const response = error instanceof SearchError ? error.response : null;
       if (type === "vault_create_encrypted_commit" && (error.code === "vault_creation_not_pending" || error.code === "vault_creation_damaged")) clearOnboarding();
+      if (type === "vault_restore_activate" && error.code === "vault_restore_not_pending") closeRestored();
       if (error.code === "recovery_phrase_invalid") {
         setMessage(describePhraseProblem(response));
       } else if ((error.code === "key_unavailable" || error.code === "vault_locked" || error.code === "vault_decrypt_failed") && response?.recoveryAvailable === true && response.path) {
@@ -311,9 +431,60 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
         setMessage(lines.join("\n"));
       }
     } finally {
+      // A backup password and phrase are used for one request only.
+      if (type === "vault_backup") clearBackupSecrets();
       busy = false;
       await refresh();
     }
+  }
+
+  function startRestore(info) {
+    restoreSource = info;
+    restoreTitle.textContent = describeRestoreSource(info);
+    restorePasswordRow.hidden = info.needsPassword !== true;
+    restorePhraseRow.hidden = info.needsPhrase !== true;
+    restorePassword.value = "";
+    restorePhrase.value = "";
+    restoreBox.hidden = false;
+    setMessage("");
+    (info.needsPassword ? restorePassword : info.needsPhrase ? restorePhrase : restoreSubmit).focus();
+  }
+
+  /** Forgets the backup chosen and the secrets typed for it. */
+  function closeRestore() {
+    restoreSource = null;
+    restorePassword.value = "";
+    restorePhrase.value = "";
+    restoreBox.hidden = true;
+  }
+
+  function showRestored(response) {
+    restored = { path: response.path, vaultToken: response.vaultToken, fromStatus: false };
+    restoredTitle.textContent = describeRestored(response);
+    restoredPolicy.textContent = describePolicyCopy(response.policyCopy);
+    const copy = response.policyCopy;
+    restoredPolicyDetails.hidden = copy?.state !== "valid";
+    restoredPolicyJson.textContent = copy?.state === "valid" ? JSON.stringify({ policy: copy.policy, approvedDomains: copy.approvedDomains }, null, 2) : "";
+    restoreActivate.hidden = false;
+    restoredBox.hidden = false;
+    restoreActivate.focus();
+  }
+
+  function showRestorePending(pending) {
+    const usable = pending.phase === "restored" || pending.phase === "verified";
+    restored = { path: pending.path, vaultToken: usable ? pending.vaultToken : null, fromStatus: true };
+    restoredTitle.textContent = describeRestorePending(pending);
+    restoredPolicy.textContent = "";
+    restoredPolicyDetails.hidden = true;
+    restoredPolicyJson.textContent = "";
+    restoreActivate.hidden = !usable;
+    restoredBox.hidden = false;
+  }
+
+  function closeRestored() {
+    restored = null;
+    restoredPolicyJson.textContent = "";
+    restoredBox.hidden = true;
   }
 
   function wordItem(word) {
@@ -417,7 +588,39 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   createDefault.addEventListener("click", () => void run(createType(), { useDefault: true }));
   createPick.addEventListener("click", () => void run(createType()));
   openPick.addEventListener("click", () => void run("vault_open"));
-  backupPick.addEventListener("click", () => void run("vault_backup"));
+  backupPick.addEventListener("click", () => {
+    const params = backupParams();
+    if (params) void run("vault_backup", params);
+  });
+  for (const choice of [backupNormal, backupPassword]) {
+    choice.addEventListener("change", () => {
+      if (!backupPassword.checked) clearBackupPassword();
+      render();
+    });
+  }
+  restorePick.addEventListener("click", () => void run("vault_restore_inspect"));
+  restoreSubmit.addEventListener("click", () => {
+    if (!restoreSource || busy) return;
+    const params = { backupPath: restoreSource.backupPath };
+    if (restoreSource.needsPassword) {
+      if (!restorePassword.value) {
+        setMessage("バックアップのパスワードを入力してください。");
+        restorePassword.focus();
+        return;
+      }
+      params.password = restorePassword.value;
+    }
+    if (restoreSource.needsPhrase) params.recoveryPhrase = restorePhrase.value;
+    void run("vault_restore", params);
+  });
+  restoreCancel.addEventListener("click", () => {
+    closeRestore();
+    setMessage("キャンセルしました。何も復元していません。");
+  });
+  restoreActivate.addEventListener("click", () => {
+    if (restored?.vaultToken) void run("vault_restore_activate", { expectedVaultToken: restored.vaultToken });
+  });
+  restoreDiscard.addEventListener("click", () => void run("vault_restore_discard"));
   for (const button of document.querySelectorAll("[data-manual]")) {
     button.addEventListener("click", () => {
       const value = manualInput.value.trim();
@@ -427,7 +630,12 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
         return;
       }
       const type = button.dataset.manual === "vault_create" ? createType() : button.dataset.manual;
-      void run(type, type === "vault_backup" ? { directory: value } : { path: value });
+      if (type === "vault_backup") {
+        const params = backupParams({ directory: value });
+        if (params) void run(type, params);
+        return;
+      }
+      void run(type, { path: value });
     });
   }
   approveButton.addEventListener("click", () => {

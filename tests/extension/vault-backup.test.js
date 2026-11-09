@@ -22,7 +22,7 @@ test("a backup sends the token of the vault shown and names its source and desti
   await settle(30);
   assert.deepEqual(backups(host).map(({ expectedVaultToken, directory }) => ({ expectedVaultToken, directory })), [{ expectedVaultToken: tokenOf("A"), directory: undefined }]);
   assert.deepEqual(host.backups, [{ vault: "A", backupPath: "C:\\Backups\\memocampus-backup-0.sqlite3" }]);
-  assert.equal($("#vault-message").textContent, "バックアップを作成しました。\nバックアップ元: A\n保存先: C:\\Backups\\memocampus-backup-0.sqlite3");
+  assert.equal($("#vault-message").textContent, "バックアップを作成しました（形式A）。\nバックアップ元: A\n保存先: C:\\Backups\\memocampus-backup-0.sqlite3");
 
   // The folder typed by hand: the same token goes with it.
   $("#vault-path-input").value = "D:\\Backups";
@@ -193,7 +193,7 @@ test("end to end with the real host: the vault shown is backed up; one switched 
     const done = readdirSync(dest);
     assert.equal(done.length, 1, $("#vault-message").textContent);
     assert.deepEqual(urls(path.join(dest, done[0])), ["https://a.test/"]);
-    assert.match($("#vault-message").textContent, /^バックアップを作成しました。\nバックアップ元: .*a\.sqlite3\n保存先: .*memocampus-backup-/);
+    assert.match($("#vault-message").textContent, /^バックアップを作成しました（形式A）。\nバックアップ元: .*a\.sqlite3\n保存先: .*memocampus-backup-/);
 
     // Another window opens B; this panel still shows A. The backup it asks for is refused.
     assert.equal((await call({ type: "vault_open", requestId: "o", path: vaultB })).ok, true);

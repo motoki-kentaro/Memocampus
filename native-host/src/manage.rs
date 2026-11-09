@@ -1,6 +1,7 @@
 //! Vault management messages from the side panel: `vault_status`, `vault_create`,
 //! `vault_open`, `vault_backup`, and (Issue #51) `vault_publication_confirm` /
-//! `vault_publication_revoke`. Every message gets exactly one `vault_result` response.
+//! `vault_publication_revoke`, the encrypted vault messages (`encrypted.rs`) and backup restore
+//! (`restore.rs`). Every message gets exactly one `vault_result` response.
 //!
 //! Publication decisions exist only here, in the Native Host, which only the extension can reach;
 //! the MCP server has no way to make or undo one.
@@ -21,8 +22,6 @@ use memocampus_native_host::policy_store::{PolicyStore, StoreError};
 
 const MAX_PATH_CHARS: usize = 32_767;
 const DEFAULT_VAULT_NAME: &str = "memocampus.sqlite3";
-/// `vault_backup` of an encrypted vault: refused, nothing written (Slice C brings its backups).
-const ENCRYPTED_BACKUP_UNSUPPORTED: &str = "vault_backup_encrypted_unsupported";
 
 struct Failure {
     code: &'static str,
@@ -66,6 +65,10 @@ pub fn handle(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> 
         Some("vault_create_encrypted_commit") => encrypted::commit(session, message),
         Some("vault_create_encrypted_cancel") => encrypted::cancel(session),
         Some("vault_recover") => encrypted::recover(session, dialogs, message),
+        Some("vault_restore_inspect") => restore::inspect(session, dialogs, message),
+        Some("vault_restore") => restore::restore(session, dialogs, message),
+        Some("vault_restore_activate") => restore::activate(session, message),
+        Some("vault_restore_discard") => restore::discard(session),
         _ => Err(Failure::with("unknown_type", json!({}))),
     };
     let mut response = match result {
@@ -107,6 +110,8 @@ pub fn status(session: &Session) -> Value {
         // the target of a creation interrupted before its phrase was confirmed (to be cancelled).
         "encryptionAvailable": cfg!(windows),
         "creationPending": encrypted::pending_creation(session),
+        // Issue #51 Slice C: a restored vault not yet activated (or a restore interrupted).
+        "restorePending": restore::pending_restore(session),
     });
     let (path, mode, vault_id, config) = match vault::resolve(env) {
         Err(error) => {
@@ -367,6 +372,11 @@ fn open(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Result
 /// backup is read only from that same vault file (`read_for`), after the folder is chosen. A switch
 /// at any point before (panel shown, dialog open, folder given) fails with `vault_switched`, before
 /// any file is created; a switch away and back to the same file is that vault again.
+///
+/// Issue #51 Slice C: `protection` is `"normal"` (default) or `"password"` (with `password`). A plain
+/// vault's normal backup is format A (a plain SQLite file, as before); the others are containers
+/// (`backup.rs`): B (encrypted vault), C (plain, password) and D (encrypted, password). B and D also
+/// need `recoveryPhrase`, which must recover this very vault.
 fn backup(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Result<Value, Failure> {
     require_management(session)?;
     let expected = message
@@ -374,36 +384,77 @@ fn backup(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Resu
         .and_then(Value::as_str)
         .filter(|token| crate::image_original::is_hex64(token))
         .ok_or_else(|| Failure::with("invalid_vault_token", json!({})))?;
+    let protection = backup::protection(message)?;
     // Fail before showing a dialog if there is nothing to back up, or not the vault shown.
     let ticket = session.ticket()?;
-    // Issue #51 Slice B: the existing backup writes a plain SQLite copy. An encrypted vault is
-    // never copied out in the clear; its backups (format B/C) arrive in Slice C.
-    if session.active_target()?.mode == VaultMode::Encrypted {
-        return Err(Failure::with(ENCRYPTED_BACKUP_UNSUPPORTED, json!({})));
-    }
-    if ticket.token != expected {
+    let active = session.active_target()?;
+    if ticket.token != expected || active.path != ticket.path {
         return Err(VaultError::Switched.into());
     }
+    let kind = backup::kind_for(active.mode, &protection);
+    // B and D (review finding C-03): the phrase the user holds, checked for syntax before the
+    // dialog and against this vault's envelope and key before anything is written.
+    let phrase = match kind {
+        Some(memocampus_native_host::secure_vault::container::Kind::B)
+        | Some(memocampus_native_host::secure_vault::container::Kind::D) => {
+            let typed = zeroize::Zeroizing::new(
+                message
+                    .get("recoveryPhrase")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            );
+            Some(
+                memocampus_native_host::secure_vault::phrase::parse(&typed)
+                    .map_err(encrypted::phrase_failure)?,
+            )
+        }
+        _ => None,
+    };
     // Neither a connection nor a lock is held while the dialog is open.
     session.reset();
     let dir = match requested_path(message, "directory")? {
         Some(path) => path,
         None => dialogs.choose_backup_dir().ok_or(VaultError::Cancelled)?,
     };
-    let path = session.read_for(&ticket, |db| {
-        vault::backup_vault(db, &dir, SystemTime::now())
+    let Some(kind) = kind else {
+        let path = session.read_for(&ticket, |db| {
+            vault::backup_vault(db, &dir, SystemTime::now())
+        })?;
+        return Ok(json!({
+            "backupPath": display(&path),
+            "vaultPath": ticket.path,
+            "vaultToken": ticket.token,
+            "format": "A",
+            "policyCopy": false,
+        }));
+    };
+    let source = backup::Source {
+        path: PathBuf::from(&ticket.path),
+        vault_id: active.vault_id,
+        app: session
+            .env
+            .app_dir
+            .clone()
+            .ok_or(VaultError::AppDirUnavailable)?,
+        token: ticket.token.clone(),
+        phrase,
+    };
+    let written = session.read_for(&ticket, |db| {
+        backup::write(db, &source, &dir, kind, &protection, SystemTime::now())
     })?;
-    Ok(json!({
-        "backupPath": display(&path),
-        "vaultPath": ticket.path,
-        "vaultToken": ticket.token,
-    }))
+    Ok(backup::response(&written, &ticket.path, &ticket.token))
 }
 
+mod backup;
 mod encrypted;
+mod restore;
 
 #[cfg(test)]
 mod backup_race_tests;
+
+#[cfg(test)]
+mod backup_restore_tests;
 
 #[cfg(test)]
 mod tests {

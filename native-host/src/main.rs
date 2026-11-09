@@ -449,7 +449,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 | "vault_create_encrypted"
                 | "vault_create_encrypted_commit"
                 | "vault_create_encrypted_cancel"
-                | "vault_recover",
+                | "vault_recover"
+                | "vault_restore_inspect"
+                | "vault_restore"
+                | "vault_restore_activate"
+                | "vault_restore_discard",
             ) => {
                 write_message(&manage::handle(
                     &mut session,

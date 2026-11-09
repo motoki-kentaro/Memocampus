@@ -213,3 +213,80 @@ function startMcpServer(servers, env, args) {
   servers.push(mcp);
   return mcp;
 }
+
+test("end to end with the real host and MCP: a password backup of an encrypted vault restores on another PC as a new vault that MCP reads only once confirmed", { skip: HOST_BIN && MCP_BIN ? false : "set MEMOCAMPUS_TEST_HOST and MEMOCAMPUS_TEST_MCP to run" }, async () => {
+  const { spawn } = await import("node:child_process");
+  const { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } = await import("node:fs");
+  const os = await import("node:os");
+  const root = mkdtempSync(path.join(os.tmpdir(), "memocampus-restore-e2e-"));
+  // Two app directories: this PC and a new PC (no config, no key store entry of the first).
+  const caller = (appDir) => {
+    const env = { ...process.env, MEMOCAMPUS_APP_DIR: appDir };
+    delete env.MEMOCAMPUS_DB;
+    const call = (message) =>
+      new Promise((resolve, reject) => {
+        const child = spawn(HOST_BIN, [], { env, cwd: root, stdio: ["pipe", "pipe", "pipe"] });
+        const chunks = [];
+        child.stdout.on("data", (chunk) => chunks.push(chunk));
+        child.on("error", reject);
+        child.on("close", () => {
+          const out = Buffer.concat(chunks);
+          if (out.length < 4) return reject(new Error("no answer"));
+          resolve(JSON.parse(out.subarray(4, 4 + out.readUInt32LE(0)).toString("utf8")));
+        });
+        const body = Buffer.from(JSON.stringify({ requestId: "r", ...message }), "utf8");
+        const length = Buffer.alloc(4);
+        length.writeUInt32LE(body.length);
+        child.stdin.end(Buffer.concat([length, body]));
+      });
+    return { env, call };
+  };
+  const first = caller(path.join(root, "app"));
+  const second = caller(path.join(root, "app2"));
+  const backups = path.join(root, "backups");
+  mkdirSync(backups);
+  const servers = [];
+  try {
+    assert.equal((await first.call({ type: "policy_initialize" })).ok, true);
+    const begun = await first.call({ type: "vault_create_encrypted", path: path.join(root, "enc.sqlite3") });
+    const phrase = begun.recoveryPhrase.join(" ");
+    assert.equal((await first.call({ type: "vault_create_encrypted_commit", recoveryPhrase: phrase })).ok, true);
+    const ack = await first.call({ type: "visit", id: "v1", url: "https://public.test/restored-row", title: "Restored row", incognito: false, visitedAt: "2026-11-09T10:00:00.000Z" });
+    assert.equal(ack.ok, true, JSON.stringify(ack));
+    const shown = await first.call({ type: "vault_status" });
+    const backedUp = await first.call({ type: "vault_backup", expectedVaultToken: shown.status.vaultToken, directory: backups, protection: "password", password: "e2e password", recoveryPhrase: phrase });
+    assert.equal(backedUp.ok, true, JSON.stringify(backedUp));
+    assert.equal(backedUp.format, "D");
+    const bytes = readFileSync(backedUp.backupPath);
+    for (const secret of ["restored-row", "e2e password", phrase, "SQLite format 3"]) assert.equal(bytes.includes(secret), false, secret);
+
+    // The new PC: a policy of its own is ready, which must not publish the restored vault.
+    assert.equal((await second.call({ type: "policy_initialize" })).ok, true);
+    const inspected = await second.call({ type: "vault_restore_inspect", path: backedUp.backupPath });
+    assert.deepEqual([inspected.format, inspected.needsPassword, inspected.needsPhrase], ["D", true, true]);
+    const target = path.join(root, "restored.sqlite3");
+    const restored = await second.call({ type: "vault_restore", backupPath: backedUp.backupPath, path: target, password: "e2e password", recoveryPhrase: phrase });
+    assert.equal(restored.ok, true, JSON.stringify(restored));
+    assert.equal(restored.policyCopy.state, "valid");
+    assert.equal(restored.status.state, "not_configured", "restored, not active yet");
+    const activated = await second.call({ type: "vault_restore_activate", expectedVaultToken: restored.vaultToken });
+    assert.equal(activated.status.publication, "pending");
+    const pending = await failure(startMcpServer(servers, second.env, []).initialize("restore-e2e"));
+    assert.match(pending.stderr, /vault refused: vault_publication_pending/);
+    await confirmPublication(second.call);
+    const mcp = startMcpServer(servers, second.env, []);
+    await mcp.initialize("restore-e2e");
+    const found = JSON.stringify(await mcp.request("tools/call", { name: "memocampus_search_visits", arguments: { query: "" } }));
+    assert.match(found, /restored-row/);
+    for (const secret of ["e2e password", phrase]) assert.equal(found.includes(secret), false);
+    // Nothing of the restore is readable at rest on the new PC.
+    for (const name of readdirSync(path.join(root, "app2"), { recursive: true })) {
+      const file = path.join(root, "app2", String(name));
+      if (statSync(file).isFile()) assert.equal(readFileSync(file).includes("restored-row"), false, file);
+    }
+    assert.equal(readFileSync(target).includes("restored-row"), false);
+  } finally {
+    for (const server of servers) await server.close();
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});

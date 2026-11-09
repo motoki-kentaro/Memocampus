@@ -27,7 +27,9 @@ own license applies. (The browser extension does not contain it; its notices are
 | Changes by Memocampus | None |
 
 The Rust crates used for key handling (`bip39`, `chacha20poly1305`, `hkdf`, `hmac`, `sha2`,
-`subtle`, `zeroize`, `getrandom`) are licensed under MIT and/or Apache-2.0 (`bip39`: CC0-1.0), like
-the crates already used before Slice B; see each crate's metadata in `Cargo.lock`.
+`subtle`, `zeroize`, `getrandom`) and, since Slice C, for password-protected backups (`argon2` 0.5.3
+with its dependencies `blake2` 0.10.6, `password-hash` 0.5.0 and `base64ct` 1.8.3) are licensed
+under MIT and/or Apache-2.0 (`bip39`: CC0-1.0), like the crates already used before Slice B; see each
+crate's metadata in `Cargo.lock`.
 
 This file is not legal advice.

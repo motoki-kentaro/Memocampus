@@ -13,10 +13,12 @@
 //! - `sidecar`: `<vault>.mckey`, the phrase envelope that travels with the vault file.
 //! - `cipher`: keyed SQLCipher connections. The key is handed to SQLCipher through its C API, never
 //!   through SQL text.
+//! - `container` (Slice C): the portable backup formats B, C and D (format A is plain SQLite).
 //!
 //! Nothing here logs, and no error value carries key material, a phrase or a path.
 
 pub mod cipher;
+pub mod container;
 pub mod fsutil;
 pub mod key_store;
 pub mod phrase;

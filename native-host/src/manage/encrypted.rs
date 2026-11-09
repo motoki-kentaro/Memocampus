@@ -159,7 +159,7 @@ fn random_failure() -> Failure {
     Failure::with("random_unavailable", json!({}))
 }
 
-fn key_store_failure(error: key_store::StoreError) -> Failure {
+pub(super) fn key_store_failure(error: key_store::StoreError) -> Failure {
     let code = match error {
         key_store::StoreError::Unsupported => "key_protector_unavailable",
         key_store::StoreError::ProtectorFailed => "key_protector_failed",
@@ -402,7 +402,7 @@ pub fn commit(session: &mut Session, message: &Value) -> Result<Value, Failure> 
 
 /// Renames `from` to `to` without replacing; if `from` is gone and `to` is already this
 /// creation's file (`ours`), that step was done before a crash.
-fn promote_file(from: &Path, to: &Path, ours: impl Fn(&Path) -> bool) -> io::Result<()> {
+pub(super) fn promote_file(from: &Path, to: &Path, ours: impl Fn(&Path) -> bool) -> io::Result<()> {
     match fsutil::rename_no_replace(from, to) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound && ours(to) => Ok(()),
@@ -471,7 +471,7 @@ fn remove_created(session: &Session, manifest: &Manifest) {
 }
 
 /// A key already in hand (just unwrapped or just read), for one open.
-struct GivenKey(VaultKey);
+pub(super) struct GivenKey(pub(super) VaultKey);
 
 impl KeySource for GivenKey {
     fn key_for(&self, _: &KeyRequest) -> Result<VaultKey, KeyError> {
@@ -479,7 +479,7 @@ impl KeySource for GivenKey {
     }
 }
 
-fn phrase_failure(error: phrase::PhraseError) -> Failure {
+pub(super) fn phrase_failure(error: phrase::PhraseError) -> Failure {
     let details = match error {
         phrase::PhraseError::WordCount(count) => json!({ "reason": "word_count", "count": count }),
         phrase::PhraseError::UnknownWord(position) => {

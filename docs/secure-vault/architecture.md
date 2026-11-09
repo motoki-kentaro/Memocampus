@@ -1,7 +1,8 @@
 # Secure Vault — technical architecture (Issue #51, Slice A)
 
 Status: **design proposal.** Basis: `main` at `c08797a`. Implemented so far: Slice B0 (`slice-b0.md`) and Slice B
-(`slice-b.md`: SQLCipher, DPAPI key store, recovery phrase and sidecar, encrypted creation and recovery). Where the
+(`slice-b.md`: SQLCipher, DPAPI key store, recovery phrase and sidecar, encrypted creation and recovery) and Slice C
+(`slice-c.md`: backups A–D and restore; its §6 lists differences DC1–DC9 from §5–§6 here). Where the
 implementation differs from this text, the slice documents list the difference (`slice-b.md` §9).
 Each statement is tagged:
 
@@ -192,6 +193,9 @@ reason to switch modes.
 
 ## 5. Backup formats (A-5)
 
+> Implemented in Slice C with differences DC1–DC9 (`slice-c.md` §6): B is a Backup API snapshot with a new salt, C over B
+> is kind `D`, the B policy copy follows the payload, Argon2 m is bounded at 256 MiB.
+
 Detection is by the first 16 bytes [POC A-5]. Recognition never relies only on the SQLite magic:
 
 | First bytes | Format | Next step |
@@ -296,6 +300,9 @@ sections: "policy" (JSON copy of policy + PSL approvals), then "vault-a" (raw SQ
   residual risk R6).
 
 ## 6. Restore (separate vault only)
+
+> Implemented in Slice C (`slice-c.md` §4): the phrase is always required for B and D (DC2), a restored encrypted vault
+> gets a new vault id (DC3), and activation is a separate confirmed step with a manifest (DC7).
 
 1. Pick the file, then detect the format (§5).
 2. Ask only for the secrets that format needs:

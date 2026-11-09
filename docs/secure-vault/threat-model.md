@@ -97,7 +97,7 @@
 | R3 | Weak backup password in C over A | Argon2id only slows guessing; offer a strength hint |
 | R4 | Recovery level is 128 bits, below the 256-bit DB key | stated; PO acceptance (P5) |
 | R5 | DPAPI accepted 128/2,096 single-bit-modified blobs (same plaintext) | mitigated by kcv and vault-id entropy |
-| R6 | A crash during restore of C over A leaves a plaintext `.partial` | listed at the next start; deletion only with the user's consent |
+| R6 | A crash during restore of C over A leaves a plaintext `.partial` | Slice C: shown as `restorePending` in the side panel; removed only by the user's discard. Further Slice C risks R-C1–R-C9: `slice-c.md` §11. A C backup writes no plaintext work file (review C-01, `slice-c.md` §3.1) |
 | R7 | SQLCipher, OpenSSL and the SQLite 3.45.3 downgrade: Rust suites pass on it [POC A-1.5]; Node/E2E and dogfood still open | Slice S0 gate |
 | R8 | The config rename is not write-through; after a power cut the previous config may reappear | Slice B0: POSIX rename by handle + flush after the rename (`slice-b0.md`); crash points simulated, a real power cut NOT VERIFIED; a disk ignoring flushes stays a residual risk |
 | R9 | L3 (pre-enqueue policy check failure) silently skips a visit today | pre-existing; conversion must not trigger it. Fixing it in general is a separate issue. |
