@@ -7,6 +7,13 @@ point here.
 
 Markers: **[TEST]** covered by an automated test named below, **[CODE]** read in the code, **NOT RUN** not exercised.
 
+> **Slice E (current).** The spell itself (§1, §2, §2.1, §5.1 confirmation, §6) is unchanged. What the spell protects has
+> changed: the vault key is no longer a random key wrapped in an envelope (§3, §4.1) but is **derived** from the spell and the
+> vault file's salt, `VK = HKDF-SHA256(spell, salt, "memocampus/vault-key/v3")`; the `.mckey` sidecar (§4.1) is no longer
+> written or needed, backups are container version 3 (§4.2), and the spell can be **re-issued** (a new vault). See
+> `slice-e.md`, which takes precedence over §3, §4.1, §4.2, §5.2–§5.5 and §7 below. Those sections are kept as the history
+> of the scheme they describe (version 2), now unsupported.
+
 ## 1. Names
 
 | Where | Name |

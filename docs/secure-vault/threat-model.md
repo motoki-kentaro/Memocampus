@@ -8,7 +8,7 @@
 | Saved images and their sources | vault | high |
 | Per-image MCP permission (`mcpPublic`) | vault | medium (it decides exposure) |
 | Privacy policy (`neverSave`/`saveButNoMcp` rules), PSL approvals | `policy.json`, `settings.sqlite3` (global) | high: the rules themselves reveal sensitive domains |
-| Vault key VK | memory; DPAPI blob in the key store; spell envelopes | critical |
+| Vault key VK | memory; DPAPI blob in the key store. Slice E: derived from the spell and the vault file's public salt, never stored in an envelope | critical |
 | Recovery Spell (ふっかつのじゅもん) | wherever the user keeps it (paper, password manager); memory during onboarding; possibly the clipboard | critical |
 | Backup password | memory only | critical (format C) |
 | Backups A, B, C | user-chosen folders, cloud, USB | high |
@@ -49,8 +49,8 @@
 
 | Attack | Defence | Status |
 |---|---|---|
-| T1/T3 read a stolen encrypted vault | SQLCipher AES-256 + HMAC per page under a random 256-bit VK; VK only in DPAPI and spell envelopes | [TEST] Slice B, `recovery-spell.md` (no plaintext row, key or spell in any file) |
-| T3 steal the vault plus `.mckey` sidecar | the sidecar is spell-wrapped (256-bit); not enough without the spell | [TEST] `recovery::tests` |
+| T1/T3 read a stolen encrypted vault | SQLCipher AES-256 + HMAC per page under a 256-bit VK. Slice E: VK = HKDF(spell, public salt); every public value (salt, vault id, kcv, headers, algorithms) is assumed known; only the 256-bit spell is secret; VK stored only DPAPI-protected | [TEST] Slice B, `slice-e.md` §1 (no plaintext row, key or spell in any file) |
+| T3 steal the vault (Slice E: there is no sidecar) | the file alone gives the salt and vault id, both public; without the spell each guess costs an HKDF and a SQLCipher page check over 256 bits | [TEST] `secure_vault_e_poc`, `recovery::tests` |
 | T2 brute-force a B backup | 256-bit spell; HKDF + HMAC per guess | 2²⁵⁶ (was 2¹²⁸ with the 12-word phrase, P5) |
 | T2 brute-force a C or D backup | Argon2id (64 MiB, t=3) per guess; D still needs the spell | [POC A-5]; weak passwords stay weak (R3) |
 | T2/T5 tamper with a backup (header, payload, truncation, chunk reordering) | B: exact length + HMAC under a VK-derived key; C: STREAM AEAD with the header as AAD, password check, exact length | [POC A-5.1/A-5.2] |
@@ -64,7 +64,8 @@
 | Restored vault exposed to MCP under a different or empty policy (HIGH-3) | publication gate: `pending` until confirmed; never auto-overwrite global policy | design |
 | Approval given under one policy carried over to a policy initialized again after a loss (review F-02) | `policy_initialize`/`policy_start` withdraw the active vault's publication (`confirmed` → `pending`) under the policy lock before writing; a failed withdrawal writes no policy; a failed policy write leaves `pending`. Ordinary rule edits keep the approval; each read applies the current policy | [TEST] `slice-b0.md` §10; hand-made valid policy files are not detected |
 | Secrets leak through logs, IPC, MCP or errors | fixed error codes; key handed to SQLCipher through its C API, never SQL text; canary tests (`VaultKey::appears_in`) over host output, MCP answers, the MCP log and every file | [TEST] Slice B; the spell itself crosses Native Messaging at creation, recovery, B/D backup and restore (`recovery-spell.md` §6, R-S1) |
-| Wrong spell or altered sidecar overwrites a working key, or activates a vault | the spell must open the envelope and the key must open the vault before anything is written; damaged metadata told apart by the check value; a 12-word sidecar or backup is reported as unsupported, never as damage or a wrong spell | [TEST] Slice B, `recovery-spell.md` §7 |
+| Wrong spell or altered vault overwrites a working key, or activates a vault | Slice E: the key derived from the spell must open the vault (`quick_check`) before anything is written; an altered salt is another key; a vault of an earlier scheme (its `.mckey` or version 1 key store entry) is reported as unsupported | [TEST] `secure_vault_b.rs`, `slice-e.md` §4 |
+| An old spell still opens old copies after a re-issue | re-issuing makes a new vault under a new spell; old copies and backups keep the old spell; the UI says it is not a revocation | [TEST] `convert_tests::reissuing_…`; R12 |
 | Interrupted creation leaves a half-made vault active, or mixes keys on retry | manifest + `.pending` files, commit point = config rename, one creation at a time, cancel removes only files bound to that creation | [TEST] Slice B |
 | Plaintext temp files during secure backup | raw ciphertext copy under SHARED; stream encryption for C; `temp_store = MEMORY` | [POC A-4.2] (plain); SQLCipher [DOC] |
 | Silent loss of capture during conversion | Slice D: the source stays active and is only read; writers blocked by the copy or by the fence at activation get `vault_busy` (events stay queued, L5); the converted vault is refreshed from the source under the switch fence before it becomes active; policy evaluation unaffected. No watchdog (`slice-d.md` R-D2) | [TEST] `slice-d.md` §4 (`secure_vault_d.rs`, `convert_tests`) |
@@ -107,4 +108,5 @@
 | R8 | The config rename is not write-through; after a power cut the previous config may reappear | Slice B0: POSIX rename by handle + flush after the rename (`slice-b0.md`); crash points simulated, a real power cut NOT VERIFIED; a disk ignoring flushes stays a residual risk |
 | R9 | L3 (pre-enqueue policy check failure) silently skips a visit today | pre-existing; conversion must not trigger it. Fixing it in general is a separate issue. |
 | R10 | Non-Windows | design isolates DPAPI behind a key-protector interface; no non-Windows implementation is designed or verified |
+| R12 | Slice E: the spell alone (with any copy of the vault file or a B backup) recovers everything; re-issuing does not revoke an old spell; earlier encrypted vaults and B/D backups are unsupported | `slice-e.md` §13 (R-E1–R-E7) |
 | R11 | Slice D conversion: plaintext copy by choice (D2), writers blocked during a copy, no progress/watchdog, kept snapshots | `slice-d.md` §11 (R-D1–R-D9) |

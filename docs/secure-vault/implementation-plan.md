@@ -155,6 +155,13 @@ replace (POSIX rename instead of `MOVEFILE_WRITE_THROUGH`). Its differences are 
   - A crash at each phase, via a test hook plus process kill.
   - Contention scripts: concurrent backup, `vault_open` and MCP readers.
 
+### Slice E — the Recovery Spell as the only recovery secret — **implemented** (`slice-e.md`; review and PO approval pending)
+
+> VK derived from the spell and the vault file's salt; no `.mckey`; DPAPI as a cache; backups B/D container version 3 with a
+> re-keyed restore under a new vault id; spell re-issue as a conversion direction; earlier encrypted vaults and B/D backups
+> explicitly unsupported (no migration, by PO decision). Covers the "regeneration" part of S5 below (re-issuing the spell
+> makes a new vault; there is no re-keying in place).
+
 ### S5 — regeneration, rotation, hardening (Phase E)
 
 - **Scope.**

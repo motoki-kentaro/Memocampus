@@ -14,23 +14,27 @@ Clicking the Memocampus toolbar action opens a side panel with three tabs: **URL
 
 The vault (SQLite file) is independent of the host executable. Its path is stored in `%LOCALAPPDATA%\Memocampus\config.json`; the default vault is `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`. On first use, open the side panel's **Vault** section and create a vault explicitly (or open an existing one). Automatic recording also needs the privacy policy to be initialized (see [Privacy policy](#privacy-policy)). Only vaults created by this version (schema 7, which added image tags in #44) can be used; a schema 6 vault is refused like any older one, so create a new vault after updating. An older vault is refused with an explanation and left unchanged: there is no conversion, and it cannot be backed up from the app, so copy the file if you want to keep it. Manual backups use the SQLite Backup API and copy the whole vault, including saved images, their save history and thumbnails. Switching or opening another vault switches the images too; nothing is copied between vaults. See `docs/issue-003-vault-location.md`.
 
-**Encrypted vaults** (Issue #51, [docs/secure-vault/slice-b.md](docs/secure-vault/slice-b.md)). A new vault is encrypted by default
-(SQLCipher, a random 256-bit key); choose **暗号化しない** for a plain one. Existing vaults are never converted automatically. The key is
-protected with Windows DPAPI for your Windows user, so the vault opens without a password. When you create it, the panel shows the
-**ふっかつのじゅもん (Recovery Spell) once**: 43 characters (`A–Z a–z 0–9 - _`, case-sensitive) encoding 256 random bits. Keep it
-somewhere safe; the vault is created only after you enter all 43 characters again. With the spell and the `<vault>.mckey` file next
-to the vault, the vault can be opened by another Windows user or on another PC (**ふっかつのじゅもんで復旧**); without both, nobody
-can. Vaults and B/D backups made with the earlier 12-word recovery phrase are not supported by this version (an existing vault still
-opens for the Windows user that created it); see [docs/secure-vault/recovery-spell.md](docs/secure-vault/recovery-spell.md).
+**Encrypted vaults** (Issue #51, [docs/secure-vault/slice-e.md](docs/secure-vault/slice-e.md)). A new vault is encrypted by default
+(SQLCipher); choose **暗号化しない** for a plain one. Existing vaults are never converted automatically. When you create it, the panel
+shows the **ふっかつのじゅもん (Recovery Spell) once**: 43 characters (`A–Z a–z 0–9 - _`, case-sensitive) encoding 256 random bits. Keep
+it somewhere safe; the vault is created only after you enter all 43 characters again. The vault's key is derived from the spell and a
+random salt stored at the start of the vault file, so **the vault file and the spell are all a recovery needs**: on another PC, after
+reinstalling Windows or as another Windows user, open the file and enter the spell (**ふっかつのじゅもんで復旧**); no other file is
+needed, and without the spell nobody can read it. For daily use the key is also kept protected with Windows DPAPI for your Windows
+user, so the vault opens without the spell. If the spell is lost while the vault still opens, **ふっかつのじゅもんを再発行する** copies
+the vault into a **new** vault under a new spell (the old spell still opens the old vault and its old backups). Encrypted vaults and
+B/D backups of earlier versions (with a `.mckey` file, or the 12-word recovery phrase) are not supported by this version and are left
+unchanged; convert such a vault to plain with the earlier version first.
 
 **Backups and restore** (Issue #51, [docs/secure-vault/slice-c.md](docs/secure-vault/slice-c.md)). **バックアップを作成…** writes one
 file: a plain vault's normal backup is a plain SQLite file (format A, as before); an encrypted vault's normal backup stays encrypted
-(format B, `.mcbackup`, restored with the Recovery Spell only, no key of the original PC needed; the panel asks for the spell
+(format B, `.mcbackup`, restored with the Recovery Spell only, no key or file of the original PC needed; the panel asks for the spell
 when the backup is made and refuses one that does not recover the vault); **パスワードで保護する** encrypts
 the whole backup with a password you choose (Argon2id; format C for a plain vault, format D for an encrypted one, which then needs
 the password **and** the spell). The password is stored nowhere. B, C and D carry a copy of the privacy policy, which a restore
 shows but never applies. **バックアップから復元…** always creates a **new** vault (it never overwrites a file or the active vault),
-verifies it, and makes it active only when you choose **このVaultを使い始める**; MCP access starts unconfirmed.
+verifies it, and makes it active only when you choose **このVaultを使い始める**; MCP access starts unconfirmed. A restored encrypted
+vault gets a new identity and is re-encrypted under it; the same spell opens it.
 
 **Converting a vault** (Issue #51, [docs/secure-vault/slice-d.md](docs/secure-vault/slice-d.md)). **このVaultを暗号化する** copies
 the active plain vault into a **new** encrypted vault and shows its new Recovery Spell once (enter it again in full to finish);

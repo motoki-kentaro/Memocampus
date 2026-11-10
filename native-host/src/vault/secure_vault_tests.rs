@@ -1033,8 +1033,9 @@ mod keyed {
     /// An encrypted vault at `path` whose key is in `env`'s key store; recorded as active.
     fn active_encrypted(env: &Environment, path: &Path) -> (VaultId, VaultKey) {
         let key = VaultKey::generate().unwrap();
-        let salt = cipher::create(path, &key).unwrap();
-        let id = VaultId::generate().unwrap();
+        let salt = CipherSalt::generate().unwrap();
+        cipher::create(path, &key, &salt).unwrap();
+        let id = memocampus_native_host::secure_vault::recovery::vault_id(&salt);
         key_store::store(
             env.app_dir.as_ref().unwrap(),
             &id,

@@ -165,9 +165,10 @@ fn a_plain_vault_is_encrypted_and_back_across_host_processes() {
     let key = memocampus_native_host::secure_vault::key_store::unlock(
         &app,
         &config.vault_id.unwrap(),
-        &sidecar::read(&sidecar::path_for(&encrypted))
-            .unwrap()
-            .cipher_salt,
+        &match cipher::read_head(&encrypted).unwrap() {
+            cipher::Head::Salt(salt) => salt,
+            other => panic!("{other:?}"),
+        },
     )
     .unwrap();
     let db = cipher::open(&encrypted, &key, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
@@ -198,6 +199,7 @@ fn a_plain_vault_is_encrypted_and_back_across_host_processes() {
     assert_eq!(activated["status"]["publication"], "pending");
     let db = rusqlite::Connection::open(&back).unwrap();
     assert_eq!(visits_of(&db), ["a1", "a2", "a3", "a4", "a5", "a6"]);
-    // Both earlier vaults are kept.
-    assert!(plain.exists() && encrypted.exists() && sidecar::path_for(&encrypted).exists());
+    // Both earlier vaults are kept; no sidecar was ever written (Slice E).
+    assert!(plain.exists() && encrypted.exists());
+    assert!(!sidecar::path_for(&encrypted).exists());
 }

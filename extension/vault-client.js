@@ -50,9 +50,9 @@ export const SPELL_LEAD = "あなたの記憶を取り戻すための、復活�
 export const SPELL_CAUTION = "この呪文は一度しか表示されません。安全な場所に保管してください。失うとバックアップから復元できなくなる場合があります。";
 
 export const SPELL_NOTE =
-  "・別のPC、Windowsの再インストール後、別のWindowsユーザーでこのVaultを開くには、この呪文と「.mckey」ファイルが必要です。暗号化Vaultのバックアップ（形式B・D）から復元するときにも必要です。\n" +
-  "・Memocampusは呪文を保存せず、再表示も再発行もできません。\n" +
-  "・呪文を知っている人は、Vaultファイルと「.mckey」ファイル（またはバックアップ）があれば中身を読めます。誰にも伝えないでください。\n" +
+  "・この呪文と暗号化Vaultのファイル1個（またはそのバックアップ）があれば、別のPC、Windowsの再インストール後、別のWindowsユーザーでも記憶を取り戻せます。ほかのファイルは必要ありません。\n" +
+  "・Memocampusは呪文を保存せず、再表示もできません。呪文をなくしたときは、Vaultを開けるうちに「ふっかつのじゅもんを再発行する」で、新しい呪文の新しいVaultを作れます。\n" +
+  "・呪文を知っている人は、Vaultファイル（またはバックアップ）があれば中身を読めます。誰にも伝えないでください。\n" +
   "・英字の大文字と小文字は区別されます。紙に書き写すときは、0（ゼロ）とO（オー）、1とlとI、-（ハイフン）と_（アンダースコア）の違いに注意してください。\n" +
   "・「コピー」を押すと、呪文がクリップボードに入ります。クリップボードやWindowsのクリップボード履歴に残る場合があるため、保管し終えたら消去してください。";
 
@@ -197,6 +197,16 @@ export const CONVERT_TEXT = {
       "平文Vaultには、ふっかつのじゅもんはありません（元の暗号化Vaultの呪文は、元のVaultにだけ使えます）。",
     pick: "保存先を選んで暗号化を解除…",
   },
+  // Issue #51 Slice E: a new spell means a new vault (a new key and a new salt).
+  reissue: {
+    title: "ふっかつのじゅもんを再発行する",
+    note:
+      "新しいふっかつのじゅもんで暗号化した新しいVaultへ、現在のVaultの内容をコピーします。元のVaultは削除されません。" +
+      "コピーの後に新しい呪文を一度だけ表示します。記録して全文を入力し直すまで、再発行は完了しません。\n" +
+      "再発行しても、古い呪文は失効しません。古い呪文は、元のVaultとその古いバックアップを引き続き開けます。" +
+      "古い呪文を他人に知られたおそれがあるときは、新しいVaultを使い始めた後で、元のVaultと古いバックアップを安全に処分してください。",
+    pick: "保存先を選んで再発行…",
+  },
 };
 
 /** Which conversion the vault shown offers: by its mode. */
@@ -206,16 +216,36 @@ export function convertDirection(mode) {
   return null;
 }
 
+/** Whether the vault shown offers re-issuing its spell (Slice E): an encrypted vault. */
+export function reissueOffered(mode) {
+  return mode === "encrypted";
+}
+
+/** Whether a conversion of `direction` makes a new spell (shown once, confirmed in full). */
+export function convertMakesSpell(direction) {
+  return direction === "encrypt" || direction === "reissue";
+}
+
 /** For the spell step of a conversion: the spell belongs to the new vault only. */
 export const CONVERT_SPELL_NOTE =
   "これは新しい暗号化Vaultのふっかつのじゅもんです。以前に記録した呪文（ほかのVaultの呪文）では、このVaultを復旧できません。";
 
+/** Re-issuing (Slice E): the old spell is not revoked. */
+export const REISSUE_SPELL_NOTE =
+  "古い呪文は失効しません。元のVaultと古いバックアップは、古い呪文で開けるままです。";
+
 /** A converted vault (start or confirm answer), for the user's decision. */
 export function describeConverted(converted) {
-  const encrypt = converted?.direction === "encrypt";
-  const lines = [`変換しました（まだ使用していません）: ${converted?.path ?? ""}`];
-  if (converted?.sourcePath) lines.push(`変換元（そのまま残ります）: ${converted.sourcePath}`);
-  lines.push(encrypt ? "新しい暗号化Vault（鍵はこのWindowsユーザー用に保存しました）" : "新しい平文Vault（暗号化されていません）");
+  const reissue = converted?.direction === "reissue";
+  const encrypt = convertMakesSpell(converted?.direction);
+  const lines = [`${reissue ? "再発行しました" : "変換しました"}（まだ使用していません）: ${converted?.path ?? ""}`];
+  if (converted?.sourcePath) lines.push(`${reissue ? "元のVault" : "変換元"}（そのまま残ります）: ${converted.sourcePath}`);
+  if (reissue) {
+    lines.push("新しいふっかつのじゅもんで暗号化した新しいVault（古い呪文では開けません。鍵はこのWindowsユーザー用に保存しました）");
+    lines.push(REISSUE_SPELL_NOTE);
+  } else {
+    lines.push(encrypt ? "新しい暗号化Vault（鍵はこのWindowsユーザー用に保存しました）" : "新しい平文Vault（暗号化されていません）");
+  }
   const counts = converted?.counts;
   if (counts && Number.isSafeInteger(counts.visits)) {
     lines.push(`検証済み: 閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件・画像 ${counts.images.toLocaleString("ja-JP")}件（変換元と全件一致）`);
@@ -229,11 +259,12 @@ export function describeConverted(converted) {
 
 /** A conversion recorded by the host but not finished in this page (`status.conversionPending`). */
 export function describeConversionPending(pending) {
-  const what = pending?.direction === "decrypt" ? "暗号化を解除した平文Vault" : "暗号化した新しいVault";
+  const what =
+    pending?.direction === "decrypt" ? "暗号化を解除した平文Vault" : pending?.direction === "reissue" ? "新しいふっかつのじゅもんのVault" : "暗号化した新しいVault";
   if (pending?.phase === "converted") {
     return `変換済みで、まだ使用していない${what}があります:\n${pending.path}\n使い始めるか、切り替えずに保存するか、破棄してください。`;
   }
-  if (pending?.phase === "verified" && pending.direction === "encrypt") {
+  if (pending?.phase === "verified" && convertMakesSpell(pending.direction)) {
     return `ふっかつのじゅもんの確認前に中断された変換があります:\n${pending.path}\n呪文は再表示できないため、破棄してから、もう一度変換してください。元のVaultは変更していません。`;
   }
   if (pending?.phase === "verified") {

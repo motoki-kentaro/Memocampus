@@ -1,18 +1,21 @@
 //! Converting the encryption state of the active vault (Issue #51, Slice D): a plain vault becomes a
 //! **new** encrypted vault (D1, `encrypt`), an encrypted vault a **new** plain one (D2, `decrypt`).
-//! The source vault is never written, moved or removed, and the active vault does not change until
-//! the user activates the converted one.
+//! Slice E adds re-issuing the Recovery Spell (`reissue`): an encrypted vault becomes a **new**
+//! encrypted vault under a new spell, a new salt and so a new key and vault id
+//! (`docs/secure-vault/slice-e.md` §6). The source vault is never written, moved or removed, and
+//! the active vault does not change until the user activates the converted one.
 //!
 //! # Messages
 //!
 //! - `vault_convert_start {direction, expectedVaultToken, path?, approveWarnings?,
 //!   acknowledgePlaintext?}`: the source is the active vault the panel shows (`expectedVaultToken`);
-//!   `direction` must be the other mode (`encrypt` for a plain vault, `decrypt` for an encrypted
-//!   one). `decrypt` needs `acknowledgePlaintext: true`: the user confirmed that the new vault keeps
-//!   everything unencrypted on disk. Picks the target (a new file; dialog unless `path`), copies,
-//!   verifies. D1 answers the new Recovery Spell, once; D2 answers the converted vault.
-//! - `vault_convert_confirm {recoverySpell}` (D1): the spell re-entered in full; it must open the new
-//!   vault's envelope to its key. Then the files get their final names.
+//!   `direction` must fit the active vault (`encrypt` for a plain vault, `decrypt` or `reissue` for
+//!   an encrypted one). `decrypt` needs `acknowledgePlaintext: true`: the user confirmed that the new
+//!   vault keeps everything unencrypted on disk. Picks the target (a new file; dialog unless
+//!   `path`), copies, verifies. D1 and `reissue` answer the new Recovery Spell, once; D2 answers the
+//!   converted vault.
+//! - `vault_convert_confirm {recoverySpell}` (D1, `reissue`): the spell re-entered in full; with the
+//!   new vault's salt it must derive the new vault's key. Then the files get their final names.
 //! - `vault_convert_activate {expectedVaultToken}`: the converted vault (its `vaultToken`) becomes
 //!   the active vault, publication pending. Under the switch's fence over the old vault the copy is
 //!   refreshed from the source first, so no write to the source since the conversion is lost.
@@ -31,19 +34,23 @@
 //! | Phase | On disk | Next |
 //! |---|---|---|
 //! | `converting` | the work file (being written) | discard (then start again) |
-//! | `verified` | the work file, verified; D1: `keys\<newId>.json.pending`, `<target>.mckey.pending` | D1: confirm (spell) or discard; D2: activate / keep (promotes first) or discard |
-//! | `converted` | `<target>` (D1: + `<target>.mckey`, `keys\<newId>.json`) | activate, keep or discard |
+//! | `verified` | the work file, verified; D1, reissue: `keys\<newId>.json.pending` | D1, reissue: confirm (spell) or discard; D2: activate / keep (promotes first) or discard |
+//! | `converted` | `<target>` (D1, reissue: + `keys\<newId>.json`) | activate, keep or discard |
 //! | none | activated (the config names it, publication pending) or kept | — |
 //!
 //! - Every file is created new (`create_new`) and promoted with `rename_no_replace`.
 //! - A request out of order is refused (`vault_convert_incomplete`, `vault_convert_spell_unconfirmed`,
 //!   `vault_convert_not_pending`, `vault_convert_invalid_state`).
-//! - The Recovery Spell of D1 exists only in memory and in the one response of `start`. A process
-//!   that dies before the user confirmed it leaves a `verified` conversion that the user confirms
-//!   (if the spell was written down) or discards; it is never shown again.
+//! - The new Recovery Spell (D1, reissue) exists only in memory and in the one response of `start`.
+//!   The new salt and vault id are recorded in the manifest before anything is written; the key
+//!   follows from them and the spell (Slice E), so no `.mckey` is written. A process that dies
+//!   before the user confirmed the spell leaves a `verified` conversion that the user confirms (if
+//!   the spell was written down) or discards; it is never shown again.
 //! - Discarding removes only what is provably this conversion's: the recorded work file, a target
-//!   with the recorded file identity, sidecars and key store entries of the new vault id. Never a
-//!   file with the source's identity, never the active vault.
+//!   with the recorded file identity, key store entries of the new vault id and salt. Never a file
+//!   with the source's identity, never the active vault.
+//! - Re-issuing does not revoke the old spell: it still opens the source vault and its backups,
+//!   which are kept. Only the new vault needs the new spell.
 //! - The source stays in use meanwhile (the copy holds its read lock only while copying).
 
 use serde::{Deserialize, Serialize};
@@ -64,13 +71,16 @@ use crate::vault::{
     self, Active, ConfigLock, KeyRequest, KeyStore, NewActive, Session, VaultError,
 };
 use memocampus_native_host::active_vault::VaultMode;
-use memocampus_native_host::secure_vault::convert::{self as copy, CopyError, Ends};
+use memocampus_native_host::secure_vault::convert::{self as copy, CopyError, Ends, Keyed};
+use memocampus_native_host::secure_vault::recovery::{self, NewVault};
 use memocampus_native_host::secure_vault::secret::{CipherSalt, RecoverySpell, VaultId, VaultKey};
-use memocampus_native_host::secure_vault::{cipher, fsutil, key_store, recovery, sidecar, spell};
+use memocampus_native_host::secure_vault::{cipher, fsutil, key_store, spell};
 use zeroize::Zeroizing;
 
 pub const MANIFEST: &str = "vault-convert.json";
-const MANIFEST_VERSION: u32 = 1;
+/// Version 2 (Slice E): the new salt is recorded at start, no sidecar; `reissue`. A version 1
+/// manifest is unreadable here and can only be discarded (only the manifest goes).
+const MANIFEST_VERSION: u32 = 2;
 const WORK_SUFFIX: &str = ".partial";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +88,8 @@ const WORK_SUFFIX: &str = ".partial";
 enum Direction {
     Encrypt,
     Decrypt,
+    /// Slice E: a new spell, so a new encrypted vault.
+    Reissue,
 }
 
 impl Direction {
@@ -85,14 +97,27 @@ impl Direction {
         match self {
             Self::Encrypt => "encrypt",
             Self::Decrypt => "decrypt",
+            Self::Reissue => "reissue",
         }
     }
 
     fn source_mode(self) -> VaultMode {
         match self {
             Self::Encrypt => VaultMode::Plain,
-            Self::Decrypt => VaultMode::Encrypted,
+            Self::Decrypt | Self::Reissue => VaultMode::Encrypted,
         }
+    }
+
+    fn target_mode(self) -> VaultMode {
+        match self {
+            Self::Decrypt => VaultMode::Plain,
+            Self::Encrypt | Self::Reissue => VaultMode::Encrypted,
+        }
+    }
+
+    /// Whether the target gets a new spell (shown once, confirmed in full).
+    fn new_spell(self) -> bool {
+        self != Self::Decrypt
     }
 }
 
@@ -122,13 +147,13 @@ struct Manifest {
     /// The source vault, as the config named it, and its file identity when the conversion began.
     source: String,
     source_token: String,
-    /// D2: the source's vault id (its key is this user's key store entry).
+    /// D2, reissue: the source's vault id (its key is this user's key store entry).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     source_vault_id: Option<VaultId>,
     target: String,
     work: String,
     phase: Phase,
-    /// D1: the new vault's id (generated before anything is written) and, once known, its salt.
+    /// D1, reissue: the new vault's salt (generated before anything is written) and the id it names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     vault_id: Option<VaultId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -149,10 +174,12 @@ impl Manifest {
     }
 
     fn mode(&self) -> VaultMode {
-        match self.direction {
-            Direction::Encrypt => VaultMode::Encrypted,
-            Direction::Decrypt => VaultMode::Plain,
-        }
+        self.direction.target_mode()
+    }
+
+    /// D1, reissue: the new vault's id and salt.
+    fn new_ids(&self) -> Option<(VaultId, CipherSalt)> {
+        self.vault_id.zip(self.cipher_salt)
     }
 
     /// What every reader requires: absolute paths, the work file next to the target under a name
@@ -168,17 +195,18 @@ impl Manifest {
                 .is_some_and(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())),
             _ => false,
         };
+        let new_ids = match (self.vault_id, self.cipher_salt) {
+            (Some(id), Some(salt)) => id == recovery::vault_id(&salt),
+            _ => false,
+        };
         let ids = match self.direction {
-            Direction::Encrypt => {
-                self.vault_id.is_some()
-                    && self.source_vault_id.is_none()
-                    && (self.phase == Phase::Converting || self.cipher_salt.is_some())
-            }
+            Direction::Encrypt => new_ids && self.source_vault_id.is_none(),
             Direction::Decrypt => {
                 self.vault_id.is_none()
                     && self.cipher_salt.is_none()
                     && self.source_vault_id.is_some()
             }
+            Direction::Reissue => new_ids && self.source_vault_id.is_some(),
         };
         self.version == MANIFEST_VERSION
             && target.is_absolute()
@@ -311,20 +339,26 @@ fn step(step: Step) -> Result<(), Failure> {
     checkpoint(step).map_err(|error| output_failure(&error, "vault_convert_failed"))
 }
 
-/// The key of the encrypted source (D2): this Windows user's key store entry for its id and salt.
-fn source_key(session: &Session, path: &Path, vault_id: VaultId) -> Result<VaultKey, Failure> {
+/// The key and salt of the encrypted source (D2, reissue): this Windows user's key store entry for
+/// its id and salt.
+fn source_key(
+    session: &Session,
+    path: &Path,
+    vault_id: VaultId,
+) -> Result<(VaultKey, CipherSalt), Failure> {
     let salt = match cipher::read_head(path) {
         Ok(cipher::Head::Salt(salt)) => salt,
         Ok(_) => return Err(VaultError::ModeMismatch.into()),
         Err(_) => return Err(VaultError::Io.into()),
     };
-    session
+    let key = session
         .keys()
         .key_for(&KeyRequest {
             vault_id: Some(vault_id),
             salt,
         })
-        .map_err(|error| vault::key_kind(error).into())
+        .map_err(|error| Failure::from(vault::key_kind(error)))?;
+    Ok((key, salt))
 }
 
 fn default_name(source: &Path, direction: Direction) -> String {
@@ -335,6 +369,7 @@ fn default_name(source: &Path, direction: Direction) -> String {
     match direction {
         Direction::Encrypt => format!("{stem}-encrypted.sqlite3"),
         Direction::Decrypt => format!("{stem}-plain.sqlite3"),
+        Direction::Reissue => format!("{stem}-new-spell.sqlite3"),
     }
 }
 
@@ -348,6 +383,7 @@ pub fn start(
     let direction = match message.get("direction").and_then(Value::as_str) {
         Some("encrypt") => Direction::Encrypt,
         Some("decrypt") => Direction::Decrypt,
+        Some("reissue") => Direction::Reissue,
         _ => return Err(Failure::with("invalid_request", json!({}))),
     };
     let expected = message
@@ -398,7 +434,22 @@ pub fn start(
     let source = PathBuf::from(&ticket.path);
     let source_vault_id = match direction {
         Direction::Encrypt => None,
-        Direction::Decrypt => Some(active.vault_id.ok_or(VaultError::ConfigInvalid)?),
+        Direction::Decrypt | Direction::Reissue => {
+            Some(active.vault_id.ok_or(VaultError::ConfigInvalid)?)
+        }
+    };
+    // D1, reissue: the new spell and salt, before anything is written. A re-issue never keeps the
+    // source's salt (nor, with it, its key or vault id).
+    let made = if direction.new_spell() {
+        let avoid = match cipher::read_head(Path::new(&ticket.path)) {
+            Ok(cipher::Head::Salt(salt)) => Some(salt),
+            _ => None,
+        };
+        let spell = RecoverySpell::generate().map_err(|_| random_failure())?;
+        let salt = recovery::fresh_salt(avoid.as_ref()).map_err(|_| random_failure())?;
+        Some(NewVault::of(spell, salt))
+    } else {
+        None
     };
     // Neither a connection nor a lock is held while the dialog is open.
     session.reset();
@@ -408,7 +459,7 @@ pub fn start(
             .choose_convert_target(
                 source.parent().unwrap_or(Path::new("")),
                 &default_name(&source, direction),
-                direction == Direction::Encrypt,
+                direction.target_mode() == VaultMode::Encrypted,
             )
             .ok_or(VaultError::Cancelled)?,
     };
@@ -426,10 +477,7 @@ pub fn start(
             json!({ "path": display(&target) }),
         ));
     }
-    let mut reserved = vec![
-        sidecar::path_for(&target),
-        sidecar::pending_path_for(&target),
-    ];
+    let mut reserved = Vec::new();
     for suffix in ["-journal", "-wal", "-shm"] {
         reserved.push(fsutil::with_suffix(&target, suffix));
     }
@@ -459,19 +507,16 @@ pub fn start(
         target: display(&target),
         work: display(&work),
         phase: Phase::Converting,
-        vault_id: match direction {
-            Direction::Encrypt => Some(VaultId::generate().map_err(|_| random_failure())?),
-            Direction::Decrypt => None,
-        },
-        cipher_salt: None,
+        vault_id: made.as_ref().map(|made| made.id),
+        cipher_salt: made.as_ref().map(|made| made.salt),
         token: None,
         location_approved,
     };
     fs::create_dir_all(app_dir(session)?).map_err(|_| VaultError::Io)?;
     write_manifest(session, &manifest, true)?;
-    let outcome = match direction {
-        Direction::Encrypt => encrypt(session, &mut manifest),
-        Direction::Decrypt => decrypt(session, &mut manifest),
+    let outcome = match made {
+        Some(made) => encrypt(session, &mut manifest, made),
+        None => decrypt(session, &mut manifest),
     };
     match outcome {
         Ok(mut answer) => {
@@ -519,50 +564,52 @@ fn counts_of(path: &Path, mode: VaultMode, key: Option<&VaultKey>) -> Value {
         })
 }
 
-/// D1: copy into the keyed work file, verify, protect the new key with DPAPI and wrap it with a new
-/// Recovery Spell; answers the spell, once.
-fn encrypt(session: &Session, manifest: &mut Manifest) -> Result<Value, Failure> {
-    let vault_id = manifest.vault_id.ok_or(VaultError::ConfigInvalid)?;
-    let key = VaultKey::generate().map_err(|_| random_failure())?;
-    let secret = RecoverySpell::generate().map_err(|_| random_failure())?;
+/// D1 (plain source) and reissue (encrypted source, keyed with this user's key): copy into the work
+/// file keyed with the new key and salt, verify, protect the new key with DPAPI; answers the new
+/// spell, once.
+fn encrypt(session: &Session, manifest: &mut Manifest, made: NewVault) -> Result<Value, Failure> {
+    let (vault_id, salt) = manifest.new_ids().ok_or(VaultError::ConfigInvalid)?;
+    if vault_id != made.id || salt != made.salt {
+        return Err(Failure::with("vault_convert_damaged", json!({})));
+    }
+    let source = PathBuf::from(&manifest.source);
+    let source_key = match manifest.direction {
+        Direction::Reissue => {
+            let id = manifest.source_vault_id.ok_or(VaultError::ConfigInvalid)?;
+            Some(source_key(session, &source, id)?.0)
+        }
+        _ => None,
+    };
+    let target_key = Keyed {
+        key: &made.key,
+        salt: &made.salt,
+    };
     let work = manifest.work();
     create_work(manifest)?;
     step(Step::ConvertCopy)?;
     copy::export(&Ends {
-        source: Path::new(&manifest.source),
-        source_key: None,
+        source: &source,
+        source_key: source_key.as_ref(),
         source_token: &manifest.source_token,
         target: &work,
-        target_key: Some(&key),
+        target_key: Some(target_key),
     })
     .map_err(copy_failure)?;
+    drop(source_key);
     step(Step::ConvertVerify)?;
-    copy::verify(&work, Some(&key)).map_err(copy_failure)?;
-    let salt = match cipher::read_head(&work) {
-        Ok(cipher::Head::Salt(salt)) => salt,
-        _ => return Err(copy_failure(CopyError::Mismatch)),
-    };
-    manifest.cipher_salt = Some(salt);
-    write_manifest(session, manifest, false)?;
+    copy::verify(&work, Some(target_key)).map_err(copy_failure)?;
     step(Step::ConvertKeys)?;
     let app = app_dir(session)?;
-    key_store::store(&app, &vault_id, &salt, &key, key_store::Write::Pending)
+    key_store::store(&app, &vault_id, &salt, &made.key, key_store::Write::Pending)
         .map_err(key_store_failure)?;
-    let envelope = recovery::wrap(&key, &secret, &vault_id, &salt).map_err(|_| random_failure())?;
-    sidecar::write_new(
-        &sidecar::pending_path_for(&manifest.target()),
-        &sidecar::Sidecar::new(vault_id, salt, envelope),
-    )
-    .map_err(|error| output_failure(&error, "vault_convert_failed"))?;
-    verify_keys(session, manifest, &secret)?;
-    let counts = counts_of(&work, VaultMode::Encrypted, Some(&key));
-    drop(key);
+    verify_keys(session, manifest, &made.spell)?;
+    let counts = counts_of(&work, VaultMode::Encrypted, Some(&made.key));
     manifest.token = Some(vault::vault_token(&work)?);
     manifest.phase = Phase::Verified;
     write_manifest(session, manifest, false)?;
     // The only time this spell leaves the host: in this response to the panel, nowhere else.
-    let shown: Zeroizing<String> = spell::encode(&secret);
-    drop(secret);
+    let shown: Zeroizing<String> = spell::encode(&made.spell);
+    drop(made);
     Ok(json!({ "recoverySpell": shown.as_str(), "counts": counts }))
 }
 
@@ -571,7 +618,7 @@ fn encrypt(session: &Session, manifest: &mut Manifest) -> Result<Value, Failure>
 fn decrypt(session: &Session, manifest: &mut Manifest) -> Result<Value, Failure> {
     let vault_id = manifest.source_vault_id.ok_or(VaultError::ConfigInvalid)?;
     let source = PathBuf::from(&manifest.source);
-    let key = source_key(session, &source, vault_id)?;
+    let (key, _) = source_key(session, &source, vault_id)?;
     let work = manifest.work();
     create_work(manifest)?;
     step(Step::ConvertCopy)?;
@@ -594,15 +641,15 @@ fn decrypt(session: &Session, manifest: &mut Manifest) -> Result<Value, Failure>
     Ok(json!({ "counts": counts }))
 }
 
-/// D1: every pending file opens to the same key: the DPAPI entry, the envelope with `secret`, and
-/// the converted database. Each file under its pending name, or under its final name once promoted.
+/// D1, reissue: the DPAPI entry and the converted database open to the key `secret` derives with
+/// the new salt. Each file under its pending name, or under its final name once promoted.
 fn verify_keys(
     session: &Session,
     manifest: &Manifest,
     secret: &RecoverySpell,
 ) -> Result<VaultKey, Failure> {
     let damaged = || Failure::with("vault_convert_damaged", json!({}));
-    let (Some(vault_id), Some(salt)) = (manifest.vault_id, manifest.cipher_salt) else {
+    let Some((vault_id, salt)) = manifest.new_ids() else {
         return Err(damaged());
     };
     let target = manifest.target();
@@ -617,24 +664,8 @@ fn verify_keys(
     let stored = key_store::unlock_pending(&app, &vault_id, &salt)
         .or_else(|_| key_store::unlock(&app, &vault_id, &salt))
         .map_err(|_| damaged())?;
-    let found = sidecar::read(&pick(
-        sidecar::pending_path_for(&target),
-        sidecar::path_for(&target),
-    ))
-    .map_err(|_| damaged())?;
-    if found.vault_id != vault_id || found.cipher_salt != salt {
-        return Err(damaged());
-    }
-    let unwrapped = recovery::unwrap(&found.recovery, secret, &vault_id, &salt).map_err(
-        |error| match error {
-            recovery::UnwrapError::SpellRejected => {
-                Failure::with("recovery_spell_rejected", json!({}))
-            }
-            _ => damaged(),
-        },
-    )?;
-    if !unwrapped.same_as(&stored) {
-        return Err(damaged());
+    if !recovery::vault_key(secret, &salt).same_as(&stored) {
+        return Err(Failure::with("recovery_spell_rejected", json!({})));
     }
     let db_path = pick(manifest.work(), target);
     if cipher::read_head(&db_path).ok() != Some(cipher::Head::Salt(salt)) {
@@ -656,17 +687,9 @@ fn promote(session: &Session, manifest: &mut Manifest) -> Result<(), Failure> {
     let target = manifest.target();
     let token = manifest.token.clone().ok_or(VaultError::Io)?;
     let promoted = (|| -> io::Result<()> {
-        if let (Some(vault_id), Some(salt)) = (manifest.vault_id, manifest.cipher_salt) {
+        if let Some((vault_id, salt)) = manifest.new_ids() {
             let app = app_dir(session).map_err(|_| io::Error::other("app dir"))?;
             key_store::promote_pending(&app, &vault_id, &salt)?;
-            promote_file(
-                &sidecar::pending_path_for(&target),
-                &sidecar::path_for(&target),
-                |path| {
-                    sidecar::read(path)
-                        .is_ok_and(|found| found.vault_id == vault_id && found.cipher_salt == salt)
-                },
-            )?;
         }
         promote_file(&manifest.work(), &target, |path| {
             vault::vault_token(path).ok().as_deref() == Some(token.as_str())
@@ -682,7 +705,7 @@ fn promote(session: &Session, manifest: &mut Manifest) -> Result<(), Failure> {
     write_manifest(session, manifest, false)
 }
 
-/// `vault_convert_confirm` (D1): the new spell, re-entered in full.
+/// `vault_convert_confirm` (D1, reissue): the new spell, re-entered in full.
 pub fn confirm(session: &mut Session, message: &Value) -> Result<Value, Failure> {
     require_management(session)?;
     let secret = requested_spell(message)?;
@@ -691,7 +714,7 @@ pub fn confirm(session: &mut Session, message: &Value) -> Result<Value, Failure>
         Some(manifest) if !completed(session, &manifest) => manifest,
         _ => return Err(Failure::with("vault_convert_not_pending", json!({}))),
     };
-    if manifest.direction != Direction::Encrypt {
+    if !manifest.direction.new_spell() {
         return Err(Failure::with("vault_convert_invalid_state", json!({})));
     }
     if manifest.phase == Phase::Converting {
@@ -723,7 +746,7 @@ fn ready(session: &Session, manifest: &mut Manifest) -> Result<(), Failure> {
             "vault_convert_incomplete",
             json!({ "path": manifest.target }),
         )),
-        (Direction::Encrypt, Phase::Verified) => Err(Failure::with(
+        (Direction::Encrypt | Direction::Reissue, Phase::Verified) => Err(Failure::with(
             "vault_convert_spell_unconfirmed",
             json!({ "path": manifest.target }),
         )),
@@ -764,25 +787,27 @@ pub fn activate(session: &mut Session, message: &Value) -> Result<Value, Failure
     }
     let source = PathBuf::from(&manifest.source);
     let app = app_dir(session)?;
-    // The keys of both ends: the new vault's (D1, its promoted key store entry) or the source's
-    // (D2, this user's entry).
-    let (source_key, target_key) = match manifest.direction {
-        Direction::Encrypt => {
-            let (Some(vault_id), Some(salt)) = (manifest.vault_id, manifest.cipher_salt) else {
-                return Err(Failure::with("vault_convert_damaged", json!({})));
-            };
-            let key = key_store::unlock(&app, &vault_id, &salt)
-                .map_err(|_| Failure::from(VaultError::KeyUnavailable))?;
-            (None, Some(key))
-        }
-        Direction::Decrypt => {
+    // The keys of both ends: the new vault's (D1, reissue: its promoted key store entry, with its
+    // salt) and the source's (D2, reissue: this user's entry).
+    let target_key = match manifest.new_ids() {
+        Some((vault_id, salt)) => Some((
+            key_store::unlock(&app, &vault_id, &salt)
+                .map_err(|_| Failure::from(VaultError::KeyUnavailable))?,
+            salt,
+        )),
+        None => None,
+    };
+    let source_key = match manifest.direction {
+        Direction::Encrypt => None,
+        Direction::Decrypt | Direction::Reissue => {
             let vault_id = manifest.source_vault_id.ok_or(VaultError::ConfigInvalid)?;
-            (Some(source_key(session, &source, vault_id)?), None)
+            Some(source_key(session, &source, vault_id)?.0)
         }
     };
-    let new = match (manifest.direction, manifest.vault_id) {
-        (Direction::Encrypt, Some(vault_id)) => NewActive::encrypted(&target, vault_id),
-        (Direction::Decrypt, None) => NewActive::plain(&target),
+    let target_keyed = target_key.as_ref().map(|(key, salt)| Keyed { key, salt });
+    let new = match (manifest.direction.target_mode(), manifest.vault_id) {
+        (VaultMode::Encrypted, Some(vault_id)) => NewActive::encrypted(&target, vault_id),
+        (VaultMode::Plain, None) => NewActive::plain(&target),
         _ => return Err(Failure::with("vault_convert_damaged", json!({}))),
     };
     let keys = KeyStore::of(&session.env);
@@ -807,11 +832,11 @@ pub fn activate(session: &mut Session, message: &Value) -> Result<Value, Failure
                         source_key: source_key.as_ref(),
                         source_token: &manifest.source_token,
                         target: &target,
-                        target_key: target_key.as_ref(),
+                        target_key: target_keyed,
                     })
                     .map_err(copy_failure)
                 })
-                .and_then(|()| copy::verify(&target, target_key.as_ref()).map_err(copy_failure));
+                .and_then(|()| copy::verify(&target, target_keyed).map_err(copy_failure));
             result.map_err(|failure| {
                 refreshed = Some(failure);
                 VaultError::Io
@@ -874,19 +899,9 @@ fn remove_converted(session: &Session, manifest: &Manifest) {
             let _ = fs::remove_file(fsutil::with_suffix(&db, "-journal"));
         }
     }
-    if let Some(vault_id) = manifest.vault_id {
-        for path in [
-            sidecar::pending_path_for(&target),
-            sidecar::path_for(&target),
-        ] {
-            if sidecar::identity(&path).is_some_and(|(id, salt)| {
-                id == vault_id && manifest.cipher_salt.is_none_or(|known| known == salt)
-            }) {
-                let _ = fs::remove_file(&path);
-            }
-        }
+    if let Some((vault_id, salt)) = manifest.new_ids() {
         if let Some(app) = session.env.app_dir.as_deref() {
-            key_store::remove_created(app, &vault_id, manifest.cipher_salt.as_ref());
+            key_store::remove_created(app, &vault_id, Some(&salt));
         }
     }
     if let Ok(path) = manifest_path(session) {

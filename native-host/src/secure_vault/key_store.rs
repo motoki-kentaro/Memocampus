@@ -1,10 +1,15 @@
 //! The key store: `<app dir>\keys\<vaultId>.json`, one entry per encrypted vault this Windows user
-//! can open without the phrase.
+//! can open without the spell. A cache for daily use (Slice E): never what a recovery depends on,
+//! since the spell and the vault file give the key back (`recovery::vault_key`).
 //!
 //! ```json
-//! {"version":1,"vaultId":"<32 hex>","cipherSalt":"<32 hex>","protector":"dpapi-user",
+//! {"version":2,"vaultId":"<32 hex>","cipherSalt":"<32 hex>","protector":"dpapi-user",
 //!  "protected":"<base64 DPAPI blob>","kcv":"<64 hex>"}
 //! ```
+//!
+//! Version 2 (Slice E): the vault id is `recovery::vault_id(cipherSalt)`, checked on every read.
+//! Version 1 entries hold the random key of a vault of an earlier scheme: refused as `Legacy`, never
+//! used, never removed or replaced by this build.
 //!
 //! An entry is keyed by the vault id, not by a path: a vault file that is moved or copied keeps its
 //! key. It is accepted only for the vault id the caller expects and the salt the vault file
@@ -26,7 +31,8 @@ use zeroize::Zeroizing;
 
 pub const KEYS_DIR: &str = "keys";
 pub const PENDING_SUFFIX: &str = ".pending";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
+const LEGACY_VERSION: u32 = 1;
 const MAX_ENTRY_BYTES: u64 = 16 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,15 +65,27 @@ fn read_entry(path: &Path) -> Result<Entry, KeyError> {
             io::ErrorKind::InvalidData => KeyError::Mismatch,
             _ => KeyError::Io,
         })?;
+    #[derive(Deserialize)]
+    struct Versioned {
+        version: u32,
+    }
+    match serde_json::from_slice::<Versioned>(&bytes) {
+        Ok(found) if found.version == LEGACY_VERSION => return Err(KeyError::Legacy),
+        Ok(found) if found.version == VERSION => {}
+        _ => return Err(KeyError::Mismatch),
+    }
     let entry: Entry = serde_json::from_slice(&bytes).map_err(|_| KeyError::Mismatch)?;
-    if entry.version != VERSION || entry.protector != protector::NAME {
+    if entry.protector != protector::NAME {
         return Err(KeyError::Mismatch);
     }
     Ok(entry)
 }
 
 fn open_entry(entry: &Entry, vault_id: &VaultId, salt: &CipherSalt) -> Result<VaultKey, KeyError> {
-    if entry.vault_id != *vault_id || entry.cipher_salt != *salt {
+    if entry.vault_id != *vault_id
+        || entry.cipher_salt != *salt
+        || recovery::vault_id(salt) != *vault_id
+    {
         return Err(KeyError::Mismatch);
     }
     let blob = base64::engine::general_purpose::STANDARD
@@ -108,25 +126,24 @@ pub fn unlock_pending(
     )
 }
 
-/// The vault id of the (non-pending) entry recorded for `salt`, if exactly one names it. Lets a
-/// vault file be opened on this PC when its sidecar was not copied with it.
-pub fn find_by_salt(app_dir: &Path, salt: &CipherSalt) -> Option<VaultId> {
-    let mut found = None;
-    for item in std::fs::read_dir(keys_dir(app_dir)).ok()?.flatten() {
-        let name = item.file_name();
-        let Some(stem) = name.to_str().and_then(|name| name.strip_suffix(".json")) else {
-            continue;
-        };
-        let Some(id) = VaultId::parse_hex(stem) else {
-            continue;
-        };
-        let matches = read_entry(&item.path())
-            .is_ok_and(|entry| entry.vault_id == id && entry.cipher_salt == *salt);
-        if matches && found.replace(id).is_some() {
-            return None;
-        }
+/// True when an entry of an earlier scheme (version 1) names `salt`: the vault file with that salt
+/// is a vault of an earlier, unsupported scheme. Reads only the version and the salt.
+pub fn legacy_entry_for(app_dir: &Path, salt: &CipherSalt) -> bool {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Named {
+        version: u32,
+        cipher_salt: CipherSalt,
     }
-    found
+    let Ok(items) = std::fs::read_dir(keys_dir(app_dir)) else {
+        return false;
+    };
+    items.flatten().any(|item| {
+        fsutil::read_bounded(&item.path(), MAX_ENTRY_BYTES)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Named>(&bytes).ok())
+            .is_some_and(|named| named.version == LEGACY_VERSION && named.cipher_salt == *salt)
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,10 +274,8 @@ mod tests {
     #[test]
     fn an_entry_unlocks_only_its_vault_with_its_salt() {
         let dir = Dir::new();
-        let (id, salt) = (
-            VaultId::generate().unwrap(),
-            CipherSalt::from_array([3; 16]),
-        );
+        let salt = CipherSalt::from_array([3; 16]);
+        let id = recovery::vault_id(&salt);
         let key = VaultKey::generate().unwrap();
         assert_eq!(unlock(&dir.0, &id, &salt).unwrap_err(), KeyError::Missing);
         store(&dir.0, &id, &salt, &key, Write::New).unwrap();
@@ -271,8 +286,14 @@ mod tests {
             unlock(&dir.0, &id, &CipherSalt::from_array([4; 16])).unwrap_err(),
             KeyError::Mismatch
         );
-        assert_eq!(find_by_salt(&dir.0, &salt), Some(id));
-        assert_eq!(find_by_salt(&dir.0, &CipherSalt::from_array([4; 16])), None);
+        // A vault id that is not the salt's is never stored or accepted.
+        let foreign = VaultId::generate().unwrap();
+        assert_eq!(
+            store(&dir.0, &foreign, &salt, &key, Write::New).unwrap_err(),
+            StoreError::ProtectorFailed
+        );
+        assert!(!entry_path(&dir.0, &foreign).exists());
+        assert!(!legacy_entry_for(&dir.0, &salt));
         // Never replaced by a second creation.
         assert_eq!(
             store(
@@ -291,8 +312,11 @@ mod tests {
     #[test]
     fn a_swapped_altered_or_foreign_entry_is_refused() {
         let dir = Dir::new();
-        let (a, b) = (VaultId::generate().unwrap(), VaultId::generate().unwrap());
-        let salt = CipherSalt::from_array([5; 16]);
+        let (salt, salt_b) = (
+            CipherSalt::from_array([5; 16]),
+            CipherSalt::from_array([0x15; 16]),
+        );
+        let (a, b) = (recovery::vault_id(&salt), recovery::vault_id(&salt_b));
         store(
             &dir.0,
             &a,
@@ -304,7 +328,7 @@ mod tests {
         store(
             &dir.0,
             &b,
-            &salt,
+            &salt_b,
             &VaultKey::generate().unwrap(),
             Write::New,
         )
@@ -334,7 +358,8 @@ mod tests {
         for (field, bad) in [
             ("kcv", serde_json::json!("00")),
             ("protected", serde_json::json!("%%%")),
-            ("version", serde_json::json!(2)),
+            ("version", serde_json::json!(3)),
+            ("vaultId", serde_json::json!(b.to_hex())),
             ("protector", serde_json::json!("plain")),
             ("cipherSalt", serde_json::json!("zz")),
         ] {
@@ -353,6 +378,15 @@ mod tests {
         assert_eq!(unlock(&dir.0, &a, &salt).unwrap_err(), KeyError::Mismatch);
         std::fs::write(entry_path(&dir.0, &a), b"{").unwrap();
         assert_eq!(unlock(&dir.0, &a, &salt).unwrap_err(), KeyError::Mismatch);
+        // An entry of an earlier scheme (version 1): refused as legacy, recognised by its salt.
+        let mut value = original.clone();
+        value["version"] = 1.into();
+        rewrite(&dir.0, &a, &value);
+        assert_eq!(unlock(&dir.0, &a, &salt).unwrap_err(), KeyError::Legacy);
+        assert!(legacy_entry_for(&dir.0, &salt));
+        assert!(!legacy_entry_for(&dir.0, &salt_b));
+        remove_created(&dir.0, &a, Some(&salt));
+        assert!(entry_path(&dir.0, &a).exists(), "never removed");
         rewrite(&dir.0, &a, &original);
         assert!(unlock(&dir.0, &a, &salt).is_ok());
     }
@@ -360,14 +394,11 @@ mod tests {
     #[test]
     fn a_pending_entry_never_unlocks_until_promoted_and_promotion_never_replaces() {
         let dir = Dir::new();
-        let (id, salt) = (
-            VaultId::generate().unwrap(),
-            CipherSalt::from_array([6; 16]),
-        );
+        let salt = CipherSalt::from_array([6; 16]);
+        let id = recovery::vault_id(&salt);
         let key = VaultKey::generate().unwrap();
         store(&dir.0, &id, &salt, &key, Write::Pending).unwrap();
         assert_eq!(unlock(&dir.0, &id, &salt).unwrap_err(), KeyError::Missing);
-        assert_eq!(find_by_salt(&dir.0, &salt), None);
         assert!(unlock_pending(&dir.0, &id, &salt).unwrap().same_as(&key));
         promote_pending(&dir.0, &id, &salt).unwrap();
         assert!(unlock(&dir.0, &id, &salt).unwrap().same_as(&key));

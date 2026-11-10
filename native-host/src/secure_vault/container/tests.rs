@@ -7,24 +7,31 @@ fn cheap_kdf() -> Kdf {
     Kdf::with_cost(ARGON_M_KIB_MIN, 1, 1).unwrap()
 }
 
+/// The salt every fixture payload starts with.
+const SALT: [u8; 16] = [3; 16];
+
 fn fixture() -> (VaultKey, RecoverySpell, VaultFacts) {
-    let key = VaultKey::generate().unwrap();
     let secret = RecoverySpell::generate().unwrap();
-    let vault_id = VaultId::generate().unwrap();
-    let recovery_salt = CipherSalt::from_array([7; 16]);
-    let recovery = recovery::wrap(&key, &secret, &vault_id, &recovery_salt).unwrap();
+    let cipher_salt = CipherSalt::from_array(SALT);
+    let key = recovery::vault_key(&secret, &cipher_salt);
     let facts = VaultFacts {
         schema_version: crate::schema::SCHEMA_VERSION,
-        vault_id,
-        cipher_salt: CipherSalt::from_array([3; 16]),
-        recovery_salt,
-        recovery,
+        cipher_salt,
     };
     (key, secret, facts)
 }
 
+/// Bytes standing for a SQLCipher file: they start with the fixture's salt.
 fn payload(len: usize) -> Vec<u8> {
-    (0..len).map(|i| (i * 31 % 251) as u8).collect()
+    (0..len)
+        .map(|i| {
+            if i < 16 {
+                SALT[i]
+            } else {
+                (i * 31 % 251) as u8
+            }
+        })
+        .collect()
 }
 
 fn package_b(key: &VaultKey, facts: VaultFacts, data: &[u8], policy: Option<&[u8]>) -> Vec<u8> {
@@ -63,7 +70,15 @@ fn format_b_round_trips_with_the_spell_only() {
     assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), VERSION);
     let header: serde_json::Value =
         serde_json::from_slice(&read_prefix(&mut Cursor::new(&bytes)).unwrap().header).unwrap();
-    assert_eq!(header["recovery"]["scheme"], recovery::SCHEME);
+    assert_eq!(header["keyScheme"], recovery::SCHEME);
+    assert_eq!(
+        header["vaultId"],
+        recovery::vault_id(&CipherSalt::from_array(SALT)).to_hex()
+    );
+    assert!(
+        header.get("recovery").is_none(),
+        "no envelope: the key is derived"
+    );
     // The spell as a user pastes it.
     let typed = spell::parse(&spell::encode(&secret)).unwrap();
     assert!(restore_b(&bytes, &typed).is_ok());
@@ -182,6 +197,39 @@ fn crafted_format_b_headers_are_refused_without_allocating() {
             Box::new(|h| h["vaultId"] = "../../etc".into()),
             FormatError::Malformed,
         ),
+        // Another vault id than the salt's: refused before any key is derived.
+        (
+            Box::new(|h| h["vaultId"] = "00".repeat(16).into()),
+            FormatError::Malformed,
+        ),
+        (
+            Box::new(|h| {
+                h["keyScheme"] = "recovery-spell-256/hkdf-sha256/xchacha20poly1305/v2".into()
+            }),
+            FormatError::UnsupportedVersion,
+        ),
+        (Box::new(|h| h["kcv"] = "00".into()), FormatError::Malformed),
+        // Another check value: indistinguishable from a wrong spell.
+        (
+            Box::new(|h| h["kcv"] = "00".repeat(32).into()),
+            FormatError::SpellRejected,
+        ),
+        // Another salt (and its matching vault id): the spell yields another key, refused.
+        (
+            Box::new(|h| {
+                let salt = CipherSalt::from_array([4; 16]);
+                h["cipherSalt"] = salt.to_hex().into();
+                h["vaultId"] = recovery::vault_id(&salt).to_hex().into();
+            }),
+            FormatError::SpellRejected,
+        ),
+        (
+            Box::new(|h| {
+                h.as_object_mut().unwrap().remove("recoverySalt");
+                h["recovery"] = serde_json::json!({});
+            }),
+            FormatError::Malformed,
+        ),
     ] {
         let altered = with_header(&bytes, edit);
         assert_eq!(restore_b(&altered, &secret).err(), Some(expected));
@@ -211,20 +259,28 @@ fn detection_never_takes_a_file_for_a_container_it_is_not() {
     );
     assert_eq!(detect(&[]), Detected::Unknown);
     let mut head = MAGIC.to_vec();
-    head.extend_from_slice(&3u16.to_le_bytes());
+    head.extend_from_slice(&9u16.to_le_bytes());
     head.extend_from_slice(&[b'B', 0, 1, 0, 0, 0]);
     assert_eq!(detect(&head), Detected::UnsupportedVersion);
     head[8] = 0;
     assert_eq!(detect(&head), Detected::UnsupportedVersion, "version 0");
-    head[8] = 2;
+    head[8] = 4;
+    assert_eq!(detect(&head), Detected::UnsupportedVersion, "version 4");
+    head[8] = 3;
     assert_eq!(detect(&head), Detected::Container(Kind::B));
     head[10] = b'D';
     assert_eq!(detect(&head), Detected::Container(Kind::D));
-    // Slice C (12-word phrase): B and D are named as such, C is unchanged and still read.
-    head[8] = 1;
-    assert_eq!(detect(&head), Detected::LegacyRecoveryPhrase);
-    head[10] = b'B';
-    assert_eq!(detect(&head), Detected::LegacyRecoveryPhrase);
+    // Earlier slices (12-word phrase, spell envelope): B and D are named as such, C is unchanged
+    // and still read.
+    for version in LEGACY_VERSIONS {
+        head[8..10].copy_from_slice(&version.to_le_bytes());
+        head[10] = b'D';
+        assert_eq!(detect(&head), Detected::Legacy);
+        head[10] = b'B';
+        assert_eq!(detect(&head), Detected::Legacy);
+        head[10] = b'C';
+        assert_eq!(detect(&head), Detected::Container(Kind::C));
+    }
     head[10] = b'Z';
     assert_eq!(detect(&head), Detected::Unknown);
     head[10] = b'C';
@@ -669,58 +725,60 @@ fn every_backup_gets_a_new_salt_and_nonce() {
 }
 
 #[test]
-fn slice_c_phrase_containers_are_refused_as_such_before_any_key_is_derived() {
-    let (key, secret, facts) = fixture();
-    let b = package_b(&key, facts, &payload(4096), None);
-    let mut legacy_b = b.clone();
-    legacy_b[8..10].copy_from_slice(&LEGACY_VERSION.to_le_bytes());
-    assert_eq!(
-        restore_b(&legacy_b, &secret).err(),
-        Some(FormatError::LegacyRecoveryPhrase)
-    );
-    let (key, _, facts) = fixture();
-    let d = container_d(b"outer password", &key, facts, &payload(4096));
-    let mut legacy_d = d.clone();
-    legacy_d[8..10].copy_from_slice(&LEGACY_VERSION.to_le_bytes());
-    assert_eq!(
-        PasswordReader::open(
-            Cursor::new(&legacy_d),
-            legacy_d.len() as u64,
+fn earlier_envelope_containers_are_refused_as_such_before_any_key_is_derived() {
+    for legacy in LEGACY_VERSIONS {
+        let (key, secret, facts) = fixture();
+        let b = package_b(&key, facts, &payload(4096), None);
+        let mut legacy_b = b.clone();
+        legacy_b[8..10].copy_from_slice(&legacy.to_le_bytes());
+        assert_eq!(
+            restore_b(&legacy_b, &secret).err(),
+            Some(FormatError::Legacy)
+        );
+        let (key, _, facts) = fixture();
+        let d = container_d(b"outer password", &key, facts, &payload(4096));
+        let mut legacy_d = d.clone();
+        legacy_d[8..10].copy_from_slice(&legacy.to_le_bytes());
+        assert_eq!(
+            PasswordReader::open(
+                Cursor::new(&legacy_d),
+                legacy_d.len() as u64,
+                b"outer password",
+                Kind::D
+            )
+            .err(),
+            Some(FormatError::Legacy)
+        );
+        // A version 3 D whose inner package is an earlier B: refused at the inner prefix.
+        let (key, secret, facts) = fixture();
+        let prepared = PreparedB::new(&key, facts, 4096, None).unwrap();
+        let mut inner = Vec::new();
+        prepared
+            .write_to(&mut inner, &mut Cursor::new(payload(4096)))
+            .unwrap();
+        inner[8..10].copy_from_slice(&legacy.to_le_bytes());
+        let mut writer = PasswordWriter::start(
+            Vec::new(),
             b"outer password",
-            Kind::D
+            Kind::D,
+            cheap_kdf(),
+            vec![Section {
+                kind: SECTION_PACKAGE.into(),
+                len: inner.len() as u64,
+            }],
         )
-        .err(),
-        Some(FormatError::LegacyRecoveryPhrase)
-    );
-    // A version 2 D whose inner package is a version 1 B: refused at the inner prefix.
-    let (key, secret, facts) = fixture();
-    let prepared = PreparedB::new(&key, facts, 4096, None).unwrap();
-    let mut inner = Vec::new();
-    prepared
-        .write_to(&mut inner, &mut Cursor::new(payload(4096)))
         .unwrap();
-    inner[8..10].copy_from_slice(&LEGACY_VERSION.to_le_bytes());
-    let mut writer = PasswordWriter::start(
-        Vec::new(),
-        b"outer password",
-        Kind::D,
-        cheap_kdf(),
-        vec![Section {
-            kind: SECTION_PACKAGE.into(),
-            len: inner.len() as u64,
-        }],
-    )
-    .unwrap();
-    writer.write_all(&inner).unwrap();
-    let nested = writer.finish().unwrap();
-    assert_eq!(
-        open_d(&nested, b"outer password", &secret).err(),
-        Some(FormatError::LegacyRecoveryPhrase)
-    );
+        writer.write_all(&inner).unwrap();
+        let nested = writer.finish().unwrap();
+        assert_eq!(
+            open_d(&nested, b"outer password", &secret).err(),
+            Some(FormatError::Legacy)
+        );
+    }
 }
 
 #[test]
-fn a_slice_c_format_c_file_is_still_read_and_new_ones_are_version_2() {
+fn an_earlier_format_c_file_is_still_read_and_new_ones_are_version_3() {
     let meta = Meta::plain();
     let meta_bytes = serde_json::to_vec(&meta).unwrap();
     let vault = payload(CHUNK + 77);
@@ -740,7 +798,7 @@ fn a_slice_c_format_c_file_is_still_read_and_new_ones_are_version_2() {
         WRITE_VERSION.with(|v| v.set(VERSION));
         bytes
     };
-    for version in [LEGACY_VERSION, VERSION] {
+    for version in [LEGACY_VERSIONS[0], LEGACY_VERSIONS[1], VERSION] {
         let bytes = write(version);
         assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), version);
         assert_eq!(detect(&bytes[..16]), Detected::Container(Kind::C));
@@ -756,11 +814,11 @@ fn a_slice_c_format_c_file_is_still_read_and_new_ones_are_version_2() {
         assert!(reader.is_complete());
         assert_eq!(header.sections.len(), 2);
         assert_eq!(&plain[meta_bytes.len()..], &vault[..]);
-        // The version is authenticated: a version 1 file relabelled 2 (or the reverse) fails.
+        // The version is authenticated: a file relabelled with another version fails.
         let mut relabelled = bytes.clone();
         relabelled[8..10].copy_from_slice(
             &(if version == VERSION {
-                LEGACY_VERSION
+                LEGACY_VERSIONS[1]
             } else {
                 VERSION
             })

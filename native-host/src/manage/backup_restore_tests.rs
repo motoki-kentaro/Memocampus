@@ -6,7 +6,7 @@ use super::backup::{self, Fault, Step, FAULT};
 use super::*;
 use crate::vault::tests::TempDir;
 use crate::vault::Environment;
-use memocampus_native_host::secure_vault::{cipher, container, key_store, sidecar};
+use memocampus_native_host::secure_vault::{cipher, container, key_store, recovery, sidecar};
 use std::cell::RefCell;
 use std::fs;
 
@@ -435,12 +435,13 @@ fn an_encrypted_vault_backs_up_encrypted_and_restores_on_another_pc_with_the_spe
         panic!("not encrypted")
     };
     assert!(key_store::unlock(other_env.app_dir.as_deref().unwrap(), &new_id, &salt).is_ok());
-    let found = sidecar::read(&sidecar::path_for(&target)).unwrap();
-    assert_eq!((found.vault_id, found.cipher_salt), (new_id, salt));
+    // The new id is the new salt's; no sidecar exists (Slice E).
+    assert_eq!(recovery::vault_id(&salt), new_id);
+    assert!(!sidecar::path_for(&target).exists());
     // A fresh host process unlocks it without the spell, and the content is the source's.
     let mut fresh = Session::new(other_env.clone());
     assert_eq!(active_dump(&mut fresh), original);
-    // The spell still recovers the restored vault (its new sidecar).
+    // The spell still recovers the restored vault, from the file alone.
     let mut third = Session::new(env_of(&tmp, "app4"));
     let recovered = send(
         &mut third,
@@ -491,7 +492,10 @@ fn restoring_next_to_the_original_and_twice_never_collides() {
         json!({ "recoverySpell": spell }),
     );
     assert_eq!(second["ok"], true, "{second}");
-    let id_of = |path: &Path| sidecar::read(&sidecar::path_for(path)).unwrap().vault_id;
+    let id_of = |path: &Path| match cipher::read_head(path).unwrap() {
+        cipher::Head::Salt(salt) => recovery::vault_id(&salt),
+        other => panic!("{other:?}"),
+    };
     let ids = [
         id_of(&tmp.0.join("enc.sqlite3")),
         id_of(&tmp.0.join("one.sqlite3")),
@@ -778,16 +782,17 @@ fn files_that_are_not_backups_are_refused_and_nothing_is_created() {
             "backup_schema_mismatch",
         ),
         (
-            "v3",
+            "v4",
             {
                 let mut bytes = container::MAGIC.to_vec();
-                bytes.extend_from_slice(&3u16.to_le_bytes());
+                bytes.extend_from_slice(&4u16.to_le_bytes());
                 bytes.extend_from_slice(&[b'B', 0, 2, 0, 0, 0, b'{', b'}']);
                 bytes
             },
             "backup_unsupported_version",
         ),
-        // Slice C's B and D (12-word phrase): named as such, before any secret is asked for.
+        // B and D of earlier slices (12-word phrase, spell envelope): named as such, before any
+        // secret is asked for (Slice E).
         (
             "v1-b",
             {
@@ -796,7 +801,7 @@ fn files_that_are_not_backups_are_refused_and_nothing_is_created() {
                 bytes.extend_from_slice(&[b'B', 0, 2, 0, 0, 0, b'{', b'}']);
                 bytes
             },
-            "backup_legacy_recovery_phrase",
+            "backup_legacy_unsupported",
         ),
         (
             "v1-d",
@@ -806,7 +811,27 @@ fn files_that_are_not_backups_are_refused_and_nothing_is_created() {
                 bytes.extend_from_slice(&[b'D', 0, 2, 0, 0, 0, b'{', b'}']);
                 bytes
             },
-            "backup_legacy_recovery_phrase",
+            "backup_legacy_unsupported",
+        ),
+        (
+            "v2-b",
+            {
+                let mut bytes = container::MAGIC.to_vec();
+                bytes.extend_from_slice(&2u16.to_le_bytes());
+                bytes.extend_from_slice(&[b'B', 0, 2, 0, 0, 0, b'{', b'}']);
+                bytes
+            },
+            "backup_legacy_unsupported",
+        ),
+        (
+            "v2-d",
+            {
+                let mut bytes = container::MAGIC.to_vec();
+                bytes.extend_from_slice(&2u16.to_le_bytes());
+                bytes.extend_from_slice(&[b'D', 0, 2, 0, 0, 0, b'{', b'}']);
+                bytes
+            },
+            "backup_legacy_unsupported",
         ),
         (
             "huge-header",
@@ -1049,6 +1074,7 @@ fn a_restore_failing_at_any_step_removes_everything_it_created() {
         for step in [
             Step::RestoreWrite,
             Step::RestoreVerify,
+            Step::RestoreRekey,
             Step::RestoreKeys,
             Step::RestorePromote,
         ] {
@@ -1068,6 +1094,7 @@ fn a_restore_failing_at_any_step_removes_everything_it_created() {
                 for leftover in [
                     target.clone(),
                     tmp.0.join("restored.sqlite3.partial"),
+                    tmp.0.join("restored.sqlite3.payload.partial"),
                     sidecar::path_for(&target),
                     sidecar::pending_path_for(&target),
                     app2.join("vault-restore.json"),
@@ -1098,8 +1125,14 @@ fn a_restore_interrupted_by_a_crash_is_reported_and_can_be_discarded_or_finished
     let app2 = other_env.app_dir.clone().unwrap();
     let target = tmp.0.join("restored.sqlite3");
     let args = json!({ "recoverySpell": spell });
-    // Crashes before verification and while the keys are written: discard, then restore again.
-    for step in [Step::RestoreWrite, Step::RestoreVerify, Step::RestoreKeys] {
+    // Crashes before verification, before the re-encryption under the new salt and while the keys
+    // are written: discard, then restore again.
+    for step in [
+        Step::RestoreWrite,
+        Step::RestoreVerify,
+        Step::RestoreRekey,
+        Step::RestoreKeys,
+    ] {
         let mut other = Session::new(other_env.clone());
         let failed = with_fault(step, Fault::Crash, || {
             restore_to(&mut other, &backup, &target, args.clone())
@@ -1110,10 +1143,17 @@ fn a_restore_interrupted_by_a_crash_is_reported_and_can_be_discarded_or_finished
             shown["status"]["restorePending"]["phase"], "restoring",
             "{step:?}"
         );
-        // The target itself does not exist yet: its `.partial` names the same file under both
-        // spellings of the path (the host's canonical one, the test's possibly 8.3 one).
+        // The target itself does not exist yet: the file written so far (the payload work file,
+        // then the re-encrypted `.partial`) names the same file under both spellings of the path
+        // (the host's canonical one, the test's possibly 8.3 one).
         let pending = PathBuf::from(shown["status"]["restorePending"]["path"].as_str().unwrap());
-        assert!(same_file(&partial(&pending), &partial(&target)), "{step:?}");
+        let payload = |path: &Path| PathBuf::from(format!("{}.payload.partial", path.display()));
+        let written = if partial(&target).exists() {
+            same_file(&partial(&pending), &partial(&target))
+        } else {
+            same_file(&payload(&pending), &payload(&target))
+        };
+        assert!(written, "{step:?}");
         let activate_early = send(
             &mut other,
             json!({ "type": "vault_restore_activate", "expectedVaultToken": "0".repeat(64) }),
@@ -1125,6 +1165,7 @@ fn a_restore_interrupted_by_a_crash_is_reported_and_can_be_discarded_or_finished
         assert_eq!(discarded["ok"], true);
         assert_eq!(discarded["status"]["restorePending"], json!(null));
         assert!(!tmp.0.join("restored.sqlite3.partial").exists() && !target.exists());
+        assert!(!tmp.0.join("restored.sqlite3.payload.partial").exists());
         let keys = app2.join("keys");
         assert!(!keys.exists() || names_in(&keys).is_empty(), "{step:?}");
         assert!(!sidecar::pending_path_for(&target).exists());
@@ -1139,6 +1180,7 @@ fn a_restore_interrupted_by_a_crash_is_reported_and_can_be_discarded_or_finished
     let pending = shown["status"]["restorePending"].clone();
     assert_eq!(pending["phase"], "verified");
     assert!(!target.exists() && tmp.0.join("restored.sqlite3.partial").exists());
+    assert!(!tmp.0.join("restored.sqlite3.payload.partial").exists());
     let activated = activate(&mut other, &pending);
     assert_eq!(activated["ok"], true, "{activated}");
     assert_eq!(activated["status"]["publication"], "pending");
@@ -1445,7 +1487,6 @@ fn a_plain_vault_in_wal_mode_is_refused_for_format_c_and_nothing_is_written() {
 
 #[test]
 fn b_and_d_backups_need_the_spell_that_recovers_this_vault() {
-    use memocampus_native_host::secure_vault::{recovery, secret::VaultKey, spell};
     let tmp = TempDir::new();
     let env = tmp.env();
     let mut session = Session::new(env.clone());
@@ -1483,46 +1524,12 @@ fn b_and_d_backups_need_the_spell_that_recovers_this_vault() {
             assert!(!refused.to_string().contains(&right[..20]));
         }
     }
-    // Altered recovery metadata: refused even with the right spell.
-    let sidecar_path = sidecar::path_for(&source);
-    let original = fs::read(&sidecar_path).unwrap();
-    let found = sidecar::read(&sidecar_path).unwrap();
-    let secret = spell::parse(&right).unwrap();
-    let foreign_key = VaultKey::generate().unwrap();
-    let foreign = sidecar::Sidecar::new(
-        found.vault_id,
-        found.cipher_salt,
-        recovery::wrap(&foreign_key, &secret, &found.vault_id, &found.cipher_salt).unwrap(),
-    );
-    let mut flipped = found.clone();
-    let mut wrapped = flipped.recovery.wrapped.into_bytes();
-    wrapped[10] = if wrapped[10] == b'0' { b'1' } else { b'0' };
-    flipped.recovery.wrapped = String::from_utf8(wrapped).unwrap();
-    for (content, code) in [
-        (None, "recovery_metadata_missing"),
-        (Some(b"{not json".to_vec()), "recovery_metadata_damaged"),
-        (
-            Some(serde_json::to_vec(&flipped).unwrap()),
-            "recovery_metadata_damaged",
-        ),
-        (
-            Some(fs::read(sidecar::path_for(&other_vault)).unwrap()),
-            "recovery_metadata_mismatch",
-        ),
-        (
-            Some(serde_json::to_vec(&foreign).unwrap()),
-            "recovery_key_mismatch",
-        ),
-    ] {
-        match content {
-            None => fs::remove_file(&sidecar_path).unwrap(),
-            Some(bytes) => fs::write(&sidecar_path, bytes).unwrap(),
-        }
-        let refused = backup_to(&mut session, &dir, json!({}));
-        assert_eq!(refused["error"], code, "{refused}");
-        assert!(names_in(&dir).is_empty());
-    }
-    fs::write(&sidecar_path, &original).unwrap();
+    // Sidecars play no part (Slice E): a stray `.mckey` naming another salt changes nothing.
+    fs::write(
+        sidecar::path_for(&source),
+        fs::read(tmp.0.join("app-other").join("config.json")).unwrap_or_default(),
+    )
+    .unwrap();
     // The right spell: B and D are made, and both restore with that spell.
     let original_rows = active_dump(&mut session);
     for (index, protection) in [json!({}), password("password123")].into_iter().enumerate() {
