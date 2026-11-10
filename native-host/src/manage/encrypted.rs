@@ -1,5 +1,5 @@
-//! Encrypted vaults in the side panel (Issue #51, Slice B): creation with a recovery phrase, opening
-//! an existing one, and recovery with the phrase.
+//! Encrypted vaults in the side panel (Issue #51, Slice B): creation with a Recovery Spell
+//! (ふっかつのじゅもん), opening an existing one, and recovery with the spell.
 //!
 //! # Creation (`vault_create_encrypted` → `vault_create_encrypted_commit` | `_cancel`)
 //!
@@ -11,20 +11,22 @@
 //! |---|---|---|
 //! | none | — | unchanged |
 //! | `creating` | `<target>.pending` (keyed DB), `keys\<id>.json.pending` (DPAPI), `<target>.mckey.pending` | unchanged |
-//! | `awaiting_confirmation` | all three, verified; the phrase was shown once | unchanged |
+//! | `awaiting_confirmation` | all three, verified; the spell was shown once | unchanged |
 //! | `promoted` | `<target>`, `keys\<id>.json`, `<target>.mckey` | unchanged |
 //! | none (committed) | the same | `<target>`, publication pending |
 //!
-//! - Begin generates VK, the recovery seed and the vault id, writes the files (each never
-//!   replacing anything), checks them, and returns the phrase. The phrase and VK are never written
-//!   anywhere in the clear: VK only DPAPI-protected and phrase-wrapped, the seed nowhere.
-//! - Commit needs the phrase back from the panel, after the user re-entered words of it there: the
-//!   host checks that it opens the envelope written at begin, i.e. that the phrase shown is the
-//!   vault's. It then verifies the DB, promotes the files (no replacement) and switches the active
+//! - Begin generates VK, the Recovery Spell (256 CSPRNG bits) and the vault id, writes the files
+//!   (each never replacing anything), checks them, and returns the spell (43 base64url characters)
+//!   once. The spell and VK are never written anywhere in the clear: VK only DPAPI-protected and
+//!   spell-wrapped, the spell nowhere. No message shows it again.
+//! - Commit needs the whole spell as the user re-entered (typed or pasted) it in the panel, all 43
+//!   characters: the host checks that it opens the envelope written at begin, i.e. that the spell
+//!   the user kept is the vault's. A mistyped spell is refused (`recovery_spell_rejected` or
+//!   `recovery_spell_invalid`) and the creation stays pending, so the user can try again. It then verifies the DB, promotes the files (no replacement) and switches the active
 //!   vault, which is the commit point. A retried commit continues from where a crash stopped.
 //! - Cancel removes only files that name this creation's vault id and salt, never an active vault.
 //! - While a manifest exists no other creation starts (`vault_creation_pending`), so an interrupted
-//!   creation can never be mixed up with a new key. The phrase cannot be shown again: an
+//!   creation can never be mixed up with a new key. The spell cannot be shown again: an
 //!   unconfirmed creation is cancelled and started over.
 //!
 //! # Opening and recovery
@@ -32,9 +34,11 @@
 //! `vault_open` of a file that is not plain SQLite finds its vault id (sidecar, else this user's
 //! key store by salt) and unlocks it with DPAPI. If this Windows user has no usable key
 //! (`key_unavailable`), nothing changes and the panel offers recovery: `vault_recover` takes the
-//! phrase, opens the sidecar's envelope, proves the key on the vault itself, and only then stores a
-//! new DPAPI entry for this user and makes the vault active, publication pending. A wrong phrase
-//! or damaged metadata changes nothing.
+//! spell, opens the sidecar's envelope, proves the key on the vault itself, and only then stores a
+//! new DPAPI entry for this user and makes the vault active, publication pending. A wrong spell
+//! or damaged metadata changes nothing. A sidecar of the 12-word phrase (version 1) is
+//! `recovery_metadata_unsupported`: such a vault still opens with this user's DPAPI key, but
+//! cannot be recovered or backed up as B/D by this build.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -54,7 +58,7 @@ use crate::vault::{
 };
 use memocampus_native_host::active_vault::VaultMode;
 use memocampus_native_host::secure_vault::{
-    cipher, fsutil, key_store, phrase, recovery, secret::RecoverySeed, sidecar,
+    cipher, fsutil, key_store, recovery, secret::RecoverySpell, sidecar, spell,
 };
 use zeroize::Zeroizing;
 
@@ -169,7 +173,7 @@ pub(super) fn key_store_failure(error: key_store::StoreError) -> Failure {
     Failure::with(code, json!({}))
 }
 
-/// `vault_create_encrypted`: everything but the activation; answers with the phrase.
+/// `vault_create_encrypted`: everything but the activation; answers with the spell, once.
 pub fn begin(
     session: &mut Session,
     dialogs: &dyn Dialogs,
@@ -185,6 +189,8 @@ pub fn begin(
         }
         let _ = fs::remove_file(manifest_path(session)?);
     }
+    // Slice D: never beside an unfinished conversion (two spells at once could be confused).
+    super::convert::refuse_while_pending(session)?;
     let default_path = session.env.default_vault_path()?;
     let target = match requested_path(message, "path")? {
         Some(path) => path,
@@ -227,7 +233,7 @@ pub fn begin(
 
     let _lock = ConfigLock::acquire(&session.env)?;
     let key = VaultKey::generate().map_err(|_| random_failure())?;
-    let seed = RecoverySeed::generate().map_err(|_| random_failure())?;
+    let secret = RecoverySpell::generate().map_err(|_| random_failure())?;
     let vault_id = VaultId::generate().map_err(|_| random_failure())?;
     let mut manifest = Manifest {
         version: MANIFEST_VERSION,
@@ -251,13 +257,13 @@ pub fn begin(
         key_store::store(&app, &vault_id, &salt, &key, key_store::Write::Pending)
             .map_err(key_store_failure)?;
         let envelope =
-            recovery::wrap(&key, &seed, &vault_id, &salt).map_err(|_| random_failure())?;
+            recovery::wrap(&key, &secret, &vault_id, &salt).map_err(|_| random_failure())?;
         sidecar::write_new(
             &sidecar::pending_path_for(&target),
             &sidecar::Sidecar::new(vault_id, salt, envelope),
         )
         .map_err(|_| Failure::from(VaultError::Io))?;
-        verify_pending(session, &manifest, &seed)?;
+        verify_pending(session, &manifest, &secret)?;
         manifest.phase = Phase::AwaitingConfirmation;
         write_manifest(session, &manifest, false)
     })();
@@ -265,19 +271,22 @@ pub fn begin(
         remove_created(session, &manifest);
         return Err(failure);
     }
-    let words: Zeroizing<String> = phrase::encode(&seed);
+    // The only time the spell leaves the host. The response goes to the panel over native
+    // messaging and nowhere else: no log, no file, no other message carries it.
+    let shown: Zeroizing<String> = spell::encode(&secret);
+    drop(secret);
     Ok(json!({
         "path": display(&target),
-        "recoveryPhrase": phrase::words(&words),
+        "recoverySpell": shown.as_str(),
     }))
 }
 
-/// Every pending file opens to the same key: the DPAPI entry, the envelope with this seed, and
+/// Every pending file opens to the same key: the DPAPI entry, the envelope with this spell, and
 /// the vault itself.
 fn verify_pending(
     session: &Session,
     manifest: &Manifest,
-    seed: &RecoverySeed,
+    secret: &RecoverySpell,
 ) -> Result<(), Failure> {
     let damaged = || Failure::with("vault_creation_damaged", json!({}));
     let salt = manifest.cipher_salt.ok_or_else(damaged)?;
@@ -304,10 +313,10 @@ fn verify_pending(
         return Err(damaged());
     }
     let unwrapped =
-        recovery::unwrap(&found.recovery, seed, &manifest.vault_id, &salt).map_err(|error| {
+        recovery::unwrap(&found.recovery, secret, &manifest.vault_id, &salt).map_err(|error| {
             match error {
-                recovery::UnwrapError::PhraseRejected => {
-                    Failure::with("recovery_phrase_rejected", json!({}))
+                recovery::UnwrapError::SpellRejected => {
+                    Failure::with("recovery_spell_rejected", json!({}))
                 }
                 _ => damaged(),
             }
@@ -329,18 +338,19 @@ fn verify_pending(
     Ok(())
 }
 
-/// `vault_create_encrypted_commit`: the phrase confirmed in the panel, then promotion and the
-/// switch. `recoveryPhrase` must be the phrase begin returned.
+/// `vault_create_encrypted_commit`: the spell re-entered in full in the panel, then promotion and
+/// the switch. `recoverySpell` must be the spell begin returned, all 43 characters.
 pub fn commit(session: &mut Session, message: &Value) -> Result<Value, Failure> {
     require_management(session)?;
     let typed = Zeroizing::new(
         message
-            .get("recoveryPhrase")
+            .get("recoverySpell")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned(),
     );
-    let seed = phrase::parse(&typed).map_err(phrase_failure)?;
+    let secret = spell::parse(&typed).map_err(spell_failure)?;
+    drop(typed);
     let lock = ConfigLock::acquire(&session.env)?;
     let mut manifest = match read_manifest(session)? {
         Some(manifest) if manifest.phase != Phase::Creating => manifest,
@@ -351,8 +361,8 @@ pub fn commit(session: &mut Session, message: &Value) -> Result<Value, Failure> 
         session.reset();
         return Ok(json!({ "path": manifest.target, "status": status(session) }));
     }
-    verify_pending(session, &manifest, &seed)?;
-    drop(seed);
+    verify_pending(session, &manifest, &secret)?;
+    drop(secret);
     let salt = manifest.cipher_salt.expect("verified");
     let target = manifest.target();
     let app = app_dir(session)?;
@@ -456,8 +466,9 @@ fn remove_created(session: &Session, manifest: &Manifest) {
         sidecar::pending_path_for(&target),
         sidecar::path_for(&target),
     ] {
-        if sidecar::read(&path).is_ok_and(|found| {
-            found.vault_id == manifest.vault_id && salt.is_none_or(|salt| found.cipher_salt == salt)
+        // Any version: a creation begun before the Recovery Spell left a version 1 sidecar.
+        if sidecar::identity(&path).is_some_and(|(vault_id, cipher_salt)| {
+            vault_id == manifest.vault_id && salt.is_none_or(|salt| cipher_salt == salt)
         }) {
             let _ = fs::remove_file(&path);
         }
@@ -479,15 +490,28 @@ impl KeySource for GivenKey {
     }
 }
 
-pub(super) fn phrase_failure(error: phrase::PhraseError) -> Failure {
+/// `recovery_spell_invalid`, with what is wrong (never the input itself).
+pub(super) fn spell_failure(error: spell::SpellError) -> Failure {
     let details = match error {
-        phrase::PhraseError::WordCount(count) => json!({ "reason": "word_count", "count": count }),
-        phrase::PhraseError::UnknownWord(position) => {
-            json!({ "reason": "unknown_word", "position": position })
+        spell::SpellError::Length(count) => json!({ "reason": "length", "count": count }),
+        spell::SpellError::Character(position) => {
+            json!({ "reason": "character", "position": position })
         }
-        phrase::PhraseError::Checksum => json!({ "reason": "checksum" }),
+        spell::SpellError::NonCanonical => json!({ "reason": "non_canonical" }),
     };
-    Failure::with("recovery_phrase_invalid", details)
+    Failure::with("recovery_spell_invalid", details)
+}
+
+/// The spell of a request (`recoverySpell`), parsed strictly. Missing counts as length 0.
+pub(super) fn requested_spell(message: &Value) -> Result<RecoverySpell, Failure> {
+    let typed = Zeroizing::new(
+        message
+            .get("recoverySpell")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+    );
+    spell::parse(&typed).map_err(spell_failure)
 }
 
 /// The vault id of an encrypted file: its sidecar, else this user's key store (by salt). `None`:
@@ -513,6 +537,10 @@ fn identify(
         Err(sidecar::SidecarError::Invalid) => key_store::find_by_salt(app, salt)
             .map(|id| Some((id, false)))
             .ok_or_else(|| with_path("recovery_metadata_damaged", false)),
+        // The 12-word sidecar: this user's DPAPI key still opens the vault; nothing else can.
+        Err(sidecar::SidecarError::Unsupported) => key_store::find_by_salt(app, salt)
+            .map(|id| Some((id, false)))
+            .ok_or_else(|| with_path("recovery_metadata_unsupported", false)),
         Err(sidecar::SidecarError::Io) => Err(VaultError::Io.into()),
     }
 }
@@ -562,7 +590,7 @@ pub fn open_existing(
     ))
 }
 
-/// `vault_recover`: unlocks an encrypted vault with its recovery phrase, stores its key for this
+/// `vault_recover`: unlocks an encrypted vault with its Recovery Spell, stores its key for this
 /// Windows user (DPAPI) and makes it the active vault, publication pending.
 pub fn recover(
     session: &mut Session,
@@ -572,7 +600,7 @@ pub fn recover(
     require_management(session)?;
     let typed = Zeroizing::new(
         message
-            .get("recoveryPhrase")
+            .get("recoverySpell")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned(),
@@ -587,6 +615,7 @@ pub fn recover(
         }
     };
     let target = normalize_existing(&target)?;
+    super::refuse_work_file(session, &target)?;
     let assessment = location::probe(&target, session.env.exe_dir.as_deref());
     let location_approved = check_location(&assessment, &target, approved(message))?;
     let with_path = |code: &'static str| Failure::with(code, json!({ "path": display(&target) }));
@@ -601,18 +630,21 @@ pub fn recover(
         Ok(_) => return Err(with_path("recovery_metadata_mismatch")),
         Err(sidecar::SidecarError::Missing) => return Err(with_path("recovery_metadata_missing")),
         Err(sidecar::SidecarError::Invalid) => return Err(with_path("recovery_metadata_damaged")),
+        Err(sidecar::SidecarError::Unsupported) => {
+            return Err(with_path("recovery_metadata_unsupported"))
+        }
         Err(sidecar::SidecarError::Io) => return Err(VaultError::Io.into()),
     };
-    let seed = phrase::parse(&typed).map_err(phrase_failure)?;
+    let secret = spell::parse(&typed).map_err(spell_failure)?;
     drop(typed);
     let key =
-        recovery::unwrap(&found.recovery, &seed, &found.vault_id, &salt).map_err(|error| {
+        recovery::unwrap(&found.recovery, &secret, &found.vault_id, &salt).map_err(|error| {
             match error {
-                recovery::UnwrapError::PhraseRejected => with_path("recovery_phrase_rejected"),
+                recovery::UnwrapError::SpellRejected => with_path("recovery_spell_rejected"),
                 _ => with_path("recovery_metadata_damaged"),
             }
         })?;
-    drop(seed);
+    drop(secret);
     // Proven on the vault itself before anything is stored.
     vault::open_checked_in(
         &target,
@@ -626,7 +658,7 @@ pub fn recover(
         Ok(existing) if existing.same_as(&key) => None,
         Err(KeyError::Missing) => Some(key_store::Write::New),
         // An entry this user cannot use (another profile's, damaged, another key): replaced in one
-        // rename, now that the phrase proved the key.
+        // rename, now that the spell proved the key.
         _ => Some(key_store::Write::Replace),
     };
     if let Some(write) = write {
@@ -648,7 +680,7 @@ pub fn recover(
 }
 
 /// For the status: whether the encrypted vault at `path` has a sidecar matching its salt, so the
-/// panel can offer recovery with the phrase.
+/// panel can offer recovery with the spell.
 pub fn recovery_available(path: &Path) -> bool {
     matches!(
         (cipher::read_head(path), sidecar::read(&sidecar::path_for(path))),

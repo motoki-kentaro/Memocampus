@@ -9,9 +9,10 @@
 //! # Steps (all under the vault binding of `Session::read_for`, see `manage::backup`)
 //!
 //! 1. B and D: the key from this user's key store and the recovery envelope from the sidecar,
-//!    both checked against the vault file's salt and id, **and the phrase the user typed** (review
-//!    finding C-03): it must open that envelope to exactly the key store's key. A wrong phrase,
-//!    another vault's phrase or altered metadata refuses the backup before any file exists.
+//!    both checked against the vault file's salt and id, **and the Recovery Spell the user
+//!    entered** (review finding C-03): it must open that envelope to exactly the key store's key. A
+//!    wrong spell, another vault's spell, altered metadata or a 12-word (version 1) sidecar refuses
+//!    the backup before any file exists.
 //! 2. Snapshot.
 //!    - B, D: the SQLCipher Backup API, under one read transaction on the source, into a work file
 //!      `<app dir>\backup-work\<uuid>.sqlite3` keyed with the vault key: ciphertext with a new
@@ -45,7 +46,7 @@ use memocampus_native_host::policy::Policy;
 use memocampus_native_host::policy_store::{self, PolicyStore};
 use memocampus_native_host::secure_vault::container::{self, Kind, PasswordReader, PasswordWriter};
 use memocampus_native_host::secure_vault::recovery::{self, Envelope};
-use memocampus_native_host::secure_vault::secret::{CipherSalt, RecoverySeed, VaultId, VaultKey};
+use memocampus_native_host::secure_vault::secret::{CipherSalt, RecoverySpell, VaultId, VaultKey};
 use memocampus_native_host::secure_vault::{cipher, key_store, sidecar};
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
@@ -114,6 +115,13 @@ pub(crate) enum Step {
     RestoreVerify,
     RestoreKeys,
     RestorePromote,
+    /// Slice D: before the copy into the work file, before its verification, before the new key
+    /// and sidecar (D1), before the promotion, and in the switch's fence before the refresh.
+    ConvertCopy,
+    ConvertVerify,
+    ConvertKeys,
+    ConvertPromote,
+    ConvertRefresh,
 }
 
 #[cfg(test)]
@@ -312,9 +320,9 @@ pub struct Source {
     pub app: PathBuf,
     /// The file identity the panel showed (`vault_token`), checked again on the raw file handle.
     pub token: String,
-    /// B and D (review finding C-03): the phrase the user holds, proven against this vault before
-    /// anything is written. Never stored.
-    pub phrase: Option<RecoverySeed>,
+    /// B and D (review finding C-03): the Recovery Spell the user holds, proven against this vault
+    /// before anything is written. Never stored.
+    pub spell: Option<RecoverySpell>,
 }
 
 /// The key and recovery metadata of an encrypted vault.
@@ -325,10 +333,10 @@ struct Material {
     recovery: Envelope,
 }
 
-/// The key and envelope of the encrypted vault, and proof that the user's phrase recovers it: the
-/// phrase must open the sidecar's envelope (bound to the vault id and the file's salt) to exactly
+/// The key and envelope of the encrypted vault, and proof that the user's spell recovers it: the
+/// spell must open the sidecar's envelope (bound to the vault id and the file's salt) to exactly
 /// the key this user's key store holds (itself checked by its key check value against the same id
-/// and salt). A syntactically valid phrase of another vault, or altered metadata, is refused.
+/// and salt). A well-formed spell of another vault, or altered metadata, is refused.
 fn material(source: &Source) -> Result<Material, Failure> {
     let vault_id = source.vault_id.ok_or(VaultError::ConfigInvalid)?;
     let salt = match cipher::read_head(&source.path) {
@@ -341,21 +349,24 @@ fn material(source: &Source) -> Result<Material, Failure> {
     let found = sidecar::read(&sidecar::path_for(&source.path)).map_err(|error| match error {
         sidecar::SidecarError::Missing => Failure::with("recovery_metadata_missing", json!({})),
         sidecar::SidecarError::Invalid => Failure::with("recovery_metadata_damaged", json!({})),
+        sidecar::SidecarError::Unsupported => {
+            Failure::with("recovery_metadata_unsupported", json!({}))
+        }
         sidecar::SidecarError::Io => VaultError::Io.into(),
     })?;
     if found.vault_id != vault_id || found.cipher_salt != salt {
         return Err(Failure::with("recovery_metadata_mismatch", json!({})));
     }
-    let seed = source.phrase.as_ref().ok_or_else(|| {
+    let secret = source.spell.as_ref().ok_or_else(|| {
         Failure::with(
-            "recovery_phrase_invalid",
-            json!({ "reason": "word_count", "count": 0 }),
+            "recovery_spell_invalid",
+            json!({ "reason": "length", "count": 0 }),
         )
     })?;
-    let unwrapped = recovery::unwrap(&found.recovery, seed, &vault_id, &found.cipher_salt)
+    let unwrapped = recovery::unwrap(&found.recovery, secret, &vault_id, &found.cipher_salt)
         .map_err(|error| match error {
-            recovery::UnwrapError::PhraseRejected => {
-                Failure::with("recovery_phrase_rejected", json!({}))
+            recovery::UnwrapError::SpellRejected => {
+                Failure::with("recovery_spell_rejected", json!({}))
             }
             _ => Failure::with("recovery_metadata_damaged", json!({})),
         })?;

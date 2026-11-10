@@ -6,7 +6,7 @@
 //! - `vault_restore_inspect {path?}`: picks the backup file (dialog unless `path`), detects its format
 //!   and checks everything that needs no secret (bounds, exact length). Answers which secrets the
 //!   restore needs. Writes nothing.
-//! - `vault_restore {backupPath, path?, password?, recoveryPhrase?, approveWarnings?}`: picks the
+//! - `vault_restore {backupPath, path?, password?, recoverySpell?, approveWarnings?}`: picks the
 //!   target (a file that does not exist; dialog unless `path`), restores, verifies, and leaves a
 //!   complete vault there that is **not active**. Answers its counts and the backup's policy copy,
 //!   for the user to review.
@@ -34,11 +34,14 @@
 //!
 //! # Encrypted vaults
 //!
-//! The vault key comes from the backup's recovery envelope and the phrase only; no key store or
-//! DPAPI data of the original PC is used or copied. The restored vault gets a **new vault id** (so a
-//! restore next to the original, or a second restore of the same backup, never collides with an
-//! existing key store entry), its key is protected with this Windows user's DPAPI, and a new
-//! sidecar wraps the same key under the same phrase for the new id and the file's salt.
+//! The vault key comes from the backup's recovery envelope and the Recovery Spell only; no key
+//! store or DPAPI data of the original PC is used or copied. The restored vault gets a **new vault
+//! id** (so a restore next to the original, or a second restore of the same backup, never collides
+//! with an existing key store entry), its key is protected with this Windows user's DPAPI, and a new
+//! sidecar (version 2) wraps the same key under the same spell for the new id and the file's salt:
+//! the spell that restored the vault is the one that recovers it. A Slice C backup B or D (12-word
+//! phrase, container version 1) is refused as `backup_legacy_recovery_phrase` before any secret is
+//! asked for.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -47,7 +50,7 @@ use std::io::{self, BufReader, BufWriter, Read};
 use std::path::{Path, PathBuf};
 
 use super::backup::{self as bk, checkpoint, crashed, output_failure, Guarded, Step};
-use super::encrypted::{key_store_failure, phrase_failure, promote_file};
+use super::encrypted::{key_store_failure, promote_file, requested_spell};
 use super::{
     approved, check_location, display, normalize_existing, normalize_new, requested_path,
     require_management, status, Failure,
@@ -58,8 +61,8 @@ use crate::vault::{self, Active, ConfigLock, KeyStore, NewActive, Session, Vault
 use memocampus_native_host::active_vault::VaultMode;
 use memocampus_native_host::schema::{self, SchemaError};
 use memocampus_native_host::secure_vault::container::{self, FormatError, Kind, PasswordReader};
-use memocampus_native_host::secure_vault::secret::{CipherSalt, RecoverySeed, VaultId, VaultKey};
-use memocampus_native_host::secure_vault::{cipher, fsutil, key_store, phrase, recovery, sidecar};
+use memocampus_native_host::secure_vault::secret::{CipherSalt, RecoverySpell, VaultId, VaultKey};
+use memocampus_native_host::secure_vault::{cipher, fsutil, key_store, recovery, sidecar};
 use rusqlite::{Connection, OpenFlags};
 use zeroize::Zeroizing;
 
@@ -193,10 +196,11 @@ fn format_failure(error: FormatError) -> Failure {
     let code = match error {
         FormatError::UnsupportedFormat => "backup_unsupported_format",
         FormatError::UnsupportedVersion => "backup_unsupported_version",
+        FormatError::LegacyRecoveryPhrase => "backup_legacy_recovery_phrase",
         FormatError::Malformed => "backup_malformed",
         FormatError::Incomplete => "backup_incomplete",
         FormatError::SchemaMismatch => "backup_schema_mismatch",
-        FormatError::PhraseRejected => "recovery_phrase_rejected",
+        FormatError::SpellRejected => "recovery_spell_rejected",
         FormatError::RecoveryDamaged => "backup_damaged",
         FormatError::PasswordRejected => "backup_password_rejected",
         FormatError::Tampered => "backup_tampered",
@@ -285,6 +289,9 @@ fn examine(path: &Path) -> Result<Examined, Failure> {
         container::Detected::UnsupportedVersion => {
             Err(format_failure(FormatError::UnsupportedVersion))
         }
+        container::Detected::LegacyRecoveryPhrase => {
+            Err(format_failure(FormatError::LegacyRecoveryPhrase))
+        }
         container::Detected::Unknown => Err(format_failure(FormatError::UnsupportedFormat)),
     }
 }
@@ -334,7 +341,7 @@ pub fn inspect(
         "format": examined.format(),
         "mode": examined.mode().code(),
         "needsPassword": kind.is_some_and(Kind::needs_password),
-        "needsPhrase": kind.is_some_and(Kind::needs_phrase),
+        "needsSpell": kind.is_some_and(Kind::needs_spell),
         "policyCopy": examined.policy,
         "size": examined.len,
     }))
@@ -343,7 +350,7 @@ pub fn inspect(
 /// The secrets a restore of `kind` needs, from the request.
 struct Secrets {
     password: Option<Zeroizing<String>>,
-    seed: Option<RecoverySeed>,
+    spell: Option<RecoverySpell>,
 }
 
 fn secrets(kind: Option<Kind>, message: &Value) -> Result<Secrets, Failure> {
@@ -361,20 +368,11 @@ fn secrets(kind: Option<Kind>, message: &Value) -> Result<Secrets, Failure> {
         }
         _ => None,
     };
-    let seed = match kind {
-        Some(kind) if kind.needs_phrase() => {
-            let typed = Zeroizing::new(
-                message
-                    .get("recoveryPhrase")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
-            );
-            Some(phrase::parse(&typed).map_err(phrase_failure)?)
-        }
+    let spell = match kind {
+        Some(kind) if kind.needs_spell() => Some(requested_spell(message)?),
         _ => None,
     };
-    Ok(Secrets { password, seed })
+    Ok(Secrets { password, spell })
 }
 
 /// `vault_restore`.
@@ -393,6 +391,8 @@ pub fn restore(
         }
         let _ = fs::remove_file(manifest_path(session)?);
     }
+    // Slice D: never beside an unfinished conversion.
+    super::convert::refuse_while_pending(session)?;
     let backup = match requested_path(message, "backupPath")? {
         Some(path) => normalize_existing(&path)?,
         None => return Err(Failure::with("backup_path_required", json!({}))),
@@ -511,7 +511,7 @@ fn run(
     )?;
     checkpoint(Step::RestoreVerify).map_err(|_| Failure::with("restore_failed", json!({})))?;
     if manifest.mode == VaultMode::Encrypted {
-        let (Some(key), Some(salt), Some(seed)) = (&streamed.key, streamed.salt, &secrets.seed)
+        let (Some(key), Some(salt), Some(secret)) = (&streamed.key, streamed.salt, &secrets.spell)
         else {
             return Err(Failure::with("restore_failed", json!({})));
         };
@@ -524,7 +524,7 @@ fn run(
         let app = app_dir(session)?;
         key_store::store(&app, &vault_id, &salt, key, key_store::Write::Pending)
             .map_err(key_store_failure)?;
-        let envelope = recovery::wrap(key, seed, &vault_id, &salt)
+        let envelope = recovery::wrap(key, secret, &vault_id, &salt)
             .map_err(|_| Failure::with("random_unavailable", json!({})))?;
         sidecar::write_new(
             &sidecar::pending_path_for(&target),
@@ -588,15 +588,15 @@ fn stream_container(
         .as_ref()
         .map(|text| text.as_bytes())
         .unwrap_or_default();
-    let with_phrase = |header: &container::HeaderB| match &secrets.seed {
-        Some(seed) => container::unlock_with_phrase(header, seed),
-        None => Err(FormatError::PhraseRejected),
+    let with_spell = |header: &container::HeaderB| match &secrets.spell {
+        Some(secret) => container::unlock_with_spell(header, secret),
+        None => Err(FormatError::SpellRejected),
     };
     let streamed = match kind {
         Kind::B => {
             let mut input = input;
-            let restored = container::read_b(&mut input, len, with_phrase, &mut out)
-                .map_err(format_failure)?;
+            let restored =
+                container::read_b(&mut input, len, with_spell, &mut out).map_err(format_failure)?;
             Stream {
                 salt: Some(restored.header.cipher_salt),
                 key: Some(restored.key),
@@ -637,7 +637,7 @@ fn stream_container(
             let (header, mut reader) =
                 PasswordReader::open(input, len, password, Kind::D).map_err(format_failure)?;
             let restored =
-                container::read_b(&mut reader, header.sections[0].len, with_phrase, &mut out)
+                container::read_b(&mut reader, header.sections[0].len, with_spell, &mut out)
                     .map_err(format_failure)?;
             if !reader.is_complete() {
                 return Err(format_failure(FormatError::Tampered));

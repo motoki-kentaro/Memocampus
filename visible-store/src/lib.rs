@@ -99,7 +99,7 @@ pub enum VisibleError {
     VaultEncryptionUnsupported,
     /// The active vault is encrypted and its key is not available to this process (no key store
     /// entry for this Windows user, DPAPI refused it, or it belongs to another vault). The user
-    /// unlocks it in the side panel (recovery phrase); MCP never asks for one.
+    /// unlocks it in the side panel (Recovery Spell); MCP never asks for one.
     VaultLocked,
     /// The key was obtained but SQLCipher refuses it for this file.
     VaultDecryptFailed,

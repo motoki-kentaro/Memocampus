@@ -20,6 +20,16 @@ pub trait Dialogs {
     fn choose_restore_target(&self, _default_name: &str) -> Option<PathBuf> {
         None
     }
+    /// Issue #51 Slice D: where the converted copy of the active vault is created (a new file),
+    /// starting next to the source. `encrypt`: the copy is encrypted (else plain).
+    fn choose_convert_target(
+        &self,
+        _default_dir: &Path,
+        _default_name: &str,
+        _encrypt: bool,
+    ) -> Option<PathBuf> {
+        None
+    }
 }
 
 pub struct NativeDialogs;
@@ -73,6 +83,28 @@ impl Dialogs for NativeDialogs {
             .set_file_name(default_name);
         if let Some(dir) = documents_dir().filter(|dir| dir.is_dir()) {
             dialog = dialog.set_directory(dir);
+        }
+        owner::with_parent(dialog, owner.as_ref()).save_file()
+    }
+
+    fn choose_convert_target(
+        &self,
+        default_dir: &Path,
+        default_name: &str,
+        encrypt: bool,
+    ) -> Option<PathBuf> {
+        let owner = owner::OwnerWindow::create();
+        let title = if encrypt {
+            "暗号化した新しいVaultの保存先（元のVaultは残ります）"
+        } else {
+            "暗号化を解除した新しいVault（平文）の保存先（元のVaultは残ります）"
+        };
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(title)
+            .add_filter("Memocampus Vault", &VAULT_EXTENSIONS)
+            .set_file_name(default_name);
+        if default_dir.is_dir() {
+            dialog = dialog.set_directory(default_dir);
         }
         owner::with_parent(dialog, owner.as_ref()).save_file()
     }

@@ -32,50 +32,68 @@ export const STATE_TEXT = {
 /** Issue #51 Slice B: encrypted vaults. */
 export const ENCRYPTION_NOTE =
   "暗号化すると、Vaultファイルが盗まれたりコピーされたりしても、鍵がなければ中身を読めません。" +
-  "このWindowsユーザーでは、毎回パスワードを入力せずに使えます。作成時に表示する12単語のリカバリーフレーズは、" +
-  "PCの入れ替えやWindowsの再インストール後に開くために必要です。";
+  "このWindowsユーザーでは、毎回パスワードを入力せずに使えます。作成時に一度だけ表示する「ふっかつのじゅもん（Recovery Spell）」は、" +
+  "PCの入れ替えやWindowsの再インストール後に開くときと、暗号化Vaultのバックアップから復元するときに必要です。";
 
-export const PHRASE_TITLE =
-  "リカバリーフレーズ（12単語）を紙などに順番どおり書き留めてください。\n" +
-  "このフレーズは今回だけ表示します。あとから表示し直すことはできません。";
+/** Issue #51: the Recovery Spell (ふっかつのじゅもん), 256 random bits as 43 base64url characters. */
+export const SPELL_NAME = "ふっかつのじゅもん";
+export const SPELL_NAME_EN = "Recovery Spell";
+export const SPELL_LENGTH = 43;
+const SPELL_ALPHABET = /^[A-Za-z0-9_-]$/;
+// The last of 43 characters carries 4 data bits and 2 unused bits, which must be zero.
+const SPELL_LAST = "AEIMQUYcgkosw048";
 
-export const PHRASE_NOTE =
-  "・別のPC、Windowsの再インストール後、別のWindowsユーザーでこのVaultを開くには、このフレーズと「.mckey」ファイルが必要です。\n" +
-  "・フレーズをなくすと、このPCのWindowsユーザーが使えなくなったときにVaultを開けなくなります。Memocampusは再発行できません。\n" +
-  "・フレーズを知っている人は、Vaultファイルと「.mckey」ファイルがあれば中身を読めます。誰にも伝えず、写真やクラウドのメモに残さないでください。\n" +
-  "・この画面にはコピー機能はありません（クリップボードに残さないため）。";
+export const SPELL_TITLE = `${SPELL_NAME}（${SPELL_NAME_EN}）`;
 
-export const PHRASE_CHECK_TITLE = "書き留めたフレーズから、次の番号の単語を入力してください。正しく入力されるまでVaultは作成されません。";
+export const SPELL_LEAD = "あなたの記憶を取り戻すための、復活の呪文を記録してください。決して忘れないでくださいね。";
+
+export const SPELL_CAUTION = "この呪文は一度しか表示されません。安全な場所に保管してください。失うとバックアップから復元できなくなる場合があります。";
+
+export const SPELL_NOTE =
+  "・別のPC、Windowsの再インストール後、別のWindowsユーザーでこのVaultを開くには、この呪文と「.mckey」ファイルが必要です。暗号化Vaultのバックアップ（形式B・D）から復元するときにも必要です。\n" +
+  "・Memocampusは呪文を保存せず、再表示も再発行もできません。\n" +
+  "・呪文を知っている人は、Vaultファイルと「.mckey」ファイル（またはバックアップ）があれば中身を読めます。誰にも伝えないでください。\n" +
+  "・英字の大文字と小文字は区別されます。紙に書き写すときは、0（ゼロ）とO（オー）、1とlとI、-（ハイフン）と_（アンダースコア）の違いに注意してください。\n" +
+  "・「コピー」を押すと、呪文がクリップボードに入ります。クリップボードやWindowsのクリップボード履歴に残る場合があるため、保管し終えたら消去してください。";
+
+export const SPELL_CHECK_TITLE =
+  `記録した${SPELL_NAME}を、${SPELL_LENGTH}文字すべて入力するか貼り付けてください。表示した呪文と完全に一致するまで、Vaultの作成は完了しません。\n` +
+  "※この確認は、呪文を安全に保管したことの証明にはなりません。PCとは別の安全な場所に保管してください。";
 
 export const RECOVERY_TITLE =
   "このWindowsユーザーには、この暗号化Vaultの鍵が保存されていません（別のPC・再インストール後・別のユーザーなど）。\n" +
-  "作成時に書き留めた12単語のリカバリーフレーズを入力すると、鍵をこのWindowsユーザー用に保存し直して開きます。\n" +
-  "フレーズはこのPCに保存しません。";
+  `作成時に記録した${SPELL_NAME}（${SPELL_LENGTH}文字）を入力すると、鍵をこのWindowsユーザー用に保存し直して開きます。\n` +
+  "呪文はこのPCに保存しません。";
 
-/** Message for a phrase the host refused (`recovery_phrase_invalid` details). */
-export function describePhraseProblem(response) {
-  if (response?.reason === "word_count") return `12単語を入力してください（${Number(response.count) || 0}単語でした）。`;
-  if (response?.reason === "unknown_word") return `${Number(response.position) || "?"}番目の単語が単語リストにありません。綴りを確認してください。`;
-  if (response?.reason === "checksum") return "単語の綴りまたは順番が違います。書き留めたフレーズと照らし合わせてください。";
-  return "リカバリーフレーズの形式が正しくありません。";
+/** What the user typed or pasted, with surrounding whitespace removed (nothing else is changed). */
+export function normalizeSpellInput(text) {
+  return typeof text === "string" ? text.trim() : "";
 }
 
-/** `count` distinct 1-based positions out of 12, in ascending order, from `random` (a CSPRNG fill). */
-export function pickPositions(count = 3, random = (array) => crypto.getRandomValues(array)) {
-  const chosen = new Set();
-  const buffer = new Uint32Array(1);
-  while (chosen.size < count) {
-    random(buffer);
-    // Rejection sampling keeps every position equally likely.
-    if (buffer[0] >= 4294967292) continue;
-    chosen.add((buffer[0] % 12) + 1);
-  }
-  return [...chosen].sort((a, b) => a - b);
+/**
+ * Null when `text` (after `normalizeSpellInput`) has the form of a Recovery Spell; otherwise what is
+ * wrong. The host checks the same rules again and whether the spell opens the vault.
+ */
+export function checkSpell(text) {
+  const chars = [...normalizeSpellInput(text)];
+  if (chars.length !== SPELL_LENGTH) return `${SPELL_NAME}は${SPELL_LENGTH}文字です（${chars.length}文字でした）。`;
+  const bad = chars.findIndex((c) => !SPELL_ALPHABET.test(c));
+  if (bad >= 0) return `${bad + 1}文字目に使えない文字があります。使える文字は英字（大文字・小文字）、数字、「-」「_」だけです（空白や全角文字は使えません）。`;
+  if (!SPELL_LAST.includes(chars[SPELL_LENGTH - 1])) return "最後の文字が正しくありません。記録した呪文と照らし合わせてください。";
+  return null;
 }
 
-/** True when every answer matches the word at its position (case and surrounding space ignored). */
-export function checkAnswers(words, answers) {
-  return answers.length > 0 && answers.every(({ position, word }) => typeof word === "string" && words[position - 1] === word.trim().toLowerCase());
+/** True only when `typed` is exactly the spell shown (surrounding whitespace aside). */
+export function spellMatches(shown, typed) {
+  return typeof shown === "string" && shown.length === SPELL_LENGTH && normalizeSpellInput(typed) === shown;
+}
+
+/** Message for a spell the host refused (`recovery_spell_invalid` details). Never echoes the input. */
+export function describeSpellProblem(response) {
+  if (response?.reason === "length") return `${SPELL_NAME}は${SPELL_LENGTH}文字です（${Number(response.count) || 0}文字でした）。`;
+  if (response?.reason === "character") return `${Number(response.position) || "?"}文字目に使えない文字があります。使える文字は英字（大文字・小文字）、数字、「-」「_」だけです。`;
+  if (response?.reason === "non_canonical") return "最後の文字が正しくありません。記録した呪文と照らし合わせてください。";
+  return `${SPELL_NAME}の形式が正しくありません。`;
 }
 
 /** Issue #51 Slice C: backup formats. A plain vault's normal backup is A; see `backupFormat`. */
@@ -87,9 +105,9 @@ export function backupFormat(mode, protection) {
 
 export const BACKUP_FORMAT_NOTE = {
   A: "形式A: 通常のSQLiteファイルとして保存します（暗号化なし）。プライバシー設定のコピーは含みません。",
-  B: "形式B: 暗号化したまま1つのファイルに保存します。復元には12単語のリカバリーフレーズが必要です（このPCの鍵は不要）。作成時に、お手元のフレーズでこのVaultを復旧できることを確認します。プライバシー設定のコピーを暗号化して含みます。",
+  B: "形式B: 暗号化したまま1つのファイルに保存します。復元にはふっかつのじゅもんが必要です（このPCの鍵は不要）。作成時に、お手元の呪文でこのVaultを復旧できることを確認します。プライバシー設定のコピーを暗号化して含みます。",
   C: "形式C: バックアップ全体をパスワードで暗号化します。復元にはこのパスワードが必要です。元のVault自体は暗号化されません。プライバシー設定のコピーを含みます。",
-  D: "形式D: 暗号化Vaultを、さらにパスワードで保護します。復元にはパスワードと12単語のリカバリーフレーズの両方が必要です。作成時に、お手元のフレーズでこのVaultを復旧できることを確認します。プライバシー設定のコピーを含みます。",
+  D: "形式D: 暗号化Vaultを、さらにパスワードで保護します。復元にはパスワードとふっかつのじゅもんの両方が必要です。作成時に、お手元の呪文でこのVaultを復旧できることを確認します。プライバシー設定のコピーを含みます。",
 };
 
 export const PASSWORD_MIN_CHARS = 8;
@@ -97,14 +115,8 @@ export const PASSWORD_MIN_CHARS = 8;
 export const PASSWORD_NOTE =
   `パスワードは${PASSWORD_MIN_CHARS}文字以上にしてください。パスワードはどこにも保存しません。忘れると、このバックアップは復元できません（Memocampusは再発行できません）。`;
 
-export const BACKUP_PHRASE_NOTE =
-  "暗号化Vaultのバックアップは、復元にリカバリーフレーズが必要です。書き留めたフレーズを入力してください。このVaultを復旧できるフレーズでなければ、バックアップは作成しません。フレーズは保存しません。";
-
-/** Null when `text` has the shape of a 12-word phrase (the host checks the words and the vault). */
-export function checkBackupPhrase(text) {
-  const words = typeof text === "string" ? text.trim().split(/\s+/).filter(Boolean) : [];
-  return words.length === 12 ? null : `リカバリーフレーズを12単語で入力してください（${words.length}単語でした）。`;
-}
+export const BACKUP_SPELL_NOTE =
+  "暗号化Vaultのバックアップは、復元にふっかつのじゅもんが必要です。記録した呪文（43文字）を入力してください。このVaultを復旧できる呪文でなければ、バックアップは作成しません。呪文は保存しません。";
 
 /** Null when the two entries make a usable backup password, otherwise what is wrong. */
 export function checkBackupPassword(password, confirmation) {
@@ -115,9 +127,9 @@ export function checkBackupPassword(password, confirmation) {
 
 export const RESTORE_FORMAT_TEXT = {
   A: "形式A（平文Vaultの通常バックアップ）。暗号化されていません。プライバシー設定のコピーは含まれません。",
-  B: "形式B（暗号化Vaultの通常バックアップ）。復元には12単語のリカバリーフレーズが必要です。",
+  B: "形式B（暗号化Vaultの通常バックアップ）。復元にはふっかつのじゅもんが必要です。",
   C: "形式C（パスワード保護）。復元にはバックアップのパスワードが必要です。",
-  D: "形式D（暗号化Vault＋パスワード保護）。復元にはパスワードと12単語のリカバリーフレーズの両方が必要です。",
+  D: "形式D（暗号化Vault＋パスワード保護）。復元にはパスワードとふっかつのじゅもんの両方が必要です。",
 };
 
 export const RESTORE_NOTE =
@@ -166,6 +178,68 @@ export function describeRestorePending(pending) {
     return `復元済みで、まだ使用していないVaultがあります:\n${pending.path}\n使い始めるか、破棄してください。`;
   }
   return `中断された復元があります${pending?.path ? `:\n${pending.path}` : ""}\n途中のファイルを破棄してから、もう一度復元してください。`;
+}
+
+/** Issue #51 Slice D: converting the vault shown between plain and encrypted. */
+export const CONVERT_TEXT = {
+  encrypt: {
+    title: "このVaultを暗号化する",
+    note:
+      "現在のVaultの内容を、新しい暗号化Vaultへコピーします。元のVaultは削除されません。" +
+      "コピーの後に、新しいVaultの「ふっかつのじゅもん」を一度だけ表示します。記録して全文を入力し直すまで、変換は完了しません。" +
+      "変換したVaultを使い始めるかどうかは、その後で選べます。",
+    pick: "保存先を選んで暗号化…",
+  },
+  decrypt: {
+    title: "このVaultの暗号化を解除する",
+    note:
+      "新しい平文Vaultを作成します。閲覧履歴や保存画像などが暗号化されずにディスクへ保存されます。元の暗号化Vaultは削除されません。" +
+      "平文Vaultには、ふっかつのじゅもんはありません（元の暗号化Vaultの呪文は、元のVaultにだけ使えます）。",
+    pick: "保存先を選んで暗号化を解除…",
+  },
+};
+
+/** Which conversion the vault shown offers: by its mode. */
+export function convertDirection(mode) {
+  if (mode === "plain") return "encrypt";
+  if (mode === "encrypted") return "decrypt";
+  return null;
+}
+
+/** For the spell step of a conversion: the spell belongs to the new vault only. */
+export const CONVERT_SPELL_NOTE =
+  "これは新しい暗号化Vaultのふっかつのじゅもんです。以前に記録した呪文（ほかのVaultの呪文）では、このVaultを復旧できません。";
+
+/** A converted vault (start or confirm answer), for the user's decision. */
+export function describeConverted(converted) {
+  const encrypt = converted?.direction === "encrypt";
+  const lines = [`変換しました（まだ使用していません）: ${converted?.path ?? ""}`];
+  if (converted?.sourcePath) lines.push(`変換元（そのまま残ります）: ${converted.sourcePath}`);
+  lines.push(encrypt ? "新しい暗号化Vault（鍵はこのWindowsユーザー用に保存しました）" : "新しい平文Vault（暗号化されていません）");
+  const counts = converted?.counts;
+  if (counts && Number.isSafeInteger(counts.visits)) {
+    lines.push(`検証済み: 閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件・画像 ${counts.images.toLocaleString("ja-JP")}件（変換元と全件一致）`);
+  }
+  lines.push(
+    "「使い始める」を押すと、その時点までに変換元へ記録された内容も取り込んでから、このVaultをActive Vaultにします。MCPへの公開は未承認から始まります。",
+    "「切り替えずに保存」を選ぶと、変換した時点の内容のまま残します（後で「既存のVaultを開く」で開けます。その後の記録は変換元にだけ残ります）。",
+  );
+  return lines.join("\n");
+}
+
+/** A conversion recorded by the host but not finished in this page (`status.conversionPending`). */
+export function describeConversionPending(pending) {
+  const what = pending?.direction === "decrypt" ? "暗号化を解除した平文Vault" : "暗号化した新しいVault";
+  if (pending?.phase === "converted") {
+    return `変換済みで、まだ使用していない${what}があります:\n${pending.path}\n使い始めるか、切り替えずに保存するか、破棄してください。`;
+  }
+  if (pending?.phase === "verified" && pending.direction === "encrypt") {
+    return `ふっかつのじゅもんの確認前に中断された変換があります:\n${pending.path}\n呪文は再表示できないため、破棄してから、もう一度変換してください。元のVaultは変更していません。`;
+  }
+  if (pending?.phase === "verified") {
+    return `変換済みで、まだ使用していない${what}があります:\n${pending.path}\n使い始めるか、切り替えずに保存するか、破棄してください。`;
+  }
+  return `中断された変換があります${pending?.path ? `:\n${pending.path}` : ""}\n途中のファイルを破棄してから、もう一度変換してください。元のVaultは変更していません。`;
 }
 
 /** MCP access to the vault shown (Issue #51): `status.publication` from a host that knows it. */

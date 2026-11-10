@@ -160,8 +160,9 @@ export function createDocument() {
     "gallery-new-dot", "gallery-error", "gallery-open-settings", "gallery-empty", "gallery-more", "gallery-details", "gallery-sources-more", "gallery-menu",
     "gallery-filter", "gallery-tags-empty", "gallery-tag-picker", "gallery-tag-picker-more",
     "visit-calendar", "visit-date-chip",
-    "vault-creation-pending", "vault-recovery-offer", "vault-onboarding", "vault-phrase-check", "vault-recovery",
-    "vault-backup-password-fields", "vault-backup-phrase-row", "vault-restore", "vault-restore-password-row", "vault-restore-phrase-row", "vault-restored", "vault-restored-policy-details",
+    "vault-creation-pending", "vault-recovery-offer", "vault-onboarding", "vault-spell-check", "vault-recovery",
+    "vault-backup-password-fields", "vault-backup-spell-row", "vault-restore", "vault-restore-password-row", "vault-restore-spell-row", "vault-restored", "vault-restored-policy-details",
+    "vault-convert", "vault-convert-ack-row", "vault-converted",
   ]) {
     document.querySelector(`#${id}`).hidden = true;
   }
@@ -336,12 +337,37 @@ const ITEM_TYPES = new Set(["host_capabilities", "policy_evaluate_batch", "polic
 
 const PNG_THUMBNAIL = Buffer.from("89504e470d0a1a0a0000000d4948445200000004000000020806000000000000000000000049454e44ae426082", "hex").toString("base64");
 
+/** The Recovery Spell the fake host shows for a new encrypted vault (43 canonical characters). */
+export const TEST_SPELL = "HfgfdBsdu4XyhzHIcsONVsXZLFGqtPLLg4znc_3m4t4";
+/** A well-formed spell of no vault here. */
+export const OTHER_SPELL = "FIGOkr1evDcTXDtnVPhoqTeIHqtUJDTffhCodcry5fs";
+
+/** As the real host's `spell::parse`: strict, never trimmed. Null when well-formed. */
+function spellProblem(text) {
+  const chars = typeof text === "string" ? [...text] : [];
+  if (chars.length !== 43) return { reason: "length", count: chars.length };
+  const bad = chars.findIndex((c) => !/^[A-Za-z0-9_-]$/.test(c));
+  if (bad >= 0) return { reason: "character", position: bad + 1 };
+  if (!"AEIMQUYcgkosw048".includes(chars[42])) return { reason: "non_canonical" };
+  return null;
+}
+
 /**
  * Native host stand-in: `vaults` maps a vault path to its pages; `active` is the open vault.
  * `images` maps a vault path to its image summaries (newest first) for the Image tab.
  */
-export function createHost({ vaults, active, statusDelay = 0, images = {}, policyStatus = null, capabilities = ["navigation_v1"], forward = null, encryption = false, restore = false }) {
+export function createHost({ vaults, active, statusDelay = 0, images = {}, policyStatus = null, capabilities = ["navigation_v1"], forward = null, encryption = false, restore = false, convert = false }) {
   const host = {
+    /**
+     * Issue #51 Slice D: conversion of the active vault between plain and encrypted, as the real
+     * host handles it (see native-host `manage::convert_tests`). `conversion` is the one recorded
+     * (`{ direction, phase, path, sourcePath, vaultToken, spell }`); `convertTargetDialog` the path
+     * the save dialog answers; `convertSpell` the new vault's spell.
+     */
+    convert,
+    conversion: null,
+    convertTargetDialog: "C:\\Converted\\memocampus-converted.sqlite3",
+    convertSpell: OTHER_SPELL,
     /**
      * Issue #51 Slice C: backups by protection and restore, as the real host handles them (see
      * native-host `manage::backup_restore_tests`). `backupFiles` maps a backup path to what restoring
@@ -355,10 +381,10 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
     restorePending: null,
     /** Issue #51 Slice B: encrypted vaults, as the real host handles them (see native-host tests). */
     encryption,
-    creation: null, // { path, phrase } while a creation waits for its confirmation
+    creation: null, // { path, spell } while a creation waits for its confirmation
     encrypted: new Set(), // vaults in encrypted mode
-    locked: new Map(), // vault path -> its phrase, for vaults this user has no key for
-    phraseFor: () => "abandon ability able about above absent absorb abstract absurd abuse access accident",
+    locked: new Map(), // vault path -> its spell, for vaults this user has no key for
+    spellFor: () => TEST_SPELL,
     capabilities,
     itemPolicy: createItemPolicy(),
     itemErrors: {}, // type -> error code, answered once
@@ -397,6 +423,10 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
       const base = { managementEnabled: true, overridden: false, defaultPath: "C:\\Vaults\\memocampus.sqlite3", defaultExists: false, locationApproved: false };
       if (host.encryption) Object.assign(base, { encryptionAvailable: true, creationPending: host.creation?.path ?? null });
       if (host.restore) base.restorePending = host.restorePending;
+      if (host.convert) {
+        const c = host.conversion;
+        base.conversionPending = c ? { direction: c.direction, phase: c.phase, path: c.path, sourcePath: c.sourcePath, vaultToken: c.phase === "converting" ? null : c.vaultToken } : null;
+      }
       if (!host.active) return { ...base, state: "not_configured", vaultPath: null, counts: null, location: null };
       if (host.locked.has(host.active)) return { ...base, state: "key_unavailable", vaultPath: host.active, vaultToken: null, counts: null, mode: "encrypted", publication: "pending", recoveryAvailable: true, location: null };
       const confirmed = host.published.has(host.active);
@@ -557,10 +587,9 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
           if (password && (typeof message.password !== "string" || [...message.password].length < 8)) return resolve(fail("backup_password_too_short"));
           const encrypted = host.encrypted.has(host.active);
           if (encrypted) {
-            // As the real host: the phrase must recover this vault (review finding C-03).
-            const words = String(message.recoveryPhrase ?? "").trim().split(/\s+/).filter(Boolean);
-            if (words.length !== 12) return resolve(fail("recovery_phrase_invalid"));
-            if (words.join(" ").toLowerCase() !== host.phraseFor(host.active)) return resolve(fail("recovery_phrase_rejected"));
+            // As the real host: the spell must recover this vault (review finding C-03).
+            if (spellProblem(message.recoverySpell)) return resolve(fail("recovery_spell_invalid"));
+            if (message.recoverySpell !== host.spellFor(host.active)) return resolve(fail("recovery_spell_rejected"));
           }
           const format = encrypted ? (password ? "D" : "B") : password ? "C" : "A";
           const backupPath = `C:\\Backups\\memocampus-backup-${host.backups.length}.${format === "A" ? "sqlite3" : "mcbackup"}`;
@@ -587,15 +616,15 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
         if (host.creation) return fail("vault_creation_pending", { path: host.creation.path });
         const path = message.path ?? (message.useDefault ? "C:\\Vaults\\memocampus.sqlite3" : "C:\\Picked\\enc.sqlite3");
         if (host.vaults[path]) return fail("file_exists", { path });
-        host.creation = { path, phrase: host.phraseFor(path) };
-        return reply({ type: "vault_result", path, recoveryPhrase: host.creation.phrase.split(" ") });
+        host.creation = { path, spell: host.spellFor(path) };
+        return reply({ type: "vault_result", path, recoverySpell: host.creation.spell });
       }
       if (message.type === "vault_create_encrypted_commit") {
         const fail = (error, extra = {}) => ({ ok: false, type: "vault_result", requestId: message.requestId, error, ...extra });
         if (!host.creation) return fail("vault_creation_not_pending");
-        const words = String(message.recoveryPhrase ?? "").trim().split(/\s+/);
-        if (words.length !== 12) return fail("recovery_phrase_invalid", { reason: "word_count", count: words.length });
-        if (words.join(" ").toLowerCase() !== host.creation.phrase) return fail("recovery_phrase_rejected");
+        const problem = spellProblem(message.recoverySpell);
+        if (problem) return fail("recovery_spell_invalid", problem);
+        if (message.recoverySpell !== host.creation.spell) return fail("recovery_spell_rejected");
         const { path } = host.creation;
         host.creation = null;
         host.vaults[path] = [];
@@ -611,9 +640,9 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
         const fail = (error, extra = {}) => ({ ok: false, type: "vault_result", requestId: message.requestId, error, ...extra });
         const expected = host.locked.get(message.path);
         if (expected === undefined) return fail("recovery_metadata_missing", { path: message.path });
-        const words = String(message.recoveryPhrase ?? "").trim().split(/\s+/).filter(Boolean);
-        if (words.length !== 12) return fail("recovery_phrase_invalid", { reason: "word_count", count: words.length });
-        if (words.join(" ").toLowerCase() !== expected) return fail("recovery_phrase_rejected", { path: message.path });
+        const problem = spellProblem(message.recoverySpell);
+        if (problem) return fail("recovery_spell_invalid", problem);
+        if (message.recoverySpell !== expected) return fail("recovery_spell_rejected", { path: message.path });
         host.locked.delete(message.path);
         host.active = message.path;
         host.published.delete(message.path);
@@ -625,7 +654,7 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
         if (!backupPath) return fail("cancelled");
         const file = host.backupFiles[backupPath];
         if (!file) return fail("backup_unsupported_format", { backupPath });
-        return reply({ type: "vault_result", backupPath, format: file.format, mode: file.mode, needsPassword: Boolean(file.password), needsPhrase: Boolean(file.phrase), policyCopy: file.policyCopy ? true : file.format === "D" ? null : false, size: 4096 });
+        return reply({ type: "vault_result", backupPath, format: file.format, mode: file.mode, needsPassword: Boolean(file.password), needsSpell: Boolean(file.spell), policyCopy: file.policyCopy ? true : file.format === "D" ? null : false, size: 4096 });
       }
       if (message.type === "vault_restore") {
         const fail = (error, extra = {}) => ({ ok: false, type: "vault_result", requestId: message.requestId, error, ...extra });
@@ -633,12 +662,12 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
         const file = host.backupFiles[message.backupPath];
         if (!file) return fail("backup_unsupported_format");
         if (file.password && !message.password) return fail("backup_password_required");
-        if (file.phrase) {
-          const words = String(message.recoveryPhrase ?? "").trim().split(/\s+/).filter(Boolean);
-          if (words.length !== 12) return fail("recovery_phrase_invalid", { reason: "word_count", count: words.length });
+        if (file.spell) {
+          const problem = spellProblem(message.recoverySpell);
+          if (problem) return fail("recovery_spell_invalid", problem);
         }
         if (file.password && message.password !== file.password) return fail("backup_password_rejected");
-        if (file.phrase && String(message.recoveryPhrase).trim().split(/\s+/).join(" ").toLowerCase() !== file.phrase) return fail("recovery_phrase_rejected");
+        if (file.spell && message.recoverySpell !== file.spell) return fail("recovery_spell_rejected");
         const path = message.path ?? host.restoreTargetDialog;
         if (!path) return fail("cancelled");
         if (host.vaults[path]) return fail("file_exists", { path });
@@ -664,6 +693,73 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
         if (pending && pending.path !== host.active) delete host.vaults[pending.path];
         host.restorePending = null;
         return reply({ type: "vault_result", status: host.status() });
+      }
+      if (message.type.startsWith("vault_convert_")) {
+        const fail = (error, extra = {}) => ({ ok: false, type: "vault_result", requestId: message.requestId, error, ...extra });
+        const done = (fields) => reply({ type: "vault_result", ...fields, status: host.status() });
+        const c = host.conversion;
+        if (message.type === "vault_convert_start") {
+          if (c) return fail("vault_convert_pending", { path: c.path });
+          if (host.creation) return fail("vault_creation_pending");
+          if (host.restorePending) return fail("vault_restore_pending");
+          const expected = message.expectedVaultToken;
+          if (typeof expected !== "string" || !/^[0-9a-f]{64}$/.test(expected)) return fail("invalid_vault_token");
+          if (message.direction === "decrypt" && message.acknowledgePlaintext !== true) return fail("vault_convert_plaintext_unacknowledged");
+          if (!host.active || tokenOf(host.active) !== expected) return fail("vault_switched");
+          const mode = host.encrypted.has(host.active) ? "encrypted" : "plain";
+          if (!["encrypt", "decrypt"].includes(message.direction)) return fail("invalid_request");
+          if ((message.direction === "encrypt") !== (mode === "plain")) return fail("vault_convert_mode_mismatch", { mode });
+          const path = message.path ?? host.convertTargetDialog;
+          if (!path) return fail("cancelled");
+          if (path === host.active) return fail("vault_convert_same_as_source", { path });
+          if (host.vaults[path]) return fail("file_exists", { path });
+          const counts = { visits: host.vaults[host.active].length, snapshots: 0, images: 0 };
+          host.conversion = {
+            direction: message.direction,
+            phase: message.direction === "encrypt" ? "verified" : "converted",
+            path,
+            sourcePath: host.active,
+            vaultToken: tokenOf(path),
+            spell: message.direction === "encrypt" ? host.convertSpell : null,
+            pages: [...host.vaults[host.active]],
+          };
+          const answer = { path, sourcePath: host.active, direction: message.direction, phase: host.conversion.phase, vaultToken: tokenOf(path), counts };
+          if (message.direction === "encrypt") answer.recoverySpell = host.convertSpell;
+          return done(answer);
+        }
+        if (message.type === "vault_convert_confirm") {
+          if (!c) return fail("vault_convert_not_pending");
+          if (c.direction !== "encrypt") return fail("vault_convert_invalid_state");
+          const problem = spellProblem(message.recoverySpell);
+          if (problem) return fail("recovery_spell_invalid", problem);
+          if (message.recoverySpell !== c.spell) return fail("recovery_spell_rejected");
+          c.phase = "converted";
+          return done({ path: c.path, vaultToken: c.vaultToken, phase: c.phase });
+        }
+        if (message.type === "vault_convert_activate") {
+          if (!c) return fail("vault_convert_not_pending");
+          if (c.phase === "converting") return fail("vault_convert_incomplete", { path: c.path });
+          if (message.expectedVaultToken !== c.vaultToken) return fail("vault_switched");
+          if (c.direction === "encrypt" && c.phase !== "converted") return fail("vault_convert_spell_unconfirmed", { path: c.path });
+          host.vaults[c.path] = [...host.vaults[c.sourcePath]];
+          if (c.direction === "encrypt") host.encrypted.add(c.path);
+          host.active = c.path;
+          host.published.delete(c.path);
+          host.conversion = null;
+          return done({ path: c.path });
+        }
+        if (message.type === "vault_convert_keep") {
+          if (!c) return fail("vault_convert_not_pending");
+          if (c.direction === "encrypt" && c.phase !== "converted") return fail("vault_convert_spell_unconfirmed", { path: c.path });
+          host.vaults[c.path] = c.pages;
+          if (c.direction === "encrypt") host.encrypted.add(c.path);
+          host.conversion = null;
+          return done({ path: c.path });
+        }
+        if (message.type === "vault_convert_discard") {
+          host.conversion = null;
+          return done({});
+        }
       }
       if (message.type === "vault_open") {
         if (host.locked.has(message.path)) {
@@ -708,6 +804,9 @@ function createChrome(host) {
       });
     },
     async sendMessage(message) {
+      // Everything the page asks the service worker (which owns the durable queue), for checks
+      // that no secret ever goes there.
+      (host.workerMessages ??= []).push(structuredClone(message));
       if (message.type === "queue-status") return { ok: true, pending: 0, deadLetters: 0, dropped: 0, blockedReason: null };
       if (message.type === "flush-queue") return { ok: true, blockedBy: null };
       if (message.type === "policy-status") return host.policyStatus ?? { ok: true, state: "ready", revision: 1, code: null, message: null };

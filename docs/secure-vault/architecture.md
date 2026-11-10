@@ -1,9 +1,19 @@
 # Secure Vault — technical architecture (Issue #51, Slice A)
 
 Status: **design proposal.** Basis: `main` at `c08797a`. Implemented so far: Slice B0 (`slice-b0.md`) and Slice B
-(`slice-b.md`: SQLCipher, DPAPI key store, recovery phrase and sidecar, encrypted creation and recovery) and Slice C
+(`slice-b.md`: SQLCipher, DPAPI key store, recovery sidecar, encrypted creation and recovery) and Slice C
 (`slice-c.md`: backups A–D and restore; its §6 lists differences DC1–DC9 from §5–§6 here). Where the
 implementation differs from this text, the slice documents list the difference (`slice-b.md` §9).
+
+> **Recovery Spell.** The 12-word BIP-39 recovery phrase of this proposal and of Slices B/C has been replaced by the
+> **Recovery Spell (ふっかつのじゅもん)**: 256 CSPRNG bits written as 43 base64url characters. Its specification — format,
+> parsing, key derivation and domain separation, sidecar version 2, container version 2, handling of 12-word files — is
+> `recovery-spell.md`, which takes precedence over §2, §2.2, §4 error codes, §5–§6 and §9 below where they differ.
+
+> **Slice D (conversion).** The conversion between plain and encrypted vaults is implemented as described in `slice-d.md`,
+> which takes precedence over §8 below: no maintenance mode and no watchdog; the copy is made into a new vault without
+> holding the config lock, and refreshed under the switch's write fence when the user activates it; publication of the
+> converted vault always starts `pending` (not inherited from the source, unlike §8.2 P5).
 Each statement is tagged:
 
 - **[CODE]** — verified against the current source (file:line given);
@@ -47,13 +57,14 @@ there; the rest stay [DOC] or [DESIGN].
    local unlock ◄─────────┤  DPAPI(VK, entropy = "memocampus/vault-key/v1\0" || vaultId),             │
                           │  user scope, CRYPTPROTECT_UI_FORBIDDEN            [POC A-2.2]             │
                           │                                                                           │
-   recovery ◄─────────────┤  KEK = HKDF-SHA256(ikm = E, salt = 32 random bytes,                       │
-                          │                    info = "memocampus/recovery/v1/kek")                   │
-                          │  wrap = XChaCha20-Poly1305(KEK, nonce 24 random, AAD = label || vaultId)  │
-                          │  E = 128-bit entropy of the 12-word phrase        [POC A-3]               │
+   recovery ◄─────────────┤  KEK = HKDF-SHA256(ikm = S, salt = 32 random bytes,                       │
+                          │                    info = "memocampus/recovery-spell/v2/kek")             │
+                          │  wrap = XChaCha20-Poly1305(KEK, nonce 24 random,                          │
+                          │                            AAD = label || vaultId || cipherSalt)          │
+                          │  S = 256-bit Recovery Spell (43 base64url chars)  [recovery-spell.md]     │
                           │                                                                           │
-   backup MAC key ◄───────┤  HKDF-SHA256(VK, info = "memocampus/backup-b/v1/mac")                     │
-   policy-copy key ◄──────┤  HKDF-SHA256(VK, info = "memocampus/backup-b/v1/policy")                  │
+   backup MAC key ◄───────┤  HKDF-SHA256(VK, info = "memocampus/backup-b/v2/mac")                     │
+   policy-copy key ◄──────┤  HKDF-SHA256(VK, info = "memocampus/backup-b/v2/policy")                  │
    key-check value ◄──────┘  HMAC-SHA256(HKDF(VK, "memocampus/kcv/v1"), vaultId)                      │
                                                                                                      ─┘
    backup password P ─► Argon2id(P, salt, m=64 MiB, t=3, p=1) ─► HKDF ─► K_enc (STREAM), K_check  [POC A-5.2]
@@ -66,16 +77,16 @@ there; the rest stay [DOC] or [DESIGN].
   - Nothing needed to unlock is stored only inside the encrypted DB.
 - **Security level (stated, not inflated).**
   - The DB key is 256-bit.
-  - The recovery path is bounded by the phrase entropy, **128 bits**. Anyone holding a backup can try
-    phrases offline, at one HKDF plus one AEAD per guess, against 2¹²⁸ candidates.
-  - This is the intended level for "backup + phrase" restore. It needs PO acceptance (P5).
-- **Why HKDF, not a slow KDF, for the phrase.**
-  - The phrase is uniformly random at 128 bits, so stretching adds nothing meaningful.
+  - The recovery path is bounded by the spell's entropy, **256 bits** (the 12-word phrase it replaced
+    gave 128). Anyone holding a backup can try spells offline, at one HKDF plus one HMAC per guess,
+    against 2²⁵⁶ candidates.
+- **Why HKDF, not a slow KDF, for the spell.**
+  - The spell is uniformly random at 256 bits, so stretching adds nothing meaningful.
   - The backup *password* is user-chosen, so it gets Argon2id with bounded parameters.
   - Both are deliberate and different.
 - **Password never wraps VK** (PO decision A).
   - Format C encrypts the whole format B package.
-  - The phrase-wrapped VK inside it stays phrase-wrapped.
+  - The spell-wrapped VK inside it stays spell-wrapped.
 
 ### 2.1 Vault identity
 
@@ -100,18 +111,18 @@ there; the rest stay [DOC] or [DESIGN].
 | Item | Location | Contents | Secret? |
 |---|---|---|---|
 | Key store entry | `%LOCALAPPDATA%\Memocampus\keys\<vaultId>.json` | `{version, vaultId, cipherSalt, dpapi: base64, kcv}` | DPAPI blob (user scope) |
-| Recovery sidecar **[PO decision P1]** | `<vault path>.mckey` | `{version, vaultId, cipherSalt, recovery envelope}` | no (phrase-wrapped) |
-| Backup B header | inside the backup file | `vaultId`, recovery envelope, sealed policy copy | no (phrase-wrapped / VK-sealed) |
-| Phrase | **nowhere**; shown once, then zeroised | 12 words | yes |
+| Recovery sidecar **[PO decision P1]** | `<vault path>.mckey` | `{version: 2, vaultId, cipherSalt, recovery envelope}` | no (spell-wrapped) |
+| Backup B header | inside the backup file | `vaultId`, recovery envelope, sealed policy copy | no (spell-wrapped / VK-sealed) |
+| Recovery Spell | **nowhere**; shown once, then zeroised | 43 base64url characters (256 bits) | yes |
 | Backup password | **nowhere** | — | yes |
 
 **P1** decides whether an Active Vault may be recovered after an OS reinstall from the vault file
-plus phrase, with no backup:
+plus spell, with no backup:
 
 - **With the sidecar, yes.** The vault becomes a two-file unit; moving one without the other is
   detected by `vaultId` and `cipherSalt`.
 - **Without it, only a backup can be restored on a new PC.** This still meets the PO requirement,
-  "backup + phrase".
+  "backup + spell".
 
 Recommendation: the sidecar, because an OS reinstall without a fresh backup is a likely data-loss
 case.
@@ -165,8 +176,9 @@ reason to switch modes.
 | `key_store_missing` | no key store entry for `vaultId` | file absent | no |
 | `dpapi_failed` | `CryptUnprotectData` failed (other user, damaged profile, damaged blob) | Win32 error (13, 0x8009000B, 0xD000000D seen [POC]) | no |
 | `key_store_mismatch` | entry or kcv or `cipherSalt` disagrees with the vault | kcv / salt compare | no |
-| `recovery_phrase_invalid` | wrong word count, unknown word (position reported) or checksum failure | parser [POC A-3.2] | n/a |
-| `recovery_phrase_rejected` | valid phrase, but the envelope does not authenticate | AEAD [POC A-3.2/A-3.3] | n/a |
+| `recovery_spell_invalid` | not 43 characters, a character outside base64url (position reported) or a non-canonical last character | `spell::parse` | n/a |
+| `recovery_spell_rejected` | well-formed spell, but the envelope's check value does not match | HMAC | n/a |
+| `recovery_metadata_unsupported` | the sidecar is of another version (1 = 12-word phrase) | sidecar version | n/a |
 | `vault_decrypt_failed` | key accepted (kcv ok) but SQLCipher refuses page 1 | `NotADatabase` **while keyed** (no key and wrong key both give `NotADatabase`/26 [POC A-8.2]) | **no** |
 | `vault_corrupt` | keyed open ok, `integrity_check`/`quick_check` fails; or plain-mode `NotADatabase`/`Corrupt` | SQLite | plain mode only (as today) |
 | `vault_mode_mismatch` | plain mode but no SQLite magic, or encrypted mode but SQLite magic | first 16 bytes | no |
@@ -201,7 +213,7 @@ Detection is by the first 16 bytes [POC A-5]. Recognition never relies only on t
 | First bytes | Format | Next step |
 |---|---|---|
 | `SQLite format 3\0` | A (plain SQLite) | full validation: `quick_check`, `schema::check`, ids |
-| `89 4D 43 56 42 0D 0A 1A` + version + kind `B` | B | header bounds, then phrase or local key |
+| `89 4D 43 56 42 0D 0A 1A` + version 2 + kind `B` | B | header bounds, then the spell (version 1 B/D: `backup_legacy_recovery_phrase`) |
 | same + kind `C` | C | header bounds, then password |
 | anything else | refused `unsupported_format` (this includes a bare SQLCipher file: it is not a backup) | — |
 
@@ -252,13 +264,13 @@ trailer  = HMAC-SHA256(K_mac, prefix || payload)
   - Every step was measured except the >1 GiB case [POC A-4.3, A-4.4].
 - **Restore.**
   1. Check the exact length (header, `payloadLen`, 32) before any crypto.
-  2. Unwrap VK with the phrase, or with the local key store if `vaultId` and kcv match.
+  2. Unwrap VK with the spell (Slice C: always the spell, DC2).
   3. Stream the payload into the target `.partial` while computing the MAC.
   4. Verify the MAC, then keyed `integrity_check` and `schema::check`.
   5. Write a new key store entry (DPAPI on this PC).
   6. `rename_no_replace`.
 
-  Tamper, truncation, appended bytes and a wrong phrase all fail closed [POC A-5.1: 3,100 flipped
+  Tamper, truncation, appended bytes and a wrong spell all fail closed [POC A-5.1: 3,100 flipped
   positions, none accepted].
 
 ### 5.4 Format C — password-protected backup
@@ -275,9 +287,9 @@ sections: "policy" (JSON copy of policy + PSL approvals), then "vault-a" (raw SQ
     vault itself.
   - When *creating* C over A, the source bytes are stream-encrypted under the SHARED lock (as in
     §5.3), so no plaintext temp copy is ever written.
-- **C over B: password AND phrase** (PO decision A) [POC A-5.3]:
-  - the password alone yields a format B package, which is still SQLCipher with a phrase-wrapped VK;
-  - the phrase alone cannot open a C file.
+- **C over B (format D): password AND spell** (PO decision A) [POC A-5.3]:
+  - the password alone yields a format B package, which is still SQLCipher with a spell-wrapped VK;
+  - the spell alone cannot open a D file.
 - **Bounds checked before Argon2 allocates** [POC A-5.2: refused in under 50 ms]:
   - `mKiB` from 19,456 to 1,048,576;
   - `t` from 1 to 10;
@@ -301,14 +313,14 @@ sections: "policy" (JSON copy of policy + PSL approvals), then "vault-a" (raw SQ
 
 ## 6. Restore (separate vault only)
 
-> Implemented in Slice C (`slice-c.md` §4): the phrase is always required for B and D (DC2), a restored encrypted vault
+> Implemented in Slice C (`slice-c.md` §4): the spell is always required for B and D (DC2), a restored encrypted vault
 > gets a new vault id (DC3), and activation is a separate confirmed step with a manifest (DC7).
 
 1. Pick the file, then detect the format (§5).
 2. Ask only for the secrets that format needs:
    - A: none;
-   - B: phrase, unless the local key store already holds a matching `vaultId` and kcv;
-   - C: password, then the phrase for C over B.
+   - B: the spell;
+   - C: password; D: password and the spell.
 3. Pick the target. It must not exist and must not be the active vault (identity check), and its
    parent must exist. Never in place.
 4. Stream into the target `.partial`, verify (§5), and publish with no replacement.
@@ -335,7 +347,7 @@ sections: "policy" (JSON copy of policy + PSL approvals), then "vault-a" (raw SQ
 - **I4** — The vault mode comes from `config.json`, never from sniffing. An encrypted vault is never
   opened, or reported, as a plain one (`vault_mode_mismatch`), and a locked vault is reported as
   locked, never as a schema mismatch.
-- **I5** — Key material, phrase, password and DPAPI blobs never enter MCP responses, native-messaging
+- **I5** — Key material, spell, password and DPAPI blobs never enter MCP responses, native-messaging
   responses, logs or diagnostics.
   - VisibleStore receives only an opened connection, or an opaque key handle.
   - Error values are fixed codes.
@@ -399,6 +411,9 @@ Under option c the publication gate (I2) still protects a restored A vault.
 
 ## 8. Encryption-mode conversion (A-7)
 
+> Superseded by the implementation in `slice-d.md` (§4 there lists the differences). The loss analysis of §8.1 still
+> applies: writers blocked by the conversion get `vault_busy` and their events stay queued (L5).
+
 ### 8.1 Loss conditions in today's capture pipeline [CODE]
 
 | # | Condition | Outcome today | Visible? |
@@ -423,7 +438,7 @@ Preconditions:
 - `ConfigLock` is held by the conversion host for the whole operation.
 - The target path was chosen by the user and does not exist.
 - Free space is at least `size(source) × 1.1 + 64 MiB`.
-- For plain to encrypted: the phrase was shown **and confirmed first** (Q6). VK, the key store entry
+- For plain to encrypted: the spell was shown **and re-entered in full first** (Q6). VK, the key store entry
   and the sidecar are prepared as `.pending` files and are not active.
 
 | Phase | Action | Durable state after a crash here |
@@ -482,45 +497,25 @@ Acceptance criteria (for S4), all automated:
 - a power cut at every phase boundary (P0–P6) ends with exactly one active vault, an unchanged
   source, and a target that is either complete or only `.partial`.
 
-## 9. Recovery phrase specification (A-3)
+## 9. Recovery secret specification
 
-- **Adopted from BIP-39:**
-  - the English wordlist (2048 words, unique 4-letter prefixes [POC]);
-  - entropy-to-mnemonic encoding with the SHA-256 checksum: 12 words = 128-bit entropy + 4-bit
-    checksum;
-  - the official test vectors pass [POC A-3.1].
-- **Not adopted:**
-  - the PBKDF2-HMAC-SHA512 mnemonic-to-seed step;
-  - the BIP-39 passphrase;
-  - BIP-32 and any wallet derivation;
-  - other languages.
-  The 16 entropy bytes are the HKDF input (§2). This is a defined profile, not "BIP-39-like".
-- **Input.**
-  - Case-insensitive, any whitespace.
-  - Unknown words are reported by position. Optionally, autocomplete by 4-letter prefix.
-  - The checksum catches about 15/16 of single-word errors (measured: 6.25–6.29% pass) and most
-    adjacent swaps (2 of 11 passed in one run).
-  - Whatever passes the checksum still fails AEAD (0 unlocks in 24,564 substitutions and 11 swaps
-    [POC A-3.2]), and is then reported as `recovery_phrase_rejected`.
-  - Damaged recovery metadata cannot be told from a wrong phrase by AEAD alone. A phrase check value,
-    like the C password check, is proposed. It gives no attack advantage at 128 bits. [DESIGN]
-- **Onboarding (Q6).**
-  - The vault file is created as `.pending` and is unusable: `config.json` is not changed, and the
-    key store entry is `.pending`.
-  - The user re-enters 3 random positions. Only then is everything promoted and activated.
-  - Abandoning onboarding leaves no active vault and no usable key store entry. The `.pending` files
-    are listed for cleanup.
-- **Regeneration (HIGH-2)**, while VK is available through DPAPI:
-  - new E, then a new envelope over the **same VK**;
-  - the sidecar and the key store copy are replaced atomically;
-  - old backups keep their old envelope and still need the old phrase [POC A-3.3];
-  - the UI tells the user to make a fresh backup.
-  - **This is not revocation.**
-- **Compromise (revocation).**
-  - Requires a new VK: re-encrypting into a new vault, which is the conversion machinery with
-    encrypted to encrypted and a new VK.
-  - Old backups stay decryptable by whoever holds the old phrase. This cannot be revoked and is
-    stated in the UI (P6).
+The 12-word BIP-39 profile proposed here (A-3) and used by Slices B/C has been **replaced** by the Recovery Spell; the
+full specification is `recovery-spell.md`. In short:
+
+- **Form.** 32 bytes from the OS CSPRNG, written as 43 base64url characters without padding; parsed strictly (exact length,
+  alphabet, canonical last character; case-sensitive; nothing trimmed or substituted by the host).
+- **Derivation.** HKDF-SHA256 with the spell as input keying material, a 32-byte random salt per envelope and distinct
+  `info` labels for the KEK and the check key (`memocampus/recovery-spell/v2/...`); the envelope binds vault id and cipher
+  salt (AAD and check value). Backup MAC and policy keys stay HKDF(VK) with `v2` labels; the key check value is unchanged.
+- **Onboarding (Q6).** The vault file, key store entry and sidecar are `.pending` until the user re-enters **all 43
+  characters**; only then is everything promoted and activated. Abandoning onboarding leaves no active vault.
+- **Old 12-word files** are recognised and refused as unsupported (sidecar version 1, container version 1 B/D), never read
+  as spell envelopes; an existing 12-word vault still opens with DPAPI for its Windows user.
+- **Regeneration (HIGH-2, later slice)**, while VK is available through DPAPI: a new spell, a new envelope over the **same
+  VK**, sidecar and key store copy replaced atomically; old backups keep their old envelope and still need the old spell.
+  **This is not revocation.**
+- **Compromise (revocation).** Requires a new VK (re-encrypting into a new vault). Old backups stay decryptable by whoever
+  holds the old spell; this cannot be revoked and is stated in the UI (P6).
 
 ## 10. Crash recovery summary
 
@@ -530,5 +525,5 @@ Acceptance criteria (for S4), all automated:
 | Backup B/C | `rename_no_replace` of `.partial` | `.partial` left (B: ciphertext; C over A on create: ciphertext; C over A on restore: **plaintext**, R6) | complete file |
 | Restore | `rename_no_replace` of the target | `.partial` (same as above) | complete, not active |
 | Conversion | `config.json` rename (P5) | `maintenance` cleared on next start; source active | target active |
-| Phrase regeneration | sidecar rename and key store rename (two files; the key store copy is the authority, the sidecar is re-derived on mismatch) | old phrase still valid | new phrase valid |
-| Key store write (new PC) | key store rename | phrase needed again | DPAPI unlock |
+| Spell regeneration | sidecar rename and key store rename (two files; the key store copy is the authority, the sidecar is re-derived on mismatch) | old spell still valid | new spell valid |
+| Key store write (new PC) | key store rename | spell needed again | DPAPI unlock |
