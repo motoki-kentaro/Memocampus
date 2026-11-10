@@ -115,6 +115,13 @@ pub(crate) enum Step {
     RestoreVerify,
     RestoreKeys,
     RestorePromote,
+    /// Slice D: before the copy into the work file, before its verification, before the new key
+    /// and sidecar (D1), before the promotion, and in the switch's fence before the refresh.
+    ConvertCopy,
+    ConvertVerify,
+    ConvertKeys,
+    ConvertPromote,
+    ConvertRefresh,
 }
 
 #[cfg(test)]

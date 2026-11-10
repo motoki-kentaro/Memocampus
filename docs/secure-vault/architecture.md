@@ -9,6 +9,11 @@ implementation differs from this text, the slice documents list the difference (
 > **Recovery Spell (ふっかつのじゅもん)**: 256 CSPRNG bits written as 43 base64url characters. Its specification — format,
 > parsing, key derivation and domain separation, sidecar version 2, container version 2, handling of 12-word files — is
 > `recovery-spell.md`, which takes precedence over §2, §2.2, §4 error codes, §5–§6 and §9 below where they differ.
+
+> **Slice D (conversion).** The conversion between plain and encrypted vaults is implemented as described in `slice-d.md`,
+> which takes precedence over §8 below: no maintenance mode and no watchdog; the copy is made into a new vault without
+> holding the config lock, and refreshed under the switch's write fence when the user activates it; publication of the
+> converted vault always starts `pending` (not inherited from the source, unlike §8.2 P5).
 Each statement is tagged:
 
 - **[CODE]** — verified against the current source (file:line given);
@@ -405,6 +410,9 @@ possible without cleartext rules. This is reported as a PO decision (P2), not re
 Under option c the publication gate (I2) still protects a restored A vault.
 
 ## 8. Encryption-mode conversion (A-7)
+
+> Superseded by the implementation in `slice-d.md` (§4 there lists the differences). The loss analysis of §8.1 still
+> applies: writers blocked by the conversion get `vault_busy` and their events stay queued (L5).
 
 ### 8.1 Loss conditions in today's capture pipeline [CODE]
 

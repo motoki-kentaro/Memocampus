@@ -391,6 +391,8 @@ pub fn restore(
         }
         let _ = fs::remove_file(manifest_path(session)?);
     }
+    // Slice D: never beside an unfinished conversion.
+    super::convert::refuse_while_pending(session)?;
     let backup = match requested_path(message, "backupPath")? {
         Some(path) => normalize_existing(&path)?,
         None => return Err(Failure::with("backup_path_required", json!({}))),

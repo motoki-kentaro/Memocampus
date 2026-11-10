@@ -399,7 +399,7 @@ pub use memocampus_native_host::secure_vault::KeyError;
 use memocampus_native_host::secure_vault::{cipher, key_store};
 
 /// The vault error a key failure is reported as. None of them proves anything about the file.
-fn key_kind(error: KeyError) -> VaultError {
+pub fn key_kind(error: KeyError) -> VaultError {
     match error {
         KeyError::NotSupported => VaultError::EncryptionUnsupported,
         KeyError::Missing | KeyError::ProtectorFailed | KeyError::Mismatch | KeyError::Io => {
@@ -897,11 +897,34 @@ pub fn switch_active_with(
 /// pending even if it is the very file whose publication was confirmed (a recovered vault).
 pub fn switch_active_to(
     env: &Environment,
+    lock: &ConfigLock,
+    new: &NewActive,
+    location_approved: bool,
+    keys: &dyn KeySource,
+    fresh_publication: bool,
+) -> Result<(), VaultError> {
+    switch_active_fenced(
+        env,
+        lock,
+        new,
+        location_approved,
+        keys,
+        fresh_publication,
+        &mut || Ok(()),
+    )
+}
+
+/// `switch_active_to` that runs `while_fenced` while the old vault's writers are fenced off, just
+/// before the config is replaced (Issue #51 Slice D: the last copy of a converted vault, so that no
+/// write to the old vault can be missing from the new one). If it fails, the config is not changed.
+pub fn switch_active_fenced(
+    env: &Environment,
     _lock: &ConfigLock,
     new: &NewActive,
     location_approved: bool,
     keys: &dyn KeySource,
     fresh_publication: bool,
+    while_fenced: &mut dyn FnMut() -> Result<(), VaultError>,
 ) -> Result<(), VaultError> {
     let new_path = new.path;
     if (new.mode == VaultMode::Encrypted) != new.vault_id.is_some() {
@@ -933,6 +956,12 @@ pub fn switch_active_to(
             hook();
         }
     });
+    if let Err(error) = while_fenced() {
+        if let Fence::WriteLock(db) = &fence {
+            let _ = db.execute_batch("ROLLBACK");
+        }
+        return Err(error);
+    }
     let token = active_vault::vault_token(new_path).ok();
     let publication = token.map(
         |token| match previous.and_then(|config| config.publication) {

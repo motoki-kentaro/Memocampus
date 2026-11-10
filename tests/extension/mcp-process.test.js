@@ -291,3 +291,88 @@ test("end to end with the real host and MCP: a password backup of an encrypted v
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+
+test("end to end with the real host and MCP: a plain vault converted to encrypted (and back) is read by MCP only once confirmed, and the source is kept", { skip: HOST_BIN && MCP_BIN ? false : "set MEMOCAMPUS_TEST_HOST and MEMOCAMPUS_TEST_MCP to run" }, async () => {
+  const { spawn } = await import("node:child_process");
+  const { existsSync, mkdtempSync, readFileSync, rmSync } = await import("node:fs");
+  const os = await import("node:os");
+  const root = mkdtempSync(path.join(os.tmpdir(), "memocampus-convert-e2e-"));
+  const env = { ...process.env, MEMOCAMPUS_APP_DIR: path.join(root, "app") };
+  delete env.MEMOCAMPUS_DB;
+  const call = (message) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(HOST_BIN, [], { env, cwd: root, stdio: ["pipe", "pipe", "pipe"] });
+      const chunks = [];
+      child.stdout.on("data", (chunk) => chunks.push(chunk));
+      child.on("error", reject);
+      child.on("close", () => {
+        const out = Buffer.concat(chunks);
+        if (out.length < 4) return reject(new Error("no answer"));
+        resolve(JSON.parse(out.subarray(4, 4 + out.readUInt32LE(0)).toString("utf8")));
+      });
+      const body = Buffer.from(JSON.stringify({ requestId: "r", ...message }), "utf8");
+      const length = Buffer.alloc(4);
+      length.writeUInt32LE(body.length);
+      child.stdin.end(Buffer.concat([length, body]));
+    });
+  const visit = async (id, url) => {
+    const ack = await call({ type: "visit", id, url, title: `title ${id}`, incognito: false, visitedAt: "2026-11-10T10:00:00.000Z" });
+    assert.equal(ack.ok, true, JSON.stringify(ack));
+  };
+  const servers = [];
+  try {
+    assert.equal((await call({ type: "policy_initialize" })).ok, true);
+    const plain = path.join(root, "plain.sqlite3");
+    assert.equal((await call({ type: "vault_create", path: plain })).ok, true);
+    await visit("v1", "https://public.test/converted-row");
+    await visit("v2", "https://accounts.google.com/CANARY");
+    await confirmPublication(call);
+    const shown = await call({ type: "vault_status" });
+    assert.equal(shown.status.publication, "confirmed");
+
+    const encrypted = path.join(root, "encrypted.sqlite3");
+    const started = await call({ type: "vault_convert_start", direction: "encrypt", expectedVaultToken: shown.status.vaultToken, path: encrypted });
+    assert.equal(started.ok, true, JSON.stringify(started));
+    const spell = started.recoverySpell;
+    assert.match(spell, /^[A-Za-z0-9_-]{43}$/);
+    await visit("v3", "https://public.test/during-conversion");
+    assert.equal((await call({ type: "vault_convert_confirm", recoverySpell: spell })).ok, true);
+    const activated = await call({ type: "vault_convert_activate", expectedVaultToken: started.vaultToken });
+    assert.equal(activated.ok, true, JSON.stringify(activated));
+    assert.equal(activated.status.mode, "encrypted");
+    assert.equal(activated.status.publication, "pending", "the source's publication is not inherited");
+    // MCP refuses the new vault until the user confirms it.
+    const pending = await failure(startMcpServer(servers, env, []).initialize("convert-e2e"));
+    assert.match(pending.stderr, /vault refused: vault_publication_pending/);
+    await confirmPublication(call);
+    const mcp = startMcpServer(servers, env, []);
+    await mcp.initialize("convert-e2e");
+    const found = JSON.stringify(await mcp.request("tools/call", { name: "memocampus_search_visits", arguments: { query: "" } }));
+    assert.match(found, /converted-row/);
+    assert.match(found, /during-conversion/, "writes made while converting are in the new vault");
+    assert.doesNotMatch(found, /CANARY/, "the privacy gate still applies");
+    assert.equal(found.includes(spell), false);
+    await mcp.close();
+    // At rest: the new vault is ciphertext; the source plain vault is kept as it was.
+    assert.equal(readFileSync(encrypted).includes("converted-row"), false);
+    assert.equal(readFileSync(plain).includes("converted-row"), true);
+
+    // And back to plain: acknowledged, a new file, publication pending again.
+    const current = await call({ type: "vault_status" });
+    const back = path.join(root, "back.sqlite3");
+    const refused = await call({ type: "vault_convert_start", direction: "decrypt", expectedVaultToken: current.status.vaultToken, path: back });
+    assert.equal(refused.error, "vault_convert_plaintext_unacknowledged");
+    assert.equal(existsSync(back), false);
+    const decrypted = await call({ type: "vault_convert_start", direction: "decrypt", acknowledgePlaintext: true, expectedVaultToken: current.status.vaultToken, path: back });
+    assert.equal(decrypted.ok, true, JSON.stringify(decrypted));
+    const done = await call({ type: "vault_convert_activate", expectedVaultToken: decrypted.vaultToken });
+    assert.equal(done.status.mode, "plain");
+    assert.equal(done.status.publication, "pending");
+    const again = await failure(startMcpServer(servers, env, []).initialize("convert-e2e-2"));
+    assert.match(again.stderr, /vault refused: vault_publication_pending/);
+    assert.equal(existsSync(encrypted) && existsSync(`${encrypted}.mckey`), true, "the encrypted source is kept");
+  } finally {
+    for (const server of servers) await server.close();
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});

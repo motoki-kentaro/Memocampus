@@ -180,6 +180,68 @@ export function describeRestorePending(pending) {
   return `中断された復元があります${pending?.path ? `:\n${pending.path}` : ""}\n途中のファイルを破棄してから、もう一度復元してください。`;
 }
 
+/** Issue #51 Slice D: converting the vault shown between plain and encrypted. */
+export const CONVERT_TEXT = {
+  encrypt: {
+    title: "このVaultを暗号化する",
+    note:
+      "現在のVaultの内容を、新しい暗号化Vaultへコピーします。元のVaultは削除されません。" +
+      "コピーの後に、新しいVaultの「ふっかつのじゅもん」を一度だけ表示します。記録して全文を入力し直すまで、変換は完了しません。" +
+      "変換したVaultを使い始めるかどうかは、その後で選べます。",
+    pick: "保存先を選んで暗号化…",
+  },
+  decrypt: {
+    title: "このVaultの暗号化を解除する",
+    note:
+      "新しい平文Vaultを作成します。閲覧履歴や保存画像などが暗号化されずにディスクへ保存されます。元の暗号化Vaultは削除されません。" +
+      "平文Vaultには、ふっかつのじゅもんはありません（元の暗号化Vaultの呪文は、元のVaultにだけ使えます）。",
+    pick: "保存先を選んで暗号化を解除…",
+  },
+};
+
+/** Which conversion the vault shown offers: by its mode. */
+export function convertDirection(mode) {
+  if (mode === "plain") return "encrypt";
+  if (mode === "encrypted") return "decrypt";
+  return null;
+}
+
+/** For the spell step of a conversion: the spell belongs to the new vault only. */
+export const CONVERT_SPELL_NOTE =
+  "これは新しい暗号化Vaultのふっかつのじゅもんです。以前に記録した呪文（ほかのVaultの呪文）では、このVaultを復旧できません。";
+
+/** A converted vault (start or confirm answer), for the user's decision. */
+export function describeConverted(converted) {
+  const encrypt = converted?.direction === "encrypt";
+  const lines = [`変換しました（まだ使用していません）: ${converted?.path ?? ""}`];
+  if (converted?.sourcePath) lines.push(`変換元（そのまま残ります）: ${converted.sourcePath}`);
+  lines.push(encrypt ? "新しい暗号化Vault（鍵はこのWindowsユーザー用に保存しました）" : "新しい平文Vault（暗号化されていません）");
+  const counts = converted?.counts;
+  if (counts && Number.isSafeInteger(counts.visits)) {
+    lines.push(`検証済み: 閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件・画像 ${counts.images.toLocaleString("ja-JP")}件（変換元と全件一致）`);
+  }
+  lines.push(
+    "「使い始める」を押すと、その時点までに変換元へ記録された内容も取り込んでから、このVaultをActive Vaultにします。MCPへの公開は未承認から始まります。",
+    "「切り替えずに保存」を選ぶと、変換した時点の内容のまま残します（後で「既存のVaultを開く」で開けます。その後の記録は変換元にだけ残ります）。",
+  );
+  return lines.join("\n");
+}
+
+/** A conversion recorded by the host but not finished in this page (`status.conversionPending`). */
+export function describeConversionPending(pending) {
+  const what = pending?.direction === "decrypt" ? "暗号化を解除した平文Vault" : "暗号化した新しいVault";
+  if (pending?.phase === "converted") {
+    return `変換済みで、まだ使用していない${what}があります:\n${pending.path}\n使い始めるか、切り替えずに保存するか、破棄してください。`;
+  }
+  if (pending?.phase === "verified" && pending.direction === "encrypt") {
+    return `ふっかつのじゅもんの確認前に中断された変換があります:\n${pending.path}\n呪文は再表示できないため、破棄してから、もう一度変換してください。元のVaultは変更していません。`;
+  }
+  if (pending?.phase === "verified") {
+    return `変換済みで、まだ使用していない${what}があります:\n${pending.path}\n使い始めるか、切り替えずに保存するか、破棄してください。`;
+  }
+  return `中断された変換があります${pending?.path ? `:\n${pending.path}` : ""}\n途中のファイルを破棄してから、もう一度変換してください。元のVaultは変更していません。`;
+}
+
 /** MCP access to the vault shown (Issue #51): `status.publication` from a host that knows it. */
 export const PUBLICATION_TEXT = {
   confirmed: "MCPへの公開: 承認済み",

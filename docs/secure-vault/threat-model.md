@@ -67,7 +67,10 @@
 | Wrong spell or altered sidecar overwrites a working key, or activates a vault | the spell must open the envelope and the key must open the vault before anything is written; damaged metadata told apart by the check value; a 12-word sidecar or backup is reported as unsupported, never as damage or a wrong spell | [TEST] Slice B, `recovery-spell.md` §7 |
 | Interrupted creation leaves a half-made vault active, or mixes keys on retry | manifest + `.pending` files, commit point = config rename, one creation at a time, cancel removes only files bound to that creation | [TEST] Slice B |
 | Plaintext temp files during secure backup | raw ciphertext copy under SHARED; stream encryption for C; `temp_store = MEMORY` | [POC A-4.2] (plain); SQLCipher [DOC] |
-| Silent loss of capture during conversion | `vault_maintenance` is temporary, so events stay queued; watchdog cancels before overflow; policy evaluation unaffected | design (§8) |
+| Silent loss of capture during conversion | Slice D: the source stays active and is only read; writers blocked by the copy or by the fence at activation get `vault_busy` (events stay queued, L5); the converted vault is refreshed from the source under the switch fence before it becomes active; policy evaluation unaffected. No watchdog (`slice-d.md` R-D2) | [TEST] `slice-d.md` §4 (`secure_vault_d.rs`, `convert_tests`) |
+| Conversion damages or replaces the source, or publishes a half-made vault | source opened read-only (`mode=ro`) only; target new (`create_new`, `rename_no_replace`), work file with an unpredictable name, never opened as a vault; one transaction + row-by-row comparison + `integrity_check` before promotion and again before the switch | [TEST] `slice-d.md` §1–§3 |
+| Converted vault exposed to MCP because the source was published | publication of the converted vault always starts `pending` | [TEST] E2E `mcp-process.test.js` (Slice D) |
+| Decrypting (D2) leaves the history in plaintext unintentionally | explicit acknowledgement in the panel and `acknowledgePlaintext: true` required by the host; new file only, the encrypted source kept | [TEST] `convert_tests::d2_…`, `vault-convert.test.js`; R-D1 |
 
 ## 5. Out of scope (explicit)
 
@@ -104,3 +107,4 @@
 | R8 | The config rename is not write-through; after a power cut the previous config may reappear | Slice B0: POSIX rename by handle + flush after the rename (`slice-b0.md`); crash points simulated, a real power cut NOT VERIFIED; a disk ignoring flushes stays a residual risk |
 | R9 | L3 (pre-enqueue policy check failure) silently skips a visit today | pre-existing; conversion must not trigger it. Fixing it in general is a separate issue. |
 | R10 | Non-Windows | design isolates DPAPI behind a key-protector interface; no non-Windows implementation is designed or verified |
+| R11 | Slice D conversion: plaintext copy by choice (D2), writers blocked during a copy, no progress/watchdog, kept snapshots | `slice-d.md` §11 (R-D1–R-D9) |

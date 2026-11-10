@@ -134,7 +134,12 @@ replace (POSIX rename instead of `MOVEFILE_WRITE_THROUGH`). Its differences are 
   - a crash-point injection for each publication step;
   - a >1 GiB vault for the lock-byte page.
 
-### S4 — mode conversion (Phase D)
+### S4 — mode conversion (Phase D) — **implemented as Slice D** (`slice-d.md`; review and PO approval pending)
+
+> Implemented differently from the scope below (`slice-d.md` §4, §12): no `maintenance` protocol and no watchdog; a copy
+> into a new vault, then a refresh under the switch's write fence at activation, so no write to the source is lost. The
+> "zero silent loss" criteria are tested with visits recorded before, during and after a conversion through the real
+> host (`tests/secure_vault_d.rs`); simulated deaths at every step replace process kills.
 
 - **Scope.**
   - The `maintenance` protocol, the conversion phases P0–P6, cancel and resume.

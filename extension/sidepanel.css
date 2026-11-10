@@ -666,3 +666,10 @@ button.danger { color: var(--error-fg); border-color: var(--error-fg); font-weig
 @media (forced-colors: active) {
   .vault-spell { border-color: CanvasText; }
 }
+
+/* Issue #51 Slice D: converting the vault between plain and encrypted. */
+.vault-convert-ack {
+  display: block;
+  margin: 6px 0;
+  font-weight: 600;
+}

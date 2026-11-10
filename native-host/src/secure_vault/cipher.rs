@@ -84,6 +84,20 @@ impl From<rusqlite::Error> for KeyingError {
 
 /// Keys a freshly opened connection. Must be the first thing done with it.
 pub fn apply_key(db: &Connection, key: &VaultKey) -> Result<(), KeyingError> {
+    apply_key_to(db, c"main", key)?;
+    db.execute_batch("PRAGMA cipher_compatibility = 4; PRAGMA temp_store = MEMORY;")?;
+    Ok(())
+}
+
+/// Keys the database `schema` of `db` (`main`, or one just attached without a `KEY` clause by a
+/// connection whose main database has no key), before anything of it is read. The key never
+/// appears in SQL text. Issue #51 Slice D: an attached database is keyed this way, never with
+/// `ATTACH … KEY`, whose key would be SQL text. The caller sets `cipher_compatibility` for it.
+pub fn apply_key_to(
+    db: &Connection,
+    schema: &std::ffi::CStr,
+    key: &VaultKey,
+) -> Result<(), KeyingError> {
     if !is_available(db) {
         return Err(KeyingError::Unavailable);
     }
@@ -95,12 +109,12 @@ pub fn apply_key(db: &Connection, key: &VaultKey) -> Result<(), KeyingError> {
         literal.push(DIGITS[usize::from(byte & 15)]);
     }
     literal.push(b'\'');
-    // SAFETY: the handle belongs to `db`, which outlives the call; "main" is NUL-terminated; the
+    // SAFETY: the handle belongs to `db`, which outlives the call; `schema` is NUL-terminated; the
     // key buffer is valid for `literal.len()` bytes. SQLCipher copies the key into its codec.
     let rc = unsafe {
         sqlite3_key_v2(
             db.handle(),
-            c"main".as_ptr(),
+            schema.as_ptr(),
             literal.as_ptr().cast(),
             literal.len() as c_int,
         )
@@ -112,7 +126,6 @@ pub fn apply_key(db: &Connection, key: &VaultKey) -> Result<(), KeyingError> {
             None,
         )));
     }
-    db.execute_batch("PRAGMA cipher_compatibility = 4; PRAGMA temp_store = MEMORY;")?;
     Ok(())
 }
 

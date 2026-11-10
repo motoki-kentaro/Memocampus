@@ -188,6 +188,13 @@
           <button id="vault-backup-pick" type="button">バックアップを作成…</button>
           <button id="vault-restore-pick" type="button">バックアップから復元…</button>
         </div>
+        <fieldset id="vault-convert" class="vault-encryption vault-convert" hidden>
+          <legend id="vault-convert-title"></legend>
+          <p id="vault-convert-note" class="vault-meta"></p>
+          <p id="vault-convert-source" class="vault-meta"></p>
+          <label id="vault-convert-ack-row" class="vault-convert-ack" hidden><input id="vault-convert-ack" type="checkbox"> 閲覧履歴や保存画像などが暗号化されずにディスクへ保存されることを理解しました</label>
+          <button id="vault-convert-pick" type="button"></button>
+        </fieldset>
         <details class="vault-manual">
           <summary>パスを直接入力</summary>
           <input id="vault-path-input" type="text" spellcheck="false" autocomplete="off" aria-label="Vaultまたはバックアップ先のパス" placeholder="C:\Users\…\memocampus.sqlite3">
@@ -240,6 +247,12 @@
           </details>
           <button id="vault-restore-activate" type="button">このVaultを使い始める（MCPへの公開は未承認）</button>
           <button id="vault-restore-discard" type="button">復元したVaultを破棄する</button>
+        </div>
+        <div id="vault-converted" class="vault-approval" role="alertdialog" aria-labelledby="vault-converted-title" hidden>
+          <p id="vault-converted-title"></p>
+          <button id="vault-convert-activate" type="button">変換したVaultを使い始める（MCPへの公開は未承認）</button>
+          <button id="vault-convert-keep" type="button">切り替えずに保存して終える</button>
+          <button id="vault-convert-discard" type="button">変換したVaultを破棄する</button>
         </div>
         <div id="vault-approval" class="vault-approval" role="alertdialog" aria-labelledby="vault-approval-title" hidden>
           <p id="vault-approval-title"></p>

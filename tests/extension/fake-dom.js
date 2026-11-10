@@ -162,6 +162,7 @@ export function createDocument() {
     "visit-calendar", "visit-date-chip",
     "vault-creation-pending", "vault-recovery-offer", "vault-onboarding", "vault-spell-check", "vault-recovery",
     "vault-backup-password-fields", "vault-backup-spell-row", "vault-restore", "vault-restore-password-row", "vault-restore-spell-row", "vault-restored", "vault-restored-policy-details",
+    "vault-convert", "vault-convert-ack-row", "vault-converted",
   ]) {
     document.querySelector(`#${id}`).hidden = true;
   }
@@ -355,8 +356,18 @@ function spellProblem(text) {
  * Native host stand-in: `vaults` maps a vault path to its pages; `active` is the open vault.
  * `images` maps a vault path to its image summaries (newest first) for the Image tab.
  */
-export function createHost({ vaults, active, statusDelay = 0, images = {}, policyStatus = null, capabilities = ["navigation_v1"], forward = null, encryption = false, restore = false }) {
+export function createHost({ vaults, active, statusDelay = 0, images = {}, policyStatus = null, capabilities = ["navigation_v1"], forward = null, encryption = false, restore = false, convert = false }) {
   const host = {
+    /**
+     * Issue #51 Slice D: conversion of the active vault between plain and encrypted, as the real
+     * host handles it (see native-host `manage::convert_tests`). `conversion` is the one recorded
+     * (`{ direction, phase, path, sourcePath, vaultToken, spell }`); `convertTargetDialog` the path
+     * the save dialog answers; `convertSpell` the new vault's spell.
+     */
+    convert,
+    conversion: null,
+    convertTargetDialog: "C:\\Converted\\memocampus-converted.sqlite3",
+    convertSpell: OTHER_SPELL,
     /**
      * Issue #51 Slice C: backups by protection and restore, as the real host handles them (see
      * native-host `manage::backup_restore_tests`). `backupFiles` maps a backup path to what restoring
@@ -412,6 +423,10 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
       const base = { managementEnabled: true, overridden: false, defaultPath: "C:\\Vaults\\memocampus.sqlite3", defaultExists: false, locationApproved: false };
       if (host.encryption) Object.assign(base, { encryptionAvailable: true, creationPending: host.creation?.path ?? null });
       if (host.restore) base.restorePending = host.restorePending;
+      if (host.convert) {
+        const c = host.conversion;
+        base.conversionPending = c ? { direction: c.direction, phase: c.phase, path: c.path, sourcePath: c.sourcePath, vaultToken: c.phase === "converting" ? null : c.vaultToken } : null;
+      }
       if (!host.active) return { ...base, state: "not_configured", vaultPath: null, counts: null, location: null };
       if (host.locked.has(host.active)) return { ...base, state: "key_unavailable", vaultPath: host.active, vaultToken: null, counts: null, mode: "encrypted", publication: "pending", recoveryAvailable: true, location: null };
       const confirmed = host.published.has(host.active);
@@ -678,6 +693,73 @@ export function createHost({ vaults, active, statusDelay = 0, images = {}, polic
         if (pending && pending.path !== host.active) delete host.vaults[pending.path];
         host.restorePending = null;
         return reply({ type: "vault_result", status: host.status() });
+      }
+      if (message.type.startsWith("vault_convert_")) {
+        const fail = (error, extra = {}) => ({ ok: false, type: "vault_result", requestId: message.requestId, error, ...extra });
+        const done = (fields) => reply({ type: "vault_result", ...fields, status: host.status() });
+        const c = host.conversion;
+        if (message.type === "vault_convert_start") {
+          if (c) return fail("vault_convert_pending", { path: c.path });
+          if (host.creation) return fail("vault_creation_pending");
+          if (host.restorePending) return fail("vault_restore_pending");
+          const expected = message.expectedVaultToken;
+          if (typeof expected !== "string" || !/^[0-9a-f]{64}$/.test(expected)) return fail("invalid_vault_token");
+          if (message.direction === "decrypt" && message.acknowledgePlaintext !== true) return fail("vault_convert_plaintext_unacknowledged");
+          if (!host.active || tokenOf(host.active) !== expected) return fail("vault_switched");
+          const mode = host.encrypted.has(host.active) ? "encrypted" : "plain";
+          if (!["encrypt", "decrypt"].includes(message.direction)) return fail("invalid_request");
+          if ((message.direction === "encrypt") !== (mode === "plain")) return fail("vault_convert_mode_mismatch", { mode });
+          const path = message.path ?? host.convertTargetDialog;
+          if (!path) return fail("cancelled");
+          if (path === host.active) return fail("vault_convert_same_as_source", { path });
+          if (host.vaults[path]) return fail("file_exists", { path });
+          const counts = { visits: host.vaults[host.active].length, snapshots: 0, images: 0 };
+          host.conversion = {
+            direction: message.direction,
+            phase: message.direction === "encrypt" ? "verified" : "converted",
+            path,
+            sourcePath: host.active,
+            vaultToken: tokenOf(path),
+            spell: message.direction === "encrypt" ? host.convertSpell : null,
+            pages: [...host.vaults[host.active]],
+          };
+          const answer = { path, sourcePath: host.active, direction: message.direction, phase: host.conversion.phase, vaultToken: tokenOf(path), counts };
+          if (message.direction === "encrypt") answer.recoverySpell = host.convertSpell;
+          return done(answer);
+        }
+        if (message.type === "vault_convert_confirm") {
+          if (!c) return fail("vault_convert_not_pending");
+          if (c.direction !== "encrypt") return fail("vault_convert_invalid_state");
+          const problem = spellProblem(message.recoverySpell);
+          if (problem) return fail("recovery_spell_invalid", problem);
+          if (message.recoverySpell !== c.spell) return fail("recovery_spell_rejected");
+          c.phase = "converted";
+          return done({ path: c.path, vaultToken: c.vaultToken, phase: c.phase });
+        }
+        if (message.type === "vault_convert_activate") {
+          if (!c) return fail("vault_convert_not_pending");
+          if (c.phase === "converting") return fail("vault_convert_incomplete", { path: c.path });
+          if (message.expectedVaultToken !== c.vaultToken) return fail("vault_switched");
+          if (c.direction === "encrypt" && c.phase !== "converted") return fail("vault_convert_spell_unconfirmed", { path: c.path });
+          host.vaults[c.path] = [...host.vaults[c.sourcePath]];
+          if (c.direction === "encrypt") host.encrypted.add(c.path);
+          host.active = c.path;
+          host.published.delete(c.path);
+          host.conversion = null;
+          return done({ path: c.path });
+        }
+        if (message.type === "vault_convert_keep") {
+          if (!c) return fail("vault_convert_not_pending");
+          if (c.direction === "encrypt" && c.phase !== "converted") return fail("vault_convert_spell_unconfirmed", { path: c.path });
+          host.vaults[c.path] = c.pages;
+          if (c.direction === "encrypt") host.encrypted.add(c.path);
+          host.conversion = null;
+          return done({ path: c.path });
+        }
+        if (message.type === "vault_convert_discard") {
+          host.conversion = null;
+          return done({});
+        }
       }
       if (message.type === "vault_open") {
         if (host.locked.has(message.path)) {

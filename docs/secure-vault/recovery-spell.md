@@ -196,6 +196,13 @@ spell also recovers the restored vault. Publication starts **pending**; the acti
 store are untouched until the user activates [TEST as above; E2E `mcp-process.test.js` (opt-in) with real binaries in two
 app directories].
 
+### 5.5 Conversion (Slice D)
+
+Converting a plain vault to encrypted (`slice-d.md`, D1) creates a **new** vault with a new VK, vault id, DPAPI entry,
+version 2 sidecar and a **new spell**, shown once and confirmed in full exactly as at creation (§5.1). Converting an
+encrypted vault to plain (D2) creates no spell; the source keeps its sidecar and its own spell. A spell of any other vault
+never opens a converted vault [TEST `convert_tests::the_spell_of_an_earlier_vault_never_recovers_a_converted_one`].
+
 ## 6. Secret handling
 
 - Host: `RecoverySpell` has no `Debug`/`Display`/`Serialize` output (`RecoverySpell(..)`), is zeroed on drop; the encoded

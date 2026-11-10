@@ -453,7 +453,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 | "vault_restore_inspect"
                 | "vault_restore"
                 | "vault_restore_activate"
-                | "vault_restore_discard",
+                | "vault_restore_discard"
+                | "vault_convert_start"
+                | "vault_convert_confirm"
+                | "vault_convert_activate"
+                | "vault_convert_keep"
+                | "vault_convert_discard",
             ) => {
                 write_message(&manage::handle(
                     &mut session,

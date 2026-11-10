@@ -1,7 +1,8 @@
 //! Vault management messages from the side panel: `vault_status`, `vault_create`,
 //! `vault_open`, `vault_backup`, and (Issue #51) `vault_publication_confirm` /
-//! `vault_publication_revoke`, the encrypted vault messages (`encrypted.rs`) and backup restore
-//! (`restore.rs`). Every message gets exactly one `vault_result` response.
+//! `vault_publication_revoke`, the encrypted vault messages (`encrypted.rs`), backup restore
+//! (`restore.rs`) and the conversion between a plain and an encrypted vault (`convert.rs`). Every
+//! message gets exactly one `vault_result` response.
 //!
 //! Publication decisions exist only here, in the Native Host, which only the extension can reach;
 //! the MCP server has no way to make or undo one.
@@ -69,6 +70,11 @@ pub fn handle(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> 
         Some("vault_restore") => restore::restore(session, dialogs, message),
         Some("vault_restore_activate") => restore::activate(session, message),
         Some("vault_restore_discard") => restore::discard(session),
+        Some("vault_convert_start") => convert::start(session, dialogs, message),
+        Some("vault_convert_confirm") => convert::confirm(session, message),
+        Some("vault_convert_activate") => convert::activate(session, message),
+        Some("vault_convert_keep") => convert::keep(session),
+        Some("vault_convert_discard") => convert::discard(session),
         _ => Err(Failure::with("unknown_type", json!({}))),
     };
     let mut response = match result {
@@ -112,6 +118,9 @@ pub fn status(session: &Session) -> Value {
         "creationPending": encrypted::pending_creation(session),
         // Issue #51 Slice C: a restored vault not yet activated (or a restore interrupted).
         "restorePending": restore::pending_restore(session),
+        // Issue #51 Slice D: a conversion of the encryption state not yet activated, kept or
+        // discarded.
+        "conversionPending": convert::pending_conversion(session),
     });
     let (path, mode, vault_id, config) = match vault::resolve(env) {
         Err(error) => {
@@ -282,6 +291,23 @@ fn normalize_existing(target: &Path) -> Result<PathBuf, Failure> {
     }
 }
 
+/// Issue #51 Slice D: a file that is (or may be) unfinished work of a vault operation is never
+/// opened as a vault: the work files of creations, restores and conversions (`.pending`,
+/// `.partial`), and the target of a conversion that is not activated or kept yet.
+fn refuse_work_file(session: &Session, target: &Path) -> Result<(), Failure> {
+    let name = target
+        .file_name()
+        .map(|name| name.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if name.ends_with(".partial") || name.ends_with(".pending") {
+        return Err(Failure::with(
+            "vault_work_file",
+            json!({ "path": display(target) }),
+        ));
+    }
+    convert::refuse_converting_file(session, target)
+}
+
 /// Returns whether the user accepted warnings; refuses rejected locations.
 fn check_location(assessment: &Assessment, target: &Path, approve: bool) -> Result<bool, Failure> {
     let details = || json!({ "path": display(target), "location": assessment });
@@ -354,6 +380,7 @@ fn open(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Result
         }
     };
     let target = normalize_existing(&target)?;
+    refuse_work_file(session, &target)?;
     let assessment = location::probe(&target, session.env.exe_dir.as_deref());
     // Location first: a rejected (e.g. network) file is never opened by SQLite.
     let location_approved = check_location(&assessment, &target, approved(message))?;
@@ -435,6 +462,7 @@ fn backup(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Resu
 }
 
 mod backup;
+mod convert;
 mod encrypted;
 mod restore;
 
@@ -443,6 +471,9 @@ mod backup_race_tests;
 
 #[cfg(test)]
 mod backup_restore_tests;
+
+#[cfg(test)]
+mod convert_tests;
 
 #[cfg(test)]
 mod tests {

@@ -189,6 +189,8 @@ pub fn begin(
         }
         let _ = fs::remove_file(manifest_path(session)?);
     }
+    // Slice D: never beside an unfinished conversion (two spells at once could be confused).
+    super::convert::refuse_while_pending(session)?;
     let default_path = session.env.default_vault_path()?;
     let target = match requested_path(message, "path")? {
         Some(path) => path,
@@ -613,6 +615,7 @@ pub fn recover(
         }
     };
     let target = normalize_existing(&target)?;
+    super::refuse_work_file(session, &target)?;
     let assessment = location::probe(&target, session.env.exe_dir.as_deref());
     let location_approved = check_location(&assessment, &target, approved(message))?;
     let with_path = |code: &'static str| Failure::with(code, json!({ "path": display(&target) }));
