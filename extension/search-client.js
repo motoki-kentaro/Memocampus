@@ -50,7 +50,6 @@ const ERROR_MESSAGES = {
   restore_failed: "復元に失敗しました。復元途中のファイルは削除しました。",
   disk_full: "保存先の空き容量が不足しています。作成途中のファイルは削除しました。",
   backup_wal_unsupported: "このVaultはWALモードのため、パスワード保護バックアップを作成できません。通常のバックアップを使ってください。何も作成していません。",
-  recovery_key_mismatch: "復旧情報ファイル（.mckey）が、このVaultの鍵と一致しません。バックアップは作成していません。",
   invalid_request: "要求が不正です。",
   vault_creation_pending: "作成途中の暗号化Vaultがあります。破棄してから、もう一度作成してください。",
   // Issue #51 Slice D: conversion between plain and encrypted.
@@ -70,14 +69,13 @@ const ERROR_MESSAGES = {
   vault_creation_not_pending: "作成途中の暗号化Vaultが見つかりません。最初から作成し直してください。",
   vault_creation_damaged: "作成途中の暗号化Vaultのファイルが壊れているか、見つかりません。破棄して作成し直してください。",
   recovery_spell_invalid: "ふっかつのじゅもんの形式が正しくありません。",
-  recovery_spell_rejected: "ふっかつのじゅもんが、このVaultのものと一致しません。Vaultも鍵も変更していません。",
-  recovery_metadata_unsupported:
-    "このVaultの復旧情報ファイル（.mckey）は、以前の12単語のリカバリーフレーズ方式のもので、この版では使えません。このWindowsユーザーで開けるVaultはそのまま使えますが、別の環境での復旧や形式B・Dのバックアップはできません。",
-  backup_legacy_recovery_phrase:
-    "このバックアップは、以前の12単語のリカバリーフレーズ方式で作られたもの（形式BまたはD）で、この版では復元できません。何も変更していません。",
-  recovery_metadata_missing: "このVaultの復旧情報ファイル（.mckey）が見つかりません。Vaultと同じフォルダに置いてください。",
-  recovery_metadata_damaged: "このVaultの復旧情報ファイル（.mckey）が壊れているか、改変されています。",
-  recovery_metadata_mismatch: "復旧情報ファイル（.mckey）が、このVaultファイルのものではありません。",
+  recovery_spell_rejected:
+    "ふっかつのじゅもんが、このVaultのものと一致しません。Vaultも鍵も変更していません。（Vaultファイルが壊れているか改変されている場合も、こう表示されます。）",
+  // Issue #51 Slice E: vaults and backups whose key was not derived from the spell.
+  vault_legacy_unsupported:
+    "このVaultは、以前の鍵管理方式（「.mckey」ファイルを使う方式）で作られたもので、この版では開けません。ファイルは変更・削除していません。",
+  backup_legacy_unsupported:
+    "このバックアップは、以前の鍵管理方式で作られたもの（形式BまたはD）で、この版では復元できません。何も変更していません。",
   vault_not_encrypted: "このVaultは暗号化されていません。「既存のVaultを開く」で開いてください。",
   key_protector_unavailable: "この環境では鍵を保護できない（Windows DPAPIが使えない）ため、暗号化Vaultを作成できません。",
   key_protector_failed: "Windowsで鍵を保護できませんでした。何も作成していません。",

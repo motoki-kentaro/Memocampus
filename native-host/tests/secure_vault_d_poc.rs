@@ -5,7 +5,10 @@
 
 use memocampus_native_host::schema;
 use memocampus_native_host::secure_vault::cipher::{self, Head};
-use memocampus_native_host::secure_vault::secret::VaultKey;
+use memocampus_native_host::secure_vault::secret::{CipherSalt, VaultKey};
+
+/// The salt of every encrypted vault these experiments create (Slice E: the caller chooses it).
+const SALT: CipherSalt = CipherSalt::from_array([0x5c; 16]);
 use rusqlite::{Connection, ErrorCode, OpenFlags};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -113,7 +116,7 @@ fn plain_vault(path: &Path) {
 }
 
 fn encrypted_vault(path: &Path, key: &VaultKey) {
-    cipher::create(path, key).unwrap();
+    cipher::create(path, key, &SALT).unwrap();
     let db = cipher::open(path, key, rw()).unwrap();
     fill(&db);
     schema::check(&db).unwrap();
@@ -470,7 +473,8 @@ fn p7_insert_select_refresh_keeps_the_target_salt() {
     plain_vault(&source);
     let key = VaultKey::generate().unwrap();
     let target = tmp.0.join("t.partial");
-    let salt = cipher::create(&target, &key).unwrap();
+    cipher::create(&target, &key, &SALT).unwrap();
+    let salt = SALT;
     let db = Connection::open_with_flags(&target, rw_uri()).unwrap();
     cipher::apply_key(&db, &key).unwrap();
     db.execute("ATTACH DATABASE ?1 AS src KEY ''", [read_only_uri(&source)])
@@ -508,7 +512,7 @@ fn p7_insert_select_refresh_keeps_the_target_salt() {
 // --- The engine (`secure_vault::convert`) ------------------------------------------------------
 
 use memocampus_native_host::active_vault::vault_token;
-use memocampus_native_host::secure_vault::convert::{self, CopyError, Ends};
+use memocampus_native_host::secure_vault::convert::{self, CopyError, Ends, Keyed};
 
 /// E1: both directions, under a folder name with Japanese characters, with the source's bytes
 /// and folder unchanged; plain → encrypted → plain gives back the same rows.
@@ -528,13 +532,29 @@ fn e1_export_both_ways_keeps_every_row_and_never_touches_the_source() {
         source_key: None,
         source_token: &vault_token(&plain).unwrap(),
         target: &encrypted,
-        target_key: Some(&key),
+        target_key: Some(Keyed {
+            key: &key,
+            salt: &SALT,
+        }),
     })
     .unwrap();
-    convert::verify(&encrypted, Some(&key)).unwrap();
+    convert::verify(
+        &encrypted,
+        Some(Keyed {
+            key: &key,
+            salt: &SALT,
+        }),
+    )
+    .unwrap();
     assert_eq!(convert::verify(&encrypted, None), Err(CopyError::Mismatch));
     assert_eq!(
-        convert::verify(&encrypted, Some(&VaultKey::generate().unwrap())),
+        convert::verify(
+            &encrypted,
+            Some(Keyed {
+                key: &VaultKey::generate().unwrap(),
+                salt: &SALT
+            })
+        ),
         Err(CopyError::Keying)
     );
     assert_eq!(file_hash(&plain), before);
@@ -576,10 +596,20 @@ fn e2_another_source_file_is_refused_before_anything_is_copied() {
         source_key: None,
         source_token: &vault_token(&other).unwrap(),
         target: &target,
-        target_key: Some(&key),
+        target_key: Some(Keyed {
+            key: &key,
+            salt: &SALT,
+        }),
     });
     assert_eq!(result, Err(CopyError::SourceChanged));
-    assert!(convert::verify(&target, Some(&key)).is_err());
+    assert!(convert::verify(
+        &target,
+        Some(Keyed {
+            key: &key,
+            salt: &SALT
+        })
+    )
+    .is_err());
 }
 
 /// E3: refresh brings later writes of the source into the converted copy, which keeps its salt;
@@ -598,7 +628,10 @@ fn e3_refresh_catches_up_with_the_source() {
         source_key: None,
         source_token: &token,
         target: &target,
-        target_key: Some(&key),
+        target_key: Some(Keyed {
+            key: &key,
+            salt: &SALT,
+        }),
     };
     convert::export(&ends).unwrap();
     let Head::Salt(salt) = cipher::read_head(&target).unwrap() else {
@@ -625,7 +658,14 @@ fn e3_refresh_catches_up_with_the_source() {
         );
     }
     convert::refresh(&ends).unwrap();
-    convert::verify(&target, Some(&key)).unwrap();
+    convert::verify(
+        &target,
+        Some(Keyed {
+            key: &key,
+            salt: &SALT,
+        }),
+    )
+    .unwrap();
     assert_eq!(cipher::read_head(&target).unwrap(), Head::Salt(salt));
     let db = cipher::open(&target, &key, rw()).unwrap();
     db.execute(
@@ -695,7 +735,10 @@ fn e4_a_hot_journal_is_rolled_back_before_the_copy() {
         source_key: None,
         source_token: &vault_token(&source).unwrap(),
         target: &target,
-        target_key: Some(&key),
+        target_key: Some(Keyed {
+            key: &key,
+            salt: &SALT,
+        }),
     })
     .unwrap();
     let db = cipher::open(&target, &key, rw()).unwrap();
@@ -725,9 +768,19 @@ fn e5_a_source_locked_by_another_process_is_refused() {
         source_key: None,
         source_token: &token,
         target: &target,
-        target_key: Some(&key),
+        target_key: Some(Keyed {
+            key: &key,
+            salt: &SALT,
+        }),
     });
     assert!(result.is_err());
     drop(held);
-    assert!(convert::verify(&target, Some(&key)).is_err());
+    assert!(convert::verify(
+        &target,
+        Some(Keyed {
+            key: &key,
+            salt: &SALT
+        })
+    )
+    .is_err());
 }

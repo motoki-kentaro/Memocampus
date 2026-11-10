@@ -10,18 +10,19 @@
 //! | Phase (manifest) | Files | Active vault |
 //! |---|---|---|
 //! | none | — | unchanged |
-//! | `creating` | `<target>.pending` (keyed DB), `keys\<id>.json.pending` (DPAPI), `<target>.mckey.pending` | unchanged |
-//! | `awaiting_confirmation` | all three, verified; the spell was shown once | unchanged |
-//! | `promoted` | `<target>`, `keys\<id>.json`, `<target>.mckey` | unchanged |
+//! | `creating` | `<target>.pending` (keyed DB), `keys\<id>.json.pending` (DPAPI) | unchanged |
+//! | `awaiting_confirmation` | both, verified; the spell was shown once | unchanged |
+//! | `promoted` | `<target>`, `keys\<id>.json` | unchanged |
 //! | none (committed) | the same | `<target>`, publication pending |
 //!
-//! - Begin generates VK, the Recovery Spell (256 CSPRNG bits) and the vault id, writes the files
-//!   (each never replacing anything), checks them, and returns the spell (43 base64url characters)
-//!   once. The spell and VK are never written anywhere in the clear: VK only DPAPI-protected and
-//!   spell-wrapped, the spell nowhere. No message shows it again.
+//! - Begin generates the Recovery Spell (256 CSPRNG bits) and the salt (128 CSPRNG bits); VK and
+//!   the vault id follow from them (Slice E, `recovery`). It writes the files (each never replacing
+//!   anything; no sidecar), checks them, and returns the spell (43 base64url characters) once. The
+//!   spell and VK are never written anywhere in the clear: VK only DPAPI-protected, the spell
+//!   nowhere. No message shows it again.
 //! - Commit needs the whole spell as the user re-entered (typed or pasted) it in the panel, all 43
-//!   characters: the host checks that it opens the envelope written at begin, i.e. that the spell
-//!   the user kept is the vault's. A mistyped spell is refused (`recovery_spell_rejected` or
+//!   characters: the host checks that it derives, with the vault's salt, the key of the pending
+//!   vault, i.e. that the spell the user kept is the one that recovers it. A mistyped spell is refused (`recovery_spell_rejected` or
 //!   `recovery_spell_invalid`) and the creation stays pending, so the user can try again. It then verifies the DB, promotes the files (no replacement) and switches the active
 //!   vault, which is the commit point. A retried commit continues from where a crash stopped.
 //! - Cancel removes only files that name this creation's vault id and salt, never an active vault.
@@ -29,16 +30,18 @@
 //!   creation can never be mixed up with a new key. The spell cannot be shown again: an
 //!   unconfirmed creation is cancelled and started over.
 //!
-//! # Opening and recovery
+//! # Opening and recovery (Slice E)
 //!
-//! `vault_open` of a file that is not plain SQLite finds its vault id (sidecar, else this user's
-//! key store by salt) and unlocks it with DPAPI. If this Windows user has no usable key
+//! `vault_open` of a file that is not plain SQLite reads its salt (the first 16 bytes), from which
+//! its vault id follows, and unlocks it with this user's DPAPI key store. If there is no usable key
 //! (`key_unavailable`), nothing changes and the panel offers recovery: `vault_recover` takes the
-//! spell, opens the sidecar's envelope, proves the key on the vault itself, and only then stores a
-//! new DPAPI entry for this user and makes the vault active, publication pending. A wrong spell
-//! or damaged metadata changes nothing. A sidecar of the 12-word phrase (version 1) is
-//! `recovery_metadata_unsupported`: such a vault still opens with this user's DPAPI key, but
-//! cannot be recovered or backed up as B/D by this build.
+//! spell, derives VK from it and the file's salt, proves the key on the vault itself, and only then
+//! stores a DPAPI entry for this user and makes the vault active, publication pending. The vault
+//! file and the spell are all it needs: no sidecar, no other file, no key of another PC. A wrong
+//! spell or a damaged file changes nothing.
+//!
+//! A vault of an earlier scheme (Slices B–D: its `.mckey` sidecar or a version 1 key store entry
+//! names its salt) is `vault_legacy_unsupported`: never opened, changed or removed by this build.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -58,12 +61,17 @@ use crate::vault::{
 };
 use memocampus_native_host::active_vault::VaultMode;
 use memocampus_native_host::secure_vault::{
-    cipher, fsutil, key_store, recovery, secret::RecoverySpell, sidecar, spell,
+    cipher, fsutil, key_store,
+    recovery::{self, NewVault},
+    secret::RecoverySpell,
+    sidecar, spell,
 };
 use zeroize::Zeroizing;
 
 pub const MANIFEST: &str = "vault-create.json";
-const MANIFEST_VERSION: u32 = 1;
+/// Version 2 (Slice E): no sidecar. A version 1 manifest (an unfinished creation of an earlier
+/// scheme) is unreadable here and can only be cancelled.
+const MANIFEST_VERSION: u32 = 2;
 const PENDING_DB: &str = ".pending";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,12 +216,7 @@ pub fn begin(
         }
     };
     let target = normalize_new(&target)?;
-    let reserved = [
-        target.clone(),
-        pending_db(&target),
-        sidecar::path_for(&target),
-        sidecar::pending_path_for(&target),
-    ];
+    let reserved = [target.clone(), pending_db(&target)];
     if let Some(taken) = reserved.iter().find(|path| path.exists()) {
         return Err(Failure::with(
             "file_exists",
@@ -232,38 +235,27 @@ pub fn begin(
     let app = app_dir(session)?;
 
     let _lock = ConfigLock::acquire(&session.env)?;
-    let key = VaultKey::generate().map_err(|_| random_failure())?;
-    let secret = RecoverySpell::generate().map_err(|_| random_failure())?;
-    let vault_id = VaultId::generate().map_err(|_| random_failure())?;
+    let made = NewVault::generate().map_err(|_| random_failure())?;
     let mut manifest = Manifest {
         version: MANIFEST_VERSION,
-        vault_id,
+        vault_id: made.id,
         target: display(&target),
         phase: Phase::Creating,
-        cipher_salt: None,
+        cipher_salt: Some(made.salt),
         location_approved,
     };
     write_manifest(session, &manifest, true)?;
     let result = (|| {
-        let salt = cipher::create(&pending_db(&target), &key).map_err(|error| match error {
-            cipher::CreateError::Exists => Failure::from(VaultError::FileExists),
-            cipher::CreateError::ParentMissing => VaultError::ParentMissing.into(),
-            cipher::CreateError::Unavailable => VaultError::EncryptionUnsupported.into(),
-            cipher::CreateError::Io => VaultError::Io.into(),
-            cipher::CreateError::Db => VaultError::Db.into(),
-        })?;
-        manifest.cipher_salt = Some(salt);
-        write_manifest(session, &manifest, false)?;
-        key_store::store(&app, &vault_id, &salt, &key, key_store::Write::Pending)
-            .map_err(key_store_failure)?;
-        let envelope =
-            recovery::wrap(&key, &secret, &vault_id, &salt).map_err(|_| random_failure())?;
-        sidecar::write_new(
-            &sidecar::pending_path_for(&target),
-            &sidecar::Sidecar::new(vault_id, salt, envelope),
+        cipher::create(&pending_db(&target), &made.key, &made.salt).map_err(create_failure)?;
+        key_store::store(
+            &app,
+            &made.id,
+            &made.salt,
+            &made.key,
+            key_store::Write::Pending,
         )
-        .map_err(|_| Failure::from(VaultError::Io))?;
-        verify_pending(session, &manifest, &secret)?;
+        .map_err(key_store_failure)?;
+        verify_pending(session, &manifest, &made.spell)?;
         manifest.phase = Phase::AwaitingConfirmation;
         write_manifest(session, &manifest, false)
     })();
@@ -273,15 +265,25 @@ pub fn begin(
     }
     // The only time the spell leaves the host. The response goes to the panel over native
     // messaging and nowhere else: no log, no file, no other message carries it.
-    let shown: Zeroizing<String> = spell::encode(&secret);
-    drop(secret);
+    let shown: Zeroizing<String> = spell::encode(&made.spell);
+    drop(made);
     Ok(json!({
         "path": display(&target),
         "recoverySpell": shown.as_str(),
     }))
 }
 
-/// Every pending file opens to the same key: the DPAPI entry, the envelope with this spell, and
+pub(super) fn create_failure(error: cipher::CreateError) -> Failure {
+    match error {
+        cipher::CreateError::Exists => VaultError::FileExists.into(),
+        cipher::CreateError::ParentMissing => VaultError::ParentMissing.into(),
+        cipher::CreateError::Unavailable => VaultError::EncryptionUnsupported.into(),
+        cipher::CreateError::Io => VaultError::Io.into(),
+        cipher::CreateError::Db => VaultError::Db.into(),
+    }
+}
+
+/// Every pending file opens to the key `secret` derives with the vault's salt: the DPAPI entry and
 /// the vault itself.
 fn verify_pending(
     session: &Session,
@@ -290,6 +292,9 @@ fn verify_pending(
 ) -> Result<(), Failure> {
     let damaged = || Failure::with("vault_creation_damaged", json!({}));
     let salt = manifest.cipher_salt.ok_or_else(damaged)?;
+    if recovery::vault_id(&salt) != manifest.vault_id {
+        return Err(damaged());
+    }
     let target = manifest.target();
     let app = app_dir(session)?;
     // Each file under its pending name, or already under its final name if a commit was
@@ -304,25 +309,8 @@ fn verify_pending(
     let stored = key_store::unlock_pending(&app, &manifest.vault_id, &salt)
         .or_else(|_| key_store::unlock(&app, &manifest.vault_id, &salt))
         .map_err(|_| damaged())?;
-    let sidecar_path = pick(
-        sidecar::pending_path_for(&target),
-        sidecar::path_for(&target),
-    );
-    let found = sidecar::read(&sidecar_path).map_err(|_| damaged())?;
-    if found.vault_id != manifest.vault_id || found.cipher_salt != salt {
-        return Err(damaged());
-    }
-    let unwrapped =
-        recovery::unwrap(&found.recovery, secret, &manifest.vault_id, &salt).map_err(|error| {
-            match error {
-                recovery::UnwrapError::SpellRejected => {
-                    Failure::with("recovery_spell_rejected", json!({}))
-                }
-                _ => damaged(),
-            }
-        })?;
-    if !unwrapped.same_as(&stored) {
-        return Err(damaged());
+    if !recovery::vault_key(secret, &salt).same_as(&stored) {
+        return Err(Failure::with("recovery_spell_rejected", json!({})));
     }
     let db_path = pick(pending_db(&target), target);
     if cipher::read_head(&db_path).ok() != Some(cipher::Head::Salt(salt)) {
@@ -369,15 +357,6 @@ pub fn commit(session: &mut Session, message: &Value) -> Result<Value, Failure> 
     if manifest.phase == Phase::AwaitingConfirmation {
         let promote = || -> io::Result<()> {
             key_store::promote_pending(&app, &manifest.vault_id, &salt)?;
-            promote_file(
-                &sidecar::pending_path_for(&target),
-                &sidecar::path_for(&target),
-                |path| {
-                    sidecar::read(path).is_ok_and(|found| {
-                        found.vault_id == manifest.vault_id && found.cipher_salt == salt
-                    })
-                },
-            )?;
             promote_file(&pending_db(&target), &target, |path| {
                 cipher::read_head(path).ok() == Some(cipher::Head::Salt(salt))
             })
@@ -462,17 +441,6 @@ fn remove_created(session: &Session, manifest: &Manifest) {
             let _ = fs::remove_file(fsutil::with_suffix(&db, "-journal"));
         }
     }
-    for path in [
-        sidecar::pending_path_for(&target),
-        sidecar::path_for(&target),
-    ] {
-        // Any version: a creation begun before the Recovery Spell left a version 1 sidecar.
-        if sidecar::identity(&path).is_some_and(|(vault_id, cipher_salt)| {
-            vault_id == manifest.vault_id && salt.is_none_or(|salt| cipher_salt == salt)
-        }) {
-            let _ = fs::remove_file(&path);
-        }
-    }
     if let Some(app) = session.env.app_dir.as_deref() {
         key_store::remove_created(app, &manifest.vault_id, salt.as_ref());
     }
@@ -514,54 +482,38 @@ pub(super) fn requested_spell(message: &Value) -> Result<RecoverySpell, Failure>
     spell::parse(&typed).map_err(spell_failure)
 }
 
-/// The vault id of an encrypted file: its sidecar, else this user's key store (by salt). `None`:
-/// nothing identifies the file as an encrypted Memocampus vault. The bool says whether a sidecar
-/// offers recovery.
-fn identify(
-    path: &Path,
-    salt: &CipherSalt,
-    app: &Path,
-) -> Result<Option<(VaultId, bool)>, Failure> {
-    let with_path = |code: &'static str, recoverable: bool| {
-        Failure::with(
-            code,
-            json!({ "path": display(path), "recoveryAvailable": recoverable }),
-        )
-    };
-    match sidecar::read(&sidecar::path_for(path)) {
-        Ok(found) if found.cipher_salt == *salt => Ok(Some((found.vault_id, true))),
-        Ok(_) => Err(with_path("recovery_metadata_mismatch", false)),
-        Err(sidecar::SidecarError::Missing) => {
-            Ok(key_store::find_by_salt(app, salt).map(|id| (id, false)))
-        }
-        Err(sidecar::SidecarError::Invalid) => key_store::find_by_salt(app, salt)
-            .map(|id| Some((id, false)))
-            .ok_or_else(|| with_path("recovery_metadata_damaged", false)),
-        // The 12-word sidecar: this user's DPAPI key still opens the vault; nothing else can.
-        Err(sidecar::SidecarError::Unsupported) => key_store::find_by_salt(app, salt)
-            .map(|id| Some((id, false)))
-            .ok_or_else(|| with_path("recovery_metadata_unsupported", false)),
-        Err(sidecar::SidecarError::Io) => Err(VaultError::Io.into()),
-    }
+/// True when the encrypted file at `path`, starting with `salt`, is a vault of an earlier scheme
+/// (Slices B–D): a `.mckey` sidecar or a version 1 key store entry names its salt. Such a vault's
+/// key is random, never derived from a spell, so this build cannot open or recover it.
+pub(super) fn is_legacy(path: &Path, salt: &CipherSalt, app: &Path) -> bool {
+    sidecar::legacy_for(path, salt) || key_store::legacy_entry_for(app, salt)
 }
 
-/// `vault_open` of a file that is not plain SQLite: an encrypted vault, unlocked with this
-/// user's key store. Returns `Ok(None)` for a file that is not encrypted-looking (the caller's
-/// plain path then reports it).
+pub(super) fn legacy_failure(path: &Path) -> Failure {
+    Failure::with(
+        VaultError::LegacyUnsupported.code(),
+        json!({ "path": display(path), "recoveryAvailable": false }),
+    )
+}
+
+/// `vault_open` of a file that is not plain SQLite: an encrypted vault, unlocked with this user's
+/// key store under the vault id its salt names. If no usable key exists, the answer offers
+/// recovery with the spell (`recoveryAvailable`), which needs nothing but the file.
 pub fn open_existing(
     session: &mut Session,
     target: &Path,
     location_approved: bool,
 ) -> Result<Option<Value>, Failure> {
     let salt = match cipher::read_head(target) {
-        Ok(cipher::Head::Salt(salt)) => salt,
+        Ok(cipher::Head::Salt(salt)) if cipher::plausible_size(target) => salt,
         Ok(_) => return Ok(None),
         Err(_) => return Err(VaultError::Io.into()),
     };
     let app = app_dir(session)?;
-    let Some((vault_id, recoverable)) = identify(target, &salt, &app)? else {
-        return Ok(None);
-    };
+    if is_legacy(target, &salt, &app) {
+        return Err(legacy_failure(target));
+    }
+    let vault_id = recovery::vault_id(&salt);
     let keys = KeyStore::of(&session.env);
     vault::open_checked_in(target, VaultMode::Encrypted, Some(vault_id), &keys).map_err(
         |failure| {
@@ -569,7 +521,7 @@ pub fn open_existing(
                 failure.kind.code(),
                 json!({
                     "path": display(target),
-                    "recoveryAvailable": recoverable && failure.needs_handle_fence(),
+                    "recoveryAvailable": failure.needs_handle_fence(),
                 }),
             )
         },
@@ -620,41 +572,35 @@ pub fn recover(
     let location_approved = check_location(&assessment, &target, approved(message))?;
     let with_path = |code: &'static str| Failure::with(code, json!({ "path": display(&target) }));
     let salt = match cipher::read_head(&target) {
-        Ok(cipher::Head::Salt(salt)) => salt,
+        Ok(cipher::Head::Salt(salt)) if cipher::plausible_size(&target) => salt,
         Ok(cipher::Head::PlainSqlite) => return Err(with_path("vault_not_encrypted")),
-        Ok(cipher::Head::TooShort) => return Err(with_path("vault_invalid")),
+        Ok(_) => return Err(with_path("vault_invalid")),
         Err(_) => return Err(VaultError::Io.into()),
     };
-    let found = match sidecar::read(&sidecar::path_for(&target)) {
-        Ok(found) if found.cipher_salt == salt => found,
-        Ok(_) => return Err(with_path("recovery_metadata_mismatch")),
-        Err(sidecar::SidecarError::Missing) => return Err(with_path("recovery_metadata_missing")),
-        Err(sidecar::SidecarError::Invalid) => return Err(with_path("recovery_metadata_damaged")),
-        Err(sidecar::SidecarError::Unsupported) => {
-            return Err(with_path("recovery_metadata_unsupported"))
-        }
-        Err(sidecar::SidecarError::Io) => return Err(VaultError::Io.into()),
-    };
+    let app = app_dir(session)?;
+    if is_legacy(&target, &salt, &app) {
+        return Err(legacy_failure(&target));
+    }
     let secret = spell::parse(&typed).map_err(spell_failure)?;
     drop(typed);
-    let key =
-        recovery::unwrap(&found.recovery, &secret, &found.vault_id, &salt).map_err(|error| {
-            match error {
-                recovery::UnwrapError::SpellRejected => with_path("recovery_spell_rejected"),
-                _ => with_path("recovery_metadata_damaged"),
-            }
-        })?;
+    // The file's salt and the spell: nothing else.
+    let vault_id = recovery::vault_id(&salt);
+    let key = recovery::vault_key(&secret, &salt);
     drop(secret);
-    // Proven on the vault itself before anything is stored.
+    // Proven on the vault itself before anything is stored. SQLCipher refuses another key at the
+    // first read (`vault_decrypt_failed`): a wrong spell, or a damaged or altered file (its salt
+    // included). Either way nothing is written.
     vault::open_checked_in(
         &target,
         VaultMode::Encrypted,
-        Some(found.vault_id),
+        Some(vault_id),
         &GivenKey(key.duplicate()),
     )
-    .map_err(|failure| with_path(failure.kind.code()))?;
-    let app = app_dir(session)?;
-    let write = match key_store::unlock(&app, &found.vault_id, &salt) {
+    .map_err(|failure| match failure.kind {
+        VaultError::DecryptFailed => with_path("recovery_spell_rejected"),
+        kind => with_path(kind.code()),
+    })?;
+    let write = match key_store::unlock(&app, &vault_id, &salt) {
         Ok(existing) if existing.same_as(&key) => None,
         Err(KeyError::Missing) => Some(key_store::Write::New),
         // An entry this user cannot use (another profile's, damaged, another key): replaced in one
@@ -662,14 +608,14 @@ pub fn recover(
         _ => Some(key_store::Write::Replace),
     };
     if let Some(write) = write {
-        key_store::store(&app, &found.vault_id, &salt, &key, write).map_err(key_store_failure)?;
+        key_store::store(&app, &vault_id, &salt, &key, write).map_err(key_store_failure)?;
     }
     drop(key);
     let lock = ConfigLock::acquire(&session.env)?;
     vault::switch_active_to(
         &session.env,
         &lock,
-        &NewActive::encrypted(&target, found.vault_id),
+        &NewActive::encrypted(&target, vault_id),
         location_approved,
         &KeyStore::of(&session.env),
         true,
@@ -679,11 +625,15 @@ pub fn recover(
     Ok(json!({ "path": display(&target), "status": status(session) }))
 }
 
-/// For the status: whether the encrypted vault at `path` has a sidecar matching its salt, so the
-/// panel can offer recovery with the spell.
-pub fn recovery_available(path: &Path) -> bool {
-    matches!(
-        (cipher::read_head(path), sidecar::read(&sidecar::path_for(path))),
-        (Ok(cipher::Head::Salt(salt)), Ok(found)) if found.cipher_salt == salt
-    )
+/// For the status: whether the panel can offer recovery with the spell for the encrypted vault at
+/// `path`: any encrypted-looking file of this scheme (the file and the spell are all it needs), not
+/// one of an earlier scheme.
+pub fn recovery_available(path: &Path, app: Option<&Path>) -> bool {
+    match cipher::read_head(path) {
+        Ok(cipher::Head::Salt(salt)) if cipher::plausible_size(path) => {
+            !sidecar::legacy_for(path, &salt)
+                && !app.is_some_and(|app| key_store::legacy_entry_for(app, &salt))
+        }
+        _ => false,
+    }
 }

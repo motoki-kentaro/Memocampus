@@ -195,6 +195,11 @@
           <label id="vault-convert-ack-row" class="vault-convert-ack" hidden><input id="vault-convert-ack" type="checkbox"> 閲覧履歴や保存画像などが暗号化されずにディスクへ保存されることを理解しました</label>
           <button id="vault-convert-pick" type="button"></button>
         </fieldset>
+        <fieldset id="vault-reissue" class="vault-encryption vault-convert" hidden>
+          <legend id="vault-reissue-title"></legend>
+          <p id="vault-reissue-note" class="vault-meta"></p>
+          <button id="vault-reissue-pick" type="button"></button>
+        </fieldset>
         <details class="vault-manual">
           <summary>パスを直接入力</summary>
           <input id="vault-path-input" type="text" spellcheck="false" autocomplete="off" aria-label="Vaultまたはバックアップ先のパス" placeholder="C:\Users\…\memocampus.sqlite3">

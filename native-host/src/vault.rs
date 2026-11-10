@@ -56,6 +56,9 @@ pub enum VaultError {
     ModeMismatch,
     /// The engine or platform cannot open encrypted vaults (no SQLCipher, no key protector).
     EncryptionUnsupported,
+    /// An encrypted vault of an earlier scheme (Slices B–D: a random key in a `.mckey` envelope),
+    /// unsupported since Slice E. Nothing about it is changed.
+    LegacyUnsupported,
 }
 
 impl VaultError {
@@ -83,6 +86,7 @@ impl VaultError {
             Self::DecryptFailed => "vault_decrypt_failed",
             Self::ModeMismatch => "vault_mode_mismatch",
             Self::EncryptionUnsupported => "vault_encryption_unsupported",
+            Self::LegacyUnsupported => "vault_legacy_unsupported",
         }
     }
 }
@@ -406,6 +410,7 @@ pub fn key_kind(error: KeyError) -> VaultError {
             VaultError::KeyUnavailable
         }
         KeyError::Locked => VaultError::Locked,
+        KeyError::Legacy => VaultError::LegacyUnsupported,
     }
 }
 
@@ -489,6 +494,7 @@ impl OpenFailure {
                 | VaultError::DecryptFailed
                 | VaultError::ModeMismatch
                 | VaultError::EncryptionUnsupported
+                | VaultError::LegacyUnsupported
         )
     }
 

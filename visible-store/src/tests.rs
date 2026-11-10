@@ -4446,8 +4446,9 @@ mod encrypted {
     fn encrypted_vault(f: &Fixture, name: &str) -> (PathBuf, VaultId, CipherSalt, VaultKey) {
         let path = f.dir.join(name);
         let key = VaultKey::generate().unwrap();
-        let salt = cipher::create(&path, &key).unwrap();
-        let id = VaultId::generate().unwrap();
+        let salt = CipherSalt::generate().unwrap();
+        cipher::create(&path, &key, &salt).unwrap();
+        let id = memocampus_native_host::secure_vault::recovery::vault_id(&salt);
         key_store::store(&f.app, &id, &salt, &key, key_store::Write::New).unwrap();
         let db = cipher::open(&path, &key, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap();
         visit(&db, "pub-1", "https://one.public.test/", "One", &day(1));

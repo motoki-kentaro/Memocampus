@@ -1,5 +1,7 @@
 //! Slice D (Issue #51): copying a vault between a plain and an encrypted database, for the
-//! conversion of a vault's encryption state (`docs/secure-vault/slice-d.md`).
+//! conversion of a vault's encryption state (`docs/secure-vault/slice-d.md`); Slice E: also from an
+//! encrypted database into a new one under another key and salt (re-issuing the Recovery Spell,
+//! restoring a backup under a new vault id; `docs/secure-vault/slice-e.md`).
 //!
 //! One connection holds both ends: the **source is always attached read-only** (`file:` URI with
 //! `mode=ro`), so no statement of the copy can change it, and the target is written in **one
@@ -10,6 +12,18 @@
 //! |---|---|---|
 //! | encrypt (plain → encrypted) | the target, keyed with the new vault key | `src`: the plain source, `KEY ''` |
 //! | decrypt (encrypted → plain) | the source, keyed (`sqlite3_key_v2`), read-only | `dst`: the plain target, `KEY ''` |
+//! | rekey (encrypted → encrypted, Slice E) | the source, keyed, read-only | `dst`: the target, attached `KEY ''`, then keyed with its key and salt (`sqlite3_key_v2`) |
+//!
+//! An encrypted target is always keyed with its key **and** its salt (`cipher::apply_new_key_to`):
+//! a new file gets exactly that salt as its first 16 bytes, and an existing one (a refresh) opens
+//! only if its salt is that one (PoC E P2/P3, P4).
+//!
+//! The refresh of a re-keyed copy (both ends encrypted, Slice E) cannot attach either end: an
+//! existing encrypted database is refused by `ATTACH` before it could be keyed, and `ATTACH … KEY`
+//! would put the key in SQL text. It uses **two connections** instead, each keyed through the C API:
+//! the source read-only in a read transaction (its lock held throughout), the target in one write
+//! transaction; rows are copied with bound values and compared across the two connections before
+//! the target commits.
 //!
 //! Keys only ever reach SQLCipher through `cipher::apply_key` (`sqlite3_key_v2`), never as SQL
 //! text. (An encrypted database attached without a key is refused by `ATTACH` itself, before it
@@ -33,7 +47,7 @@
 use crate::active_vault;
 use crate::schema;
 use crate::secure_vault::cipher::{self, Head};
-use crate::secure_vault::secret::VaultKey;
+use crate::secure_vault::secret::{CipherSalt, VaultKey};
 use rusqlite::types::Value;
 use rusqlite::{Connection, ErrorCode, OpenFlags};
 use std::path::Path;
@@ -80,15 +94,22 @@ impl From<rusqlite::Error> for CopyError {
     }
 }
 
-/// The two ends of a copy. Exactly one of the keys is given: `source_key` when decrypting,
-/// `target_key` when encrypting.
+/// The key and salt of an encrypted target.
+#[derive(Clone, Copy)]
+pub struct Keyed<'a> {
+    pub key: &'a VaultKey,
+    pub salt: &'a CipherSalt,
+}
+
+/// The two ends of a copy. At least one is encrypted: `source_key` alone when decrypting,
+/// `target_key` alone when encrypting, both when re-keying.
 pub struct Ends<'a> {
     pub source: &'a Path,
     pub source_key: Option<&'a VaultKey>,
     /// The `vault_token` the source must still have.
     pub source_token: &'a str,
     pub target: &'a Path,
-    pub target_key: Option<&'a VaultKey>,
+    pub target_key: Option<Keyed<'a>>,
 }
 
 /// A `file:` URI naming `path`, opened read-only. Only `%`, `?` and `#` are escaped: SQLite takes
@@ -122,17 +143,24 @@ fn connect(ends: &Ends) -> Result<Pair, CopyError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
         | OpenFlags::SQLITE_OPEN_NO_MUTEX
         | OpenFlags::SQLITE_OPEN_URI;
-    let keyed = |db: &Connection, key: &VaultKey| {
-        cipher::apply_key(db, key).map_err(|error| match error {
-            cipher::KeyingError::Unavailable => CopyError::Keying,
-            cipher::KeyingError::Sqlite(error) => CopyError::of(&error),
-        })
+    let failed = |error| match error {
+        cipher::KeyingError::Unavailable => CopyError::Keying,
+        cipher::KeyingError::Sqlite(error) => CopyError::of(&error),
+    };
+    let keyed = |db: &Connection, key: &VaultKey| cipher::apply_key(db, key).map_err(failed);
+    let keyed_target = |db: &Connection, schema: &std::ffi::CStr, target: Keyed| {
+        cipher::apply_new_key_to(db, schema, target.key, target.salt).map_err(failed)?;
+        let name = schema.to_str().map_err(|_| CopyError::Mismatch)?;
+        db.execute_batch(&format!(
+            "PRAGMA {name}.cipher_compatibility = 4; PRAGMA temp_store = MEMORY;"
+        ))?;
+        Ok::<_, CopyError>(())
     };
     let pair = match (ends.source_key, ends.target_key) {
-        (None, Some(key)) => {
+        (None, Some(target)) => {
             // The target exists (created empty by the caller): opening never creates a file here.
             let db = Connection::open_with_flags(ends.target, flags)?;
-            keyed(&db, key)?;
+            keyed_target(&db, c"main", target)?;
             db.execute(
                 "ATTACH DATABASE ?1 AS src KEY ''",
                 [read_only_uri(ends.source)],
@@ -156,7 +184,21 @@ fn connect(ends: &Ends) -> Result<Pair, CopyError> {
                 source: "main",
             }
         }
-        _ => return Err(CopyError::Mismatch),
+        (Some(key), Some(target)) => {
+            let db = Connection::open_with_flags(read_only_uri(ends.source), flags)?;
+            keyed(&db, key)?;
+            db.execute(
+                "ATTACH DATABASE ?1 AS dst KEY ''",
+                [ends.target.to_string_lossy()],
+            )?;
+            keyed_target(&db, c"dst", target)?;
+            Pair {
+                db,
+                target: "dst",
+                source: "main",
+            }
+        }
+        (None, None) => return Err(CopyError::Mismatch),
     };
     pair.db.busy_timeout(BUSY_TIMEOUT)?;
     // Temporary b-trees (none expected) stay in memory; constraints are the source's to have kept.
@@ -229,6 +271,9 @@ pub fn export(ends: &Ends) -> Result<(), CopyError> {
 /// A new copy into `ends.target`, which already holds the same schema: every table is emptied and
 /// filled again from the source.
 pub fn refresh(ends: &Ends) -> Result<(), CopyError> {
+    if let (Some(source_key), Some(target_key)) = (ends.source_key, ends.target_key) {
+        return refresh_rekeyed(ends, source_key, target_key);
+    }
     transaction(ends, |pair| {
         let tables = tables(&pair.db, pair.source)?;
         if tables != self::tables(&pair.db, pair.target)? {
@@ -246,6 +291,80 @@ pub fn refresh(ends: &Ends) -> Result<(), CopyError> {
         }
         Ok(())
     })
+}
+
+/// `refresh` with both ends encrypted: two connections (see the module documentation).
+fn refresh_rekeyed(ends: &Ends, source_key: &VaultKey, target_key: Keyed) -> Result<(), CopyError> {
+    let failed = |error| match error {
+        cipher::KeyingError::Unavailable => CopyError::Keying,
+        cipher::KeyingError::Sqlite(error) => CopyError::of(&error),
+    };
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let source = Connection::open_with_flags(
+        read_only_uri(ends.source),
+        flags | OpenFlags::SQLITE_OPEN_URI,
+    )?;
+    cipher::apply_key(&source, source_key).map_err(failed)?;
+    let target = Connection::open_with_flags(ends.target, flags)?;
+    cipher::apply_new_key_to(&target, c"main", target_key.key, target_key.salt).map_err(failed)?;
+    target.execute_batch(
+        "PRAGMA cipher_compatibility = 4; PRAGMA temp_store = MEMORY; PRAGMA foreign_keys = OFF;",
+    )?;
+    for db in [&source, &target] {
+        db.busy_timeout(BUSY_TIMEOUT)?;
+    }
+    source.execute_batch("BEGIN")?;
+    let result = (|| {
+        // The source's read lock, then its identity under it (as `pin_source`).
+        source.query_row("SELECT count(*) FROM main.sqlite_schema", [], |row| {
+            row.get::<_, i64>(0)
+        })?;
+        match active_vault::vault_token(ends.source) {
+            Ok(token) if token == ends.source_token => {}
+            Ok(_) => return Err(CopyError::SourceChanged),
+            Err(_) => return Err(CopyError::Io),
+        }
+        target.execute_batch("BEGIN IMMEDIATE")?;
+        let copied = (|| {
+            let names = tables(&source, "main")?;
+            if names != tables(&target, "main")? {
+                return Err(CopyError::Mismatch);
+            }
+            for table in &names {
+                target.execute_batch(&format!("DELETE FROM main.\"{table}\""))?;
+            }
+            for table in &names {
+                let mut select = source.prepare(&format!("SELECT * FROM main.\"{table}\""))?;
+                let columns = select.column_count();
+                let placeholders = (1..=columns)
+                    .map(|i| format!("?{i}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let mut insert = target.prepare(&format!(
+                    "INSERT INTO main.\"{table}\" VALUES ({placeholders})"
+                ))?;
+                let mut rows = select.query([])?;
+                while let Some(row) = rows.next()? {
+                    let values = (0..columns)
+                        .map(|i| row.get::<_, Value>(i))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    insert.execute(rusqlite::params_from_iter(values))?;
+                }
+            }
+            compare_between((&target, "main"), (&source, "main"))
+        })();
+        match copied {
+            Ok(()) => Ok(target.execute_batch("COMMIT")?),
+            Err(error) => {
+                let _ = target.execute_batch("ROLLBACK");
+                Err(error)
+            }
+        }
+    })();
+    let _ = source.execute_batch("ROLLBACK");
+    result?;
+    target.close().map_err(|(_, error)| CopyError::of(&error))?;
+    source.close().map_err(|(_, error)| CopyError::of(&error))
 }
 
 /// The ordinary tables of a schema, by name. Table names come from the database, never from a
@@ -303,20 +422,28 @@ fn order_of(db: &Connection, schema_name: &str, table: &str) -> Result<String, C
 
 /// The target holds exactly the source: same definitions, same header fields, same rows.
 pub fn compare(db: &Connection, target: &str, source: &str) -> Result<(), CopyError> {
-    if definitions(db, target)? != definitions(db, source)? {
+    compare_between((db, target), (db, source))
+}
+
+/// `compare` of a target and a source schema, each on its own connection or on the same one.
+fn compare_between(
+    (target_db, target): (&Connection, &str),
+    (source_db, source): (&Connection, &str),
+) -> Result<(), CopyError> {
+    if definitions(target_db, target)? != definitions(source_db, source)? {
         return Err(CopyError::Mismatch);
     }
     for field in ["user_version", "application_id"] {
-        if header(db, target, field)? != header(db, source, field)? {
+        if header(target_db, target, field)? != header(source_db, source, field)? {
             return Err(CopyError::Mismatch);
         }
     }
-    for table in tables(db, source)? {
-        let order = order_of(db, source, &table)?;
-        let mut from = db.prepare(&format!(
+    for table in tables(source_db, source)? {
+        let order = order_of(source_db, source, &table)?;
+        let mut from = source_db.prepare(&format!(
             "SELECT * FROM {source}.\"{table}\" ORDER BY {order}"
         ))?;
-        let mut into = db.prepare(&format!(
+        let mut into = target_db.prepare(&format!(
             "SELECT * FROM {target}.\"{table}\" ORDER BY {order}"
         ))?;
         let columns = from.column_count();
@@ -342,13 +469,14 @@ pub fn compare(db: &Connection, target: &str, source: &str) -> Result<(), CopyEr
     Ok(())
 }
 
-/// A finished copy, opened on its own: the expected kind of file (SQLCipher with a salt, or plain
-/// SQLite), the key opening it, a full `integrity_check` and the exact schema of this version.
-pub fn verify(target: &Path, key: Option<&VaultKey>) -> Result<(), CopyError> {
+/// A finished copy, opened on its own: the expected kind of file (SQLCipher starting with the
+/// expected salt, or plain SQLite), the key opening it, a full `integrity_check` and the exact
+/// schema of this version.
+pub fn verify(target: &Path, key: Option<Keyed>) -> Result<(), CopyError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let head = cipher::read_head(target).map_err(|_| CopyError::Io)?;
     let db = match (head, key) {
-        (Head::Salt(_), Some(key)) => {
+        (Head::Salt(found), Some(Keyed { key, salt })) if found == *salt => {
             cipher::open(target, key, flags).map_err(|error| match error {
                 cipher::KeyingError::Unavailable => CopyError::Keying,
                 cipher::KeyingError::Sqlite(error) => CopyError::of(&error),

@@ -23,6 +23,9 @@ import {
   checkBackupPassword,
   checkSpell,
   convertDirection,
+  convertMakesSpell,
+  reissueOffered,
+  REISSUE_SPELL_NOTE,
   describeConversionPending,
   describeConverted,
   describeSpellProblem,
@@ -156,6 +159,10 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   const convertAckRow = $("#vault-convert-ack-row");
   const convertAck = $("#vault-convert-ack");
   const convertPick = $("#vault-convert-pick");
+  const reissueBox = $("#vault-reissue");
+  const reissueTitle = $("#vault-reissue-title");
+  const reissueNote = $("#vault-reissue-note");
+  const reissuePick = $("#vault-reissue-pick");
   const convertedBox = $("#vault-converted");
   const convertedTitle = $("#vault-converted-title");
   const convertActivate = $("#vault-convert-activate");
@@ -171,7 +178,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   $("#vault-spell-note").textContent = SPELL_NOTE;
   $("#vault-spell-check-title").textContent = SPELL_CHECK_TITLE;
 
-  const actionButtons = [createDefault, createPick, openPick, backupPick, restorePick, convertPick, publicationConfirm, publicationRevoke, publicationApprove, ...document.querySelectorAll("[data-manual]")];
+  const actionButtons = [createDefault, createPick, openPick, backupPick, restorePick, convertPick, reissuePick, publicationConfirm, publicationRevoke, publicationApprove, ...document.querySelectorAll("[data-manual]")];
   const creationButtons = [createDefault, createPick, openPick, document.querySelector('[data-manual="vault_create"]'), document.querySelector('[data-manual="vault_open"]')];
   // The spell lives only here, in this page's memory, until the creation ends; it is never stored
   // (no chrome.storage, no queue, no log) and no request asks the host for it again.
@@ -224,9 +231,10 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     const conversionOpen = Boolean(status?.conversionPending) || Boolean(converted) || onboarding?.kind === "convert";
     if (conversionOpen) restorePick.disabled = true;
     const direction = convertDirection(status?.mode);
-    convertPick.disabled =
-      busy || !manageable || !backupSource() || !direction || conversionOpen || Boolean(status?.restorePending) || Boolean(status?.creationPending) || Boolean(onboarding) ||
-      (direction === "decrypt" && !convertAck.checked);
+    const conversionBlocked =
+      busy || !manageable || !backupSource() || conversionOpen || Boolean(status?.restorePending) || Boolean(status?.creationPending) || Boolean(onboarding);
+    convertPick.disabled = conversionBlocked || !direction || (direction === "decrypt" && !convertAck.checked);
+    reissuePick.disabled = conversionBlocked || !reissueOffered(status?.mode);
     convertAck.disabled = busy;
     for (const button of [convertKeep, convertDiscard]) button.disabled = busy;
     convertActivate.disabled = busy || !converted?.vaultToken;
@@ -354,6 +362,13 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     } else {
       convertAck.checked = false;
     }
+    // Slice E: an encrypted vault's spell can be re-issued (a new vault under a new spell).
+    reissueBox.hidden = !(offered && reissueOffered(status?.mode));
+    if (!reissueBox.hidden) {
+      reissueTitle.textContent = CONVERT_TEXT.reissue.title;
+      reissueNote.textContent = CONVERT_TEXT.reissue.note;
+      reissuePick.textContent = CONVERT_TEXT.reissue.pick;
+    }
     const conversion = status?.conversionPending ?? null;
     if (!conversion && converted?.fromStatus) closeConverted();
     if (conversion && !converted && !onboarding) showConversionPending(conversion);
@@ -473,9 +488,9 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
         return;
       }
       if (type === "vault_convert_start") {
-        // Converted and verified, nothing active changed. D1: the new spell, once, then its
-        // re-entry; D2: the decision right away.
-        if (response.direction === "encrypt") startOnboarding(response, "convert");
+        // Converted and verified, nothing active changed. D1 and re-issue: the new spell, once,
+        // then its re-entry; D2: the decision right away.
+        if (convertMakesSpell(response.direction)) startOnboarding(response, "convert");
         else {
           showConverted(response);
           setMessage("暗号化を解除した新しいVaultを作成し、内容を検証しました。使い始めるか、切り替えずに保存するか、破棄してください。");
@@ -483,7 +498,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
         return;
       }
       if (type === "vault_convert_confirm") {
-        const shown = { ...response, direction: "encrypt", sourcePath: onboarding?.sourcePath, counts: onboarding?.counts };
+        const shown = { ...response, direction: onboarding?.direction ?? "encrypt", sourcePath: onboarding?.sourcePath, counts: onboarding?.counts };
         clearOnboarding();
         showConverted(shown);
         setMessage("ふっかつのじゅもんの確認が完了しました。使い始めるか、切り替えずに保存するか、破棄してください。");
@@ -630,12 +645,12 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
       );
       return;
     }
-    onboarding = { spell, path: response.path, kind, sourcePath: response.sourcePath ?? null, counts: response.counts ?? null };
+    onboarding = { spell, path: response.path, kind, direction: response.direction ?? null, sourcePath: response.sourcePath ?? null, counts: response.counts ?? null };
     spellConfirm.textContent = confirmLabel[kind];
     onboardingCancel.textContent = cancelLabel[kind];
     onboardingPath.textContent =
       kind === "convert"
-        ? `変換先（新しい暗号化Vault）: ${response.path}\n変換元（そのまま残ります）: ${response.sourcePath ?? ""}\n${CONVERT_SPELL_NOTE}`
+        ? `変換先（新しい暗号化Vault）: ${response.path}\n変換元（そのまま残ります）: ${response.sourcePath ?? ""}\n${CONVERT_SPELL_NOTE}${response.direction === "reissue" ? `\n${REISSUE_SPELL_NOTE}` : ""}`
         : `保存先: ${response.path}`;
     showSpell();
     onboardingBox.hidden = false;
@@ -779,6 +794,10 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     const params = { direction };
     if (direction === "decrypt") params.acknowledgePlaintext = true;
     void run("vault_convert_start", params);
+  });
+  reissuePick.addEventListener("click", () => {
+    if (busy || !reissueOffered(status?.mode)) return;
+    void run("vault_convert_start", { direction: "reissue" });
   });
   convertActivate.addEventListener("click", () => {
     if (converted?.vaultToken) void run("vault_convert_activate", { expectedVaultToken: converted.vaultToken });

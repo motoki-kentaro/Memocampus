@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { OTHER_SPELL, TEST_SPELL, loadSidePanel, pages, settle, tokenOf } from "./fake-dom.js";
-import { CONVERT_SPELL_NOTE, SPELL_CAUTION, SPELL_LEAD, convertDirection, describeConversionPending, describeConverted } from "../../extension/vault-client.js";
+import { CONVERT_SPELL_NOTE, REISSUE_SPELL_NOTE, SPELL_CAUTION, SPELL_LEAD, SPELL_NOTE, convertDirection, convertMakesSpell, describeConversionPending, describeConverted, reissueOffered } from "../../extension/vault-client.js";
 
 const sent = (host, type) => host.requests.filter((message) => message.type === type);
 const NEW_SPELL = OTHER_SPELL;
@@ -219,4 +219,68 @@ test("an older host (no conversions) offers none; texts and directions", async (
   assert.match(text, /新しい暗号化Vault/);
   assert.match(text, /閲覧 1件・スナップショット 2件・画像 3件/);
   assert.match(describeConversionPending({ phase: "converting", path: "P" }), /中断された変換/);
+});
+
+// Issue #51 Slice E: re-issuing the Recovery Spell of an encrypted vault makes a new vault under a
+// new spell; the old spell is not revoked, and the panel says so.
+test("re-issuing the spell: offered for an encrypted vault only, a new spell shown once and confirmed in full, the old spell not revoked", async () => {
+  const writes = installClipboard();
+  const plain = await loadSidePanel({ vaults: { A: pages("A", 1) }, active: "A", encryption: true, restore: true, convert: true });
+  await settle(30);
+  await openSettings(plain.$);
+  assert.equal(plain.$("#vault-reissue").hidden, true, "a plain vault has no spell to re-issue");
+  const { $, host } = await loadSidePanel({ vaults: { E: pages("E", 2) }, active: "E", encryption: true, restore: true, convert: true });
+  host.encrypted.add("E");
+  await settle(30);
+  await openSettings($);
+  assert.equal($("#vault-reissue").hidden, false);
+  assert.equal($("#vault-reissue-title").textContent, "ふっかつのじゅもんを再発行する");
+  assert.match($("#vault-reissue-note").textContent, /古い呪文は失効しません/);
+  assert.match($("#vault-reissue-note").textContent, /元のVaultは削除されません/);
+  assert.equal($("#vault-reissue-pick").disabled, false);
+
+  $("#vault-reissue-pick").dispatch("click");
+  await settle(30);
+  const [start] = sent(host, "vault_convert_start");
+  assert.deepEqual({ direction: start.direction, token: start.expectedVaultToken, ack: start.acknowledgePlaintext }, { direction: "reissue", token: tokenOf("E"), ack: undefined });
+  assert.equal(host.active, "E", "nothing switches");
+  assert.equal($("#vault-spell").textContent, NEW_SPELL);
+  assert.ok($("#vault-onboarding-path").textContent.includes(CONVERT_SPELL_NOTE));
+  assert.ok($("#vault-onboarding-path").textContent.includes(REISSUE_SPELL_NOTE));
+  assert.equal($("#vault-reissue-pick").disabled, true, "one at a time");
+  assert.equal($("#vault-convert-pick").disabled, true);
+  $("#vault-spell-copy").dispatch("click");
+  await settle(10);
+  assert.deepEqual(writes, [NEW_SPELL]);
+  $("#vault-spell-written").dispatch("click");
+  await settle(10);
+  $("#vault-spell-confirm-input").value = NEW_SPELL;
+  $("#vault-spell-confirm").dispatch("click");
+  await settle(40);
+  assert.deepEqual(sent(host, "vault_convert_confirm").map(({ recoverySpell }) => recoverySpell), [NEW_SPELL]);
+  assert.deepEqual(spellLeftovers($), []);
+  assert.match($("#vault-converted-title").textContent, /再発行しました（まだ使用していません）/);
+  assert.match($("#vault-converted-title").textContent, /古い呪文では開けません/);
+  assert.ok($("#vault-converted-title").textContent.includes(REISSUE_SPELL_NOTE));
+  $("#vault-convert-activate").dispatch("click");
+  await settle(40);
+  assert.equal(host.active, TARGET);
+  assert.equal($("#vault-publication-state").textContent, "MCPへの公開: 未承認");
+  assert.equal($("#vault-reissue").hidden, false, "the new vault is encrypted too");
+});
+
+test("Slice E texts: the spell and the vault file are all a recovery needs; earlier schemes are named, never taken for a wrong spell", async () => {
+  assert.ok(!SPELL_NOTE.includes(".mckey"));
+  assert.match(SPELL_NOTE, /暗号化Vaultのファイル1個（またはそのバックアップ）があれば/);
+  assert.match(SPELL_NOTE, /ふっかつのじゅもんを再発行する/);
+  assert.equal(convertMakesSpell("encrypt"), true);
+  assert.equal(convertMakesSpell("reissue"), true);
+  assert.equal(convertMakesSpell("decrypt"), false);
+  assert.equal(reissueOffered("encrypted"), true);
+  assert.equal(reissueOffered("plain"), false);
+  assert.match(describeConversionPending({ direction: "reissue", phase: "verified", path: "C:/x" }), /呪文は再表示できない/);
+  assert.match(describeConversionPending({ direction: "reissue", phase: "converted", path: "C:/x" }), /新しいふっかつのじゅもんのVault/);
+  const { describeErrorCode } = await import("../../extension/search-client.js");
+  assert.match(describeErrorCode("vault_legacy_unsupported"), /以前の鍵管理方式/);
+  assert.match(describeErrorCode("backup_legacy_unsupported"), /以前の鍵管理方式/);
 });

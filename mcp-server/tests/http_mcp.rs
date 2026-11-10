@@ -1511,12 +1511,13 @@ fn encrypt(
     memocampus_native_host::secure_vault::secret::VaultId,
     memocampus_native_host::secure_vault::secret::VaultKey,
 ) {
-    use memocampus_native_host::secure_vault::secret::{VaultId, VaultKey};
+    use memocampus_native_host::secure_vault::secret::VaultKey;
     use memocampus_native_host::secure_vault::{cipher, key_store};
     fs::remove_file(&env.vault).unwrap();
     let key = VaultKey::generate().unwrap();
-    let salt = cipher::create(&env.vault, &key).unwrap();
-    let id = VaultId::generate().unwrap();
+    let salt = memocampus_native_host::secure_vault::secret::CipherSalt::generate().unwrap();
+    cipher::create(&env.vault, &key, &salt).unwrap();
+    let id = memocampus_native_host::secure_vault::recovery::vault_id(&salt);
     key_store::store(&env.app, &id, &salt, &key, key_store::Write::New).unwrap();
     Env::seed_into(
         &cipher::open(

@@ -5,17 +5,17 @@
 //!   material has no `Debug`/`Display`/`Serialize` output and is zeroed when dropped.
 //! - `spell`: the Recovery Spell (ふっかつのじゅもん): 256 CSPRNG bits written as 43 base64url
 //!   characters, parsed strictly (length, alphabet, canonical form).
-//! - `recovery`: the spell envelope (HKDF-SHA256 + XChaCha20-Poly1305), with a spell check value
-//!   that tells a wrong spell from damaged metadata.
+//! - `recovery` (Slice E): VK = HKDF-SHA256(spell, the vault file's public salt), and the vault id
+//!   from that salt. The vault file and the spell are all a recovery needs.
 //! - `protector`: Windows DPAPI, user scope. Isolated: other platforms report `Unsupported`.
 //! - `key_store`: `<app dir>\keys\<vaultId>.json`, the DPAPI-protected VK of each vault this
-//!   Windows user can open without the spell.
-//! - `sidecar`: `<vault>.mckey`, the spell envelope that travels with the vault file.
+//!   Windows user can open without the spell: a cache for daily use, never needed to recover.
+//! - `sidecar`: recognises the `<vault>.mckey` of earlier slices (unsupported); never written.
 //! - `cipher`: keyed SQLCipher connections. The key is handed to SQLCipher through its C API, never
 //!   through SQL text.
 //! - `container` (Slice C): the portable backup formats B, C and D (format A is plain SQLite).
-//! - `convert` (Slice D): copying a vault between a plain and an encrypted database (the source
-//!   attached read-only, one transaction, compared row by row).
+//! - `convert` (Slice D, E): copying a vault into a new plain or encrypted database (the source
+//!   read-only, one transaction, compared row by row); also re-encryption under a new spell.
 //!
 //! Nothing here logs, and no error value carries key material, a spell or a path.
 
@@ -46,4 +46,7 @@ pub enum KeyError {
     Locked,
     /// The key store could not be read now (sharing, permissions, I/O).
     Io,
+    /// The vault (or its key store entry) is of an earlier scheme whose key is not derived from the
+    /// Recovery Spell (Slices B–D, `.mckey`). Unsupported since Slice E; nothing is changed.
+    Legacy,
 }

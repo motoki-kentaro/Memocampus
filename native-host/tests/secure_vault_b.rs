@@ -1,12 +1,13 @@
-//! Issue #51, Slice B, through the real host binary: creating an encrypted vault with a Recovery
-//! Spell (begin → full re-entry → commit, or cancel), writing to it, opening it, and recovering it
-//! with the spell where this Windows user has no key. Temporary app directories and vaults only; the
-//! key store is the temporary app directory's, protected with this user's DPAPI.
+//! Issue #51, Slice B (Slice E key derivation), through the real host binary: creating an encrypted
+//! vault with a Recovery Spell (begin → full re-entry → commit, or cancel), writing to it, opening
+//! it, and recovering it with the spell where this Windows user has no key. Temporary app
+//! directories and vaults only; the key store is the temporary app directory's, protected with this
+//! user's DPAPI.
 
 use memocampus_native_host::active_vault::{self, PublicationState, VaultMode};
 use memocampus_native_host::secure_vault::secret::RecoverySpell;
 use memocampus_native_host::secure_vault::secret::{CipherSalt, VaultId, VaultKey};
-use memocampus_native_host::secure_vault::{cipher, key_store, sidecar, spell};
+use memocampus_native_host::secure_vault::{cipher, key_store, recovery, sidecar, spell};
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
@@ -131,16 +132,31 @@ fn one_character_off(text: &str, position: usize) -> String {
     chars.into_iter().collect()
 }
 
-/// Rewrites the sidecar of `vault` as Slice B/C wrote it: version 1, a 12-word phrase envelope.
-fn make_legacy_sidecar(vault: &Path) {
-    make_legacy(&sidecar::path_for(vault));
+/// Writes a recovery sidecar next to `vault` as Slices B–D did (`version` 1: 12-word phrase, 2:
+/// spell envelope), naming `salt`.
+fn write_earlier_sidecar(vault: &Path, version: u32, salt: &CipherSalt) {
+    let scheme = match version {
+        1 => "bip39-128/hkdf-sha256/xchacha20poly1305/v1",
+        _ => "recovery-spell-256/hkdf-sha256/xchacha20poly1305/v2",
+    };
+    let value = json!({
+        "version": version, "format": "memocampus-vault-recovery",
+        "vaultId": VaultId::generate().unwrap().to_hex(), "cipherSalt": salt.to_hex(),
+        "recovery": { "scheme": scheme, "salt": "11".repeat(32), "nonce": "22".repeat(24),
+                      "wrapped": "33".repeat(48), "check": "44".repeat(32) },
+    });
+    std::fs::write(
+        sidecar::path_for(vault),
+        serde_json::to_vec_pretty(&value).unwrap(),
+    )
+    .unwrap();
 }
 
-fn make_legacy(path: &Path) {
-    let mut value: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-    value["version"] = 1.into();
-    value["recovery"]["scheme"] = "bip39-128/hkdf-sha256/xchacha20poly1305/v1".into();
-    std::fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+fn salt_of(path: &Path) -> CipherSalt {
+    match cipher::read_head(path).unwrap() {
+        cipher::Head::Salt(salt) => salt,
+        other => panic!("{other:?}"),
+    }
 }
 
 fn config(app: &Path) -> Option<active_vault::Config> {
@@ -232,7 +248,10 @@ fn an_encrypted_vault_is_created_only_after_its_whole_spell_is_entered_again() {
     assert!(config(&app).is_none());
     assert!(!target.exists());
     assert!(PathBuf::from(format!("{}.pending", target.display())).exists());
-    assert!(sidecar::pending_path_for(&target).exists());
+    assert!(
+        !sidecar::pending_path_for(&target).exists(),
+        "no sidecar (Slice E)"
+    );
     let now = status(&app);
     assert_eq!(now["state"], "not_configured");
     // The host reports the canonical path, which may be spelled differently from `target` (the
@@ -314,8 +333,10 @@ fn an_encrypted_vault_is_created_only_after_its_whole_spell_is_entered_again() {
     assert_eq!(active.mode, VaultMode::Encrypted);
     assert!(same_file(Path::new(&active.active_vault), &target));
     assert_eq!(active.publication.unwrap().state, PublicationState::Pending);
-    assert!(target.exists() && sidecar::path_for(&target).exists());
+    assert!(target.exists() && !sidecar::path_for(&target).exists());
     assert!(!PathBuf::from(format!("{}.pending", target.display())).exists());
+    // The vault id is the one the file's salt names.
+    assert_eq!(active.vault_id, Some(recovery::vault_id(&salt_of(&target))));
     assert!(!app.join("vault-create.json").exists());
 
     // Writes and reads go to the encrypted vault; nothing readable is at rest.
@@ -411,15 +432,10 @@ fn a_commit_interrupted_after_promotion_completes_on_retry_with_the_same_key() {
     let manifest: Value =
         serde_json::from_slice(&std::fs::read(app.join("vault-create.json")).unwrap()).unwrap();
     let id = VaultId::parse_hex(manifest["vaultId"].as_str().unwrap()).unwrap();
-    // A crash after the key entry and the sidecar were promoted, before the vault file was.
+    // A crash after the key entry was promoted, before the vault file was.
     std::fs::rename(
         key_store::pending_path(&app, &id),
         key_store::entry_path(&app, &id),
-    )
-    .unwrap();
-    std::fs::rename(
-        sidecar::pending_path_for(&target),
-        sidecar::path_for(&target),
     )
     .unwrap();
     // The manifest still says awaiting_confirmation: the retry copes with half-done steps.
@@ -443,7 +459,6 @@ fn another_windows_user_recovers_with_the_spell_and_only_with_it() {
         true
     );
     let vault_bytes = std::fs::read(&target).unwrap();
-    let sidecar_bytes = std::fs::read(sidecar::path_for(&target)).unwrap();
 
     // A fresh profile: no key store entry, no config.
     let other = tmp.other_app();
@@ -492,7 +507,7 @@ fn another_windows_user_recovers_with_the_spell_and_only_with_it() {
         recover(&chars.into_iter().collect::<String>())["reason"],
         "non_canonical"
     );
-    // Single-character changes that stay canonical reach the envelope and are refused there.
+    // Single-character changes that stay canonical derive another key, refused by the vault.
     for position in [0, 10, 20, 30, 41] {
         assert_eq!(
             recover(&one_character_off(&shown, position))["error"],
@@ -510,10 +525,6 @@ fn another_windows_user_recovers_with_the_spell_and_only_with_it() {
         !other.join("keys").exists() || std::fs::read_dir(other.join("keys")).unwrap().count() == 0
     );
     assert_eq!(std::fs::read(&target).unwrap(), vault_bytes);
-    assert_eq!(
-        std::fs::read(sidecar::path_for(&target)).unwrap(),
-        sidecar_bytes
-    );
 
     // The host takes the spell as is: surrounding spaces are the panel's to trim.
     assert_eq!(
@@ -544,7 +555,7 @@ fn another_windows_user_recovers_with_the_spell_and_only_with_it() {
 }
 
 #[test]
-fn recovery_metadata_that_is_missing_swapped_or_altered_fails_closed() {
+fn recovery_needs_the_vault_file_and_its_spell_only_and_refuses_anything_altered() {
     let tmp = TempDir::new();
     let app = tmp.app();
     init_policy(&app);
@@ -552,6 +563,7 @@ fn recovery_metadata_that_is_missing_swapped_or_altered_fails_closed() {
     let b = tmp.0.join("b.sqlite3");
     let spell_a = create(&app, &a);
     let spell_b = create(&app, &b);
+    assert_eq!(one(&app, visit("v1", "https://public.test/b"))["ok"], true);
     let other = tmp.other_app();
     let recover = |path: &Path, spell: &str| {
         one(
@@ -559,38 +571,40 @@ fn recovery_metadata_that_is_missing_swapped_or_altered_fails_closed() {
             json!({ "type": "vault_recover", "path": path, "recoverySpell": spell }),
         )
     };
-    // B's spell does not open A.
+    // Another vault's spell, or the right spell for another file: refused.
     assert_eq!(recover(&a, &spell_b)["error"], "recovery_spell_rejected");
-    let sidecar_a = sidecar::path_for(&a);
-    let saved = std::fs::read(&sidecar_a).unwrap();
-    // Missing.
-    std::fs::remove_file(&sidecar_a).unwrap();
-    assert_eq!(recover(&a, &spell_a)["error"], "recovery_metadata_missing");
-    // B's sidecar beside A: another salt.
-    std::fs::copy(sidecar::path_for(&b), &sidecar_a).unwrap();
-    assert_eq!(recover(&a, &spell_a)["error"], "recovery_metadata_mismatch");
-    // Altered wrapped key: the right spell, damaged metadata.
-    let mut value: Value = serde_json::from_slice(&saved).unwrap();
-    let wrapped = value["recovery"]["wrapped"].as_str().unwrap().to_owned();
-    let flipped = format!(
-        "{}{}",
-        if wrapped.starts_with('0') { "1" } else { "0" },
-        &wrapped[1..]
+    assert_eq!(recover(&b, &spell_a)["error"], "recovery_spell_rejected");
+    let saved = std::fs::read(&b).unwrap();
+    let altered = tmp.0.join("altered.sqlite3");
+    // The salt (the public input of the key) altered: another key, refused, never misread.
+    let mut bytes = saved.clone();
+    bytes[5] ^= 0x40;
+    std::fs::write(&altered, &bytes).unwrap();
+    assert_eq!(
+        recover(&altered, &spell_b)["error"],
+        "recovery_spell_rejected"
     );
-    value["recovery"]["wrapped"] = flipped.into();
-    std::fs::write(&sidecar_a, value.to_string()).unwrap();
-    assert_eq!(recover(&a, &spell_a)["error"], "recovery_metadata_damaged");
-    // Truncated.
-    std::fs::write(&sidecar_a, &saved[..saved.len() / 2]).unwrap();
-    assert_eq!(recover(&a, &spell_a)["error"], "recovery_metadata_damaged");
-    // A vault id swapped inside the sidecar: the envelope is bound to it.
-    let mut value: Value = serde_json::from_slice(&saved).unwrap();
-    value["vaultId"] = VaultId::generate().unwrap().to_hex().into();
-    std::fs::write(&sidecar_a, value.to_string()).unwrap();
-    assert_eq!(recover(&a, &spell_a)["error"], "recovery_spell_rejected");
+    // A page altered: SQLCipher's page authentication refuses it before anything is stored.
+    for position in [4096 + 200, saved.len() - 300] {
+        let mut bytes = saved.clone();
+        bytes[position] ^= 0x01;
+        std::fs::write(&altered, &bytes).unwrap();
+        let refused = recover(&altered, &spell_b);
+        assert_eq!(refused["ok"], false, "{position}: {refused}");
+    }
+    // Truncated to a partial page: not a vault at all.
+    std::fs::write(&altered, &saved[..saved.len() - 100]).unwrap();
+    assert_eq!(recover(&altered, &spell_b)["error"], "vault_invalid");
+    // Nothing was written by any refusal.
     assert!(config(&other).is_none());
-    std::fs::write(&sidecar_a, &saved).unwrap();
-    assert_eq!(recover(&a, &spell_a)["ok"], true);
+    assert!(
+        !other.join("keys").exists() || std::fs::read_dir(other.join("keys")).unwrap().count() == 0
+    );
+    // A stray sidecar of another salt beside the vault plays no part.
+    write_earlier_sidecar(&b, 2, &CipherSalt::from_array([7; 16]));
+    let recovered = recover(&b, &spell_b);
+    assert_eq!(recovered["ok"], true, "{recovered}");
+    assert_eq!(recovered["status"]["publication"], "pending");
     // A plain vault is not recovered.
     let plain = tmp.0.join("plain.sqlite3");
     assert_eq!(
@@ -599,7 +613,6 @@ fn recovery_metadata_that_is_missing_swapped_or_altered_fails_closed() {
     );
     assert_eq!(recover(&plain, &spell_a)["error"], "vault_not_encrypted");
 }
-
 #[test]
 fn a_wrong_spell_never_replaces_a_key_entry_and_a_right_one_repairs_a_damaged_entry() {
     let tmp = TempDir::new();
@@ -765,75 +778,88 @@ fn shown_status_contains(app: &Path, secret: &str) -> bool {
 }
 
 #[test]
-fn a_vault_with_a_12_word_sidecar_still_opens_here_but_is_never_read_as_a_spell() {
+fn a_vault_of_an_earlier_scheme_is_refused_as_unsupported_and_left_as_it_is() {
     let tmp = TempDir::new();
     let app = tmp.app();
     init_policy(&app);
-    let target = tmp.0.join("enc.sqlite3");
-    let shown = create(&app, &target);
-    assert_eq!(
-        one(&app, visit("v1", "https://public.test/old"))["ok"],
-        true
-    );
-    make_legacy_sidecar(&target);
-    let legacy = std::fs::read(sidecar::path_for(&target)).unwrap();
-    let vault_bytes = std::fs::read(&target).unwrap();
-    let token = status(&app)["vaultToken"].clone();
-    // This Windows user's DPAPI key still opens it; nothing was re-wrapped or deleted.
-    let now = status(&app);
-    assert_eq!(now["state"], "ready", "{now}");
-    assert_eq!(now["recoveryAvailable"], json!(null));
-    assert_eq!(
-        one(&app, visit("v2", "https://public.test/new"))["ok"],
-        true
-    );
-    // A backup B or D needs a spell that opens the sidecar: unsupported, nothing written.
-    let dir = tmp.0.join("backups");
-    std::fs::create_dir_all(&dir).unwrap();
-    for protection in [json!("normal"), json!("password")] {
-        let refused = one(
+    // As Slices B–D made it: a random key (not derived from any spell), its own salt, a
+    // `.mckey` beside it and a version 1 key store entry under a random vault id.
+    let target = tmp.0.join("old.sqlite3");
+    let key = VaultKey::generate().unwrap();
+    let salt = CipherSalt::generate().unwrap();
+    cipher::create(&target, &key, &salt).unwrap();
+    let old_id = VaultId::generate().unwrap();
+    for version in [1, 2] {
+        write_earlier_sidecar(&target, version, &salt);
+        let sidecar_bytes = std::fs::read(sidecar::path_for(&target)).unwrap();
+        let vault_bytes = std::fs::read(&target).unwrap();
+        let opened = one(&app, json!({ "type": "vault_open", "path": target }));
+        assert_eq!(opened["error"], "vault_legacy_unsupported", "{opened}");
+        assert_eq!(opened["recoveryAvailable"], false);
+        let recovered = one(
             &app,
-            json!({ "type": "vault_backup", "directory": dir, "expectedVaultToken": token,
-                    "protection": protection, "password": "correct horse battery",
-                    "recoverySpell": shown }),
+            json!({ "type": "vault_recover", "path": target, "recoverySpell": another_spell() }),
         );
         assert_eq!(
-            refused["error"], "recovery_metadata_unsupported",
-            "{refused}"
+            recovered["error"], "vault_legacy_unsupported",
+            "{recovered}"
+        );
+        assert!(config(&app).is_none());
+        // Nothing is changed, migrated or deleted.
+        assert_eq!(std::fs::read(&target).unwrap(), vault_bytes);
+        assert_eq!(
+            std::fs::read(sidecar::path_for(&target)).unwrap(),
+            sidecar_bytes
         );
     }
-    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
-    // Recovery: refused as unsupported, never as a wrong spell or damage.
-    let recovered = one(
-        &app,
-        json!({ "type": "vault_recover", "path": target, "recoverySpell": shown }),
-    );
-    assert_eq!(recovered["error"], "recovery_metadata_unsupported");
-    // Another Windows user cannot open or recover it, and is told why.
-    let other = tmp.other_app();
-    init_policy(&other);
-    let opened = one(&other, json!({ "type": "vault_open", "path": target }));
-    assert_eq!(opened["error"], "recovery_metadata_unsupported", "{opened}");
-    assert_eq!(opened["recoveryAvailable"], false);
-    let recovered = one(
-        &other,
-        json!({ "type": "vault_recover", "path": target, "recoverySpell": shown }),
-    );
-    assert_eq!(recovered["error"], "recovery_metadata_unsupported");
-    assert!(config(&other).is_none());
-    assert_eq!(std::fs::read(sidecar::path_for(&target)).unwrap(), legacy);
-    let _ = vault_bytes;
+    // Without its sidecar, a version 1 key store entry naming its salt identifies it as well.
+    std::fs::remove_file(sidecar::path_for(&target)).unwrap();
+    let keys = app.join("keys");
+    std::fs::create_dir_all(&keys).unwrap();
+    let entry = keys.join(format!("{}.json", old_id.to_hex()));
+    std::fs::write(
+        &entry,
+        json!({ "version": 1, "vaultId": old_id.to_hex(), "cipherSalt": salt.to_hex(),
+                "protector": "dpapi-user", "protected": "AAAA", "kcv": "00".repeat(32) })
+        .to_string(),
+    )
+    .unwrap();
+    let entry_bytes = std::fs::read(&entry).unwrap();
+    let opened = one(&app, json!({ "type": "vault_open", "path": target }));
+    assert_eq!(opened["error"], "vault_legacy_unsupported", "{opened}");
+    // An earlier config naming it: the status says so, and nothing is offered for it.
+    std::fs::write(
+        app.join("config.json"),
+        serde_json::to_vec(&active_vault::Config::encrypted(
+            target.to_string_lossy().into_owned(),
+            false,
+            old_id,
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let now = status(&app);
+    assert_eq!(now["state"], "vault_legacy_unsupported", "{now}");
+    assert_eq!(now["recoveryAvailable"], false);
+    assert_eq!(now["publication"], "pending");
+    let refused = one(&app, visit("v1", "https://public.test/x"));
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(std::fs::read(&entry).unwrap(), entry_bytes, "never removed");
+    // A spell of this scheme is never taken for its key.
+    let _ = key;
 }
-
 #[test]
-fn a_creation_begun_before_the_spell_cannot_complete_and_is_discarded_completely() {
+fn a_creation_begun_by_an_earlier_scheme_cannot_complete_and_is_discarded() {
     let tmp = TempDir::new();
     let app = tmp.app();
     init_policy(&app);
     let target = tmp.0.join("enc.sqlite3");
     let shown = begin(&app, &target);
-    // As Slice C left it: the pending sidecar holds a 12-word envelope.
-    make_legacy(&sidecar::pending_path_for(&target));
+    // As an earlier build recorded it (manifest version 1, with a sidecar): unreadable here.
+    let path = app.join("vault-create.json");
+    let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    manifest["version"] = 1.into();
+    std::fs::write(&path, manifest.to_string()).unwrap();
     let refused = commit(&app, &shown);
     assert_eq!(refused["error"], "vault_creation_damaged", "{refused}");
     assert!(config(&app).is_none() && !target.exists());
@@ -841,12 +867,9 @@ fn a_creation_begun_before_the_spell_cannot_complete_and_is_discarded_completely
         one(&app, json!({ "type": "vault_create_encrypted_cancel" }))["ok"],
         true
     );
-    let left: Vec<String> = files(&tmp.0)
-        .into_iter()
-        .map(|(path, _)| path.file_name().unwrap().to_string_lossy().into_owned())
-        .filter(|name| name.starts_with("enc.") || name.ends_with(".pending"))
-        .collect();
-    assert!(left.is_empty(), "{left:?}");
-    // The same place can be used again.
-    create(&app, &target);
+    assert!(!path.exists());
+    // Its files cannot be proven to be that creation's: they stay, under pending names that can
+    // never become a vault, and the next creation picks another place.
+    assert!(pending(&target).exists() && !target.exists());
+    create(&app, &tmp.0.join("enc2.sqlite3"));
 }

@@ -20,28 +20,33 @@
 //!
 //! | Phase | On disk | Retry / clean-up |
 //! |---|---|---|
-//! | `restoring` | `<target>.partial` (being written; C: plaintext, as the restored plain vault itself) | discard, then restore again |
-//! | `verified` | `<target>.partial` verified; encrypted: `keys\<newId>.json.pending`, `<target>.mckey.pending` | activate (finishes the promotion) or discard |
-//! | `restored` | `<target>` (+ `<target>.mckey`, `keys\<newId>.json`) | activate or discard |
+//! | `restoring` | `<target>.partial` (being written; C: plaintext, as the restored plain vault itself); B, D: `<target>.payload.partial` (the backup's SQLCipher payload) first | discard, then restore again |
+//! | `verified` | `<target>.partial` verified; encrypted: `keys\<newId>.json.pending` | activate (finishes the promotion) or discard |
+//! | `restored` | `<target>` (+ `keys\<newId>.json`) | activate or discard |
 //! | none | — (activated: the config names it, publication pending) | — |
 //!
 //! - Every file is created new (`create_new`) and promoted with `rename_no_replace`: an existing file
 //!   is never replaced.
 //! - Discarding removes only files proven to be this restore's: the `.partial` it reserved, a target
-//!   whose file identity (`vault_token`, recorded before the rename) matches, and sidecar and key
-//!   store entries naming its new vault id. Never the active vault.
+//!   whose file identity (`vault_token`, recorded before the rename) matches, the payload work file
+//!   it reserved, and key store entries naming its new vault id and salt. Never the active vault.
 //! - While a manifest exists no other restore starts (`vault_restore_pending`).
 //!
-//! # Encrypted vaults
+//! # Encrypted vaults (Slice E)
 //!
-//! The vault key comes from the backup's recovery envelope and the Recovery Spell only; no key
-//! store or DPAPI data of the original PC is used or copied. The restored vault gets a **new vault
-//! id** (so a restore next to the original, or a second restore of the same backup, never collides
-//! with an existing key store entry), its key is protected with this Windows user's DPAPI, and a new
-//! sidecar (version 2) wraps the same key under the same spell for the new id and the file's salt:
-//! the spell that restored the vault is the one that recovers it. A Slice C backup B or D (12-word
-//! phrase, container version 1) is refused as `backup_legacy_recovery_phrase` before any secret is
-//! asked for.
+//! The backup's vault key comes from the Recovery Spell and the payload's salt only
+//! (`recovery::vault_key`); no key store, DPAPI data or sidecar of the original PC is used or
+//! copied. The restored vault gets a **new vault id**, so a restore next to the original, or a
+//! second restore of the same backup, never collides with an existing key store entry. Since the
+//! vault id is the salt's (`recovery::vault_id`), a new id means a new salt, and so a new key:
+//! `VK' = HKDF(spell, salt')`. The payload is therefore first streamed into the work file
+//! `<target>.payload.partial` (still ciphertext under the backup's key), verified, and then
+//! exported (`convert::export`, re-keying: compared row by row) into `<target>.partial` under
+//! `VK'` and `salt'`; the payload work file is removed. **The same spell** derives `VK'` from the
+//! restored file's salt: the spell that restored the vault is the one that recovers it, and the
+//! restored file alone is all that recovery needs. Its key is protected with this Windows user's
+//! DPAPI (a cache). A backup B or D of an earlier slice (container version 1 or 2) is refused as
+//! `backup_legacy_unsupported` before any secret is asked for.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -61,14 +66,20 @@ use crate::vault::{self, Active, ConfigLock, KeyStore, NewActive, Session, Vault
 use memocampus_native_host::active_vault::VaultMode;
 use memocampus_native_host::schema::{self, SchemaError};
 use memocampus_native_host::secure_vault::container::{self, FormatError, Kind, PasswordReader};
+use memocampus_native_host::secure_vault::convert::{self as copy, CopyError, Ends, Keyed};
+use memocampus_native_host::secure_vault::recovery::{self, NewVault};
 use memocampus_native_host::secure_vault::secret::{CipherSalt, RecoverySpell, VaultId, VaultKey};
-use memocampus_native_host::secure_vault::{cipher, fsutil, key_store, recovery, sidecar};
+use memocampus_native_host::secure_vault::{cipher, fsutil, key_store};
 use rusqlite::{Connection, OpenFlags};
 use zeroize::Zeroizing;
 
 pub const MANIFEST: &str = "vault-restore.json";
-const MANIFEST_VERSION: u32 = 1;
+/// Version 2 (Slice E): re-keyed under a new salt, no sidecar. A version 1 manifest is unreadable
+/// here and can only be discarded (only the manifest goes).
+const MANIFEST_VERSION: u32 = 2;
 const PARTIAL: &str = ".partial";
+/// B and D: the backup's payload, before it is re-encrypted into `<target>.partial`.
+const PAYLOAD: &str = ".payload.partial";
 const DEFAULT_TARGET_NAME: &str = "memocampus-restored.sqlite3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,10 +156,11 @@ fn read_manifest(session: &Session) -> Result<Option<Manifest>, Failure> {
 fn ids_consistent(manifest: &Manifest) -> bool {
     match manifest.mode {
         VaultMode::Plain => manifest.vault_id.is_none() && manifest.cipher_salt.is_none(),
-        VaultMode::Encrypted => {
-            manifest.phase == Phase::Restoring
-                || (manifest.vault_id.is_some() && manifest.cipher_salt.is_some())
-        }
+        VaultMode::Encrypted => match (manifest.vault_id, manifest.cipher_salt) {
+            (Some(id), Some(salt)) => id == recovery::vault_id(&salt),
+            (None, None) => manifest.phase == Phase::Restoring,
+            _ => false,
+        },
     }
 }
 
@@ -168,6 +180,10 @@ fn write_manifest(session: &Session, manifest: &Manifest, new: bool) -> Result<(
 
 fn partial_of(target: &Path) -> PathBuf {
     fsutil::with_suffix(target, PARTIAL)
+}
+
+fn payload_of(target: &Path) -> PathBuf {
+    fsutil::with_suffix(target, PAYLOAD)
 }
 
 /// For the status: the restore the manifest records (not yet activated), or null. An unreadable
@@ -196,12 +212,11 @@ fn format_failure(error: FormatError) -> Failure {
     let code = match error {
         FormatError::UnsupportedFormat => "backup_unsupported_format",
         FormatError::UnsupportedVersion => "backup_unsupported_version",
-        FormatError::LegacyRecoveryPhrase => "backup_legacy_recovery_phrase",
+        FormatError::Legacy => "backup_legacy_unsupported",
         FormatError::Malformed => "backup_malformed",
         FormatError::Incomplete => "backup_incomplete",
         FormatError::SchemaMismatch => "backup_schema_mismatch",
         FormatError::SpellRejected => "recovery_spell_rejected",
-        FormatError::RecoveryDamaged => "backup_damaged",
         FormatError::PasswordRejected => "backup_password_rejected",
         FormatError::Tampered => "backup_tampered",
         FormatError::Io => "io_error",
@@ -289,9 +304,7 @@ fn examine(path: &Path) -> Result<Examined, Failure> {
         container::Detected::UnsupportedVersion => {
             Err(format_failure(FormatError::UnsupportedVersion))
         }
-        container::Detected::LegacyRecoveryPhrase => {
-            Err(format_failure(FormatError::LegacyRecoveryPhrase))
-        }
+        container::Detected::Legacy => Err(format_failure(FormatError::Legacy)),
         container::Detected::Unknown => Err(format_failure(FormatError::UnsupportedFormat)),
     }
 }
@@ -406,15 +419,11 @@ pub fn restore(
             .ok_or(VaultError::Cancelled)?,
     };
     let target = normalize_new(&target)?;
-    let mut reserved = vec![
-        target.clone(),
-        partial_of(&target),
-        sidecar::path_for(&target),
-        sidecar::pending_path_for(&target),
-    ];
+    let mut reserved = vec![target.clone(), partial_of(&target), payload_of(&target)];
     for suffix in ["-journal", "-wal", "-shm"] {
         reserved.push(fsutil::with_suffix(&target, suffix));
         reserved.push(fsutil::with_suffix(&partial_of(&target), suffix));
+        reserved.push(fsutil::with_suffix(&payload_of(&target), suffix));
     }
     if let Some(taken) = reserved.iter().find(|path| path.exists()) {
         return Err(Failure::with(
@@ -485,10 +494,15 @@ fn run(
 ) -> Result<Summary, Failure> {
     let target = manifest.target();
     let partial = partial_of(&target);
+    // B and D: the payload goes to its own work file first (see the module documentation).
+    let streamed_into = match examined.kind {
+        Some(Kind::B | Kind::D) => payload_of(&target),
+        _ => partial.clone(),
+    };
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&partial)
+        .open(&streamed_into)
         .map_err(|error| output_failure(&error, "restore_failed"))?;
     let streamed = match examined.kind {
         None => {
@@ -503,8 +517,8 @@ fn run(
         Some(kind) => stream_container(backup, examined.len, kind, secrets, file)?,
     };
     checkpoint(Step::RestoreWrite).map_err(|e| output_failure(&e, "restore_failed"))?;
-    let counts = verify_restored(
-        &partial,
+    let mut counts = verify_restored(
+        &streamed_into,
         manifest.mode,
         streamed.key.as_ref(),
         streamed.salt,
@@ -515,22 +529,30 @@ fn run(
         else {
             return Err(Failure::with("restore_failed", json!({})));
         };
-        let vault_id =
-            VaultId::generate().map_err(|_| Failure::with("random_unavailable", json!({})))?;
-        manifest.vault_id = Some(vault_id);
-        manifest.cipher_salt = Some(salt);
+        // A new salt, so a new vault id; the same spell gives its key. Recorded before any file of
+        // the new vault exists.
+        let random = || Failure::with("random_unavailable", json!({}));
+        let made = NewVault::of(
+            secret_copy(secret),
+            recovery::fresh_salt(Some(&salt)).map_err(|_| random())?,
+        );
+        manifest.vault_id = Some(made.id);
+        manifest.cipher_salt = Some(made.salt);
         write_manifest(session, manifest, false)?;
+        checkpoint(Step::RestoreRekey).map_err(|_| Failure::with("restore_failed", json!({})))?;
+        rekey(&streamed_into, key, &partial, &made)?;
+        let _ = fs::remove_file(&streamed_into);
+        counts = verify_restored(&partial, manifest.mode, Some(&made.key), Some(made.salt))?;
         checkpoint(Step::RestoreKeys).map_err(|_| Failure::with("restore_failed", json!({})))?;
         let app = app_dir(session)?;
-        key_store::store(&app, &vault_id, &salt, key, key_store::Write::Pending)
-            .map_err(key_store_failure)?;
-        let envelope = recovery::wrap(key, secret, &vault_id, &salt)
-            .map_err(|_| Failure::with("random_unavailable", json!({})))?;
-        sidecar::write_new(
-            &sidecar::pending_path_for(&target),
-            &sidecar::Sidecar::new(vault_id, salt, envelope),
+        key_store::store(
+            &app,
+            &made.id,
+            &made.salt,
+            &made.key,
+            key_store::Write::Pending,
         )
-        .map_err(|error| output_failure(&error, "restore_failed"))?;
+        .map_err(key_store_failure)?;
     }
     manifest.token = Some(vault::vault_token(&partial)?);
     manifest.phase = Phase::Verified;
@@ -542,6 +564,42 @@ fn run(
         Some(_) => bk::describe_policy_copy(streamed.policy.as_deref().map(Vec::as_slice)),
     };
     Ok(Summary { counts, policy })
+}
+
+/// The spell again, for the new vault's derivation (the request's copy is dropped with it).
+fn secret_copy(secret: &RecoverySpell) -> RecoverySpell {
+    let text = memocampus_native_host::secure_vault::spell::encode(secret);
+    memocampus_native_host::secure_vault::spell::parse(&text).expect("an encoded spell parses")
+}
+
+/// B and D: the verified payload (keyed with the backup's key) exported into the new `.partial`
+/// under the new key and salt, compared row by row, and verified on its own.
+fn rekey(payload: &Path, key: &VaultKey, partial: &Path, made: &NewVault) -> Result<(), Failure> {
+    let failed = |error: CopyError| match error {
+        CopyError::DiskFull => Failure::with("disk_full", json!({})),
+        CopyError::Mismatch | CopyError::Keying => Failure::with("backup_damaged", json!({})),
+        _ => Failure::with("restore_failed", json!({})),
+    };
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(partial)
+        .map(drop)
+        .map_err(|error| output_failure(&error, "restore_failed"))?;
+    let token = vault::vault_token(payload)?;
+    let target = Keyed {
+        key: &made.key,
+        salt: &made.salt,
+    };
+    copy::export(&Ends {
+        source: payload,
+        source_key: Some(key),
+        source_token: &token,
+        target: partial,
+        target_key: Some(target),
+    })
+    .map_err(failed)?;
+    copy::verify(partial, Some(target)).map_err(failed)
 }
 
 /// Format A: the Backup API from the backup file (read-only) into the new `.partial`.
@@ -703,14 +761,6 @@ fn promote(session: &Session, manifest: &mut Manifest) -> Result<(), Failure> {
         if let (Some(vault_id), Some(salt)) = (manifest.vault_id, manifest.cipher_salt) {
             let app = app_dir(session).map_err(|_| io::Error::other("app dir"))?;
             key_store::promote_pending(&app, &vault_id, &salt)?;
-            promote_file(
-                &sidecar::pending_path_for(&target),
-                &sidecar::path_for(&target),
-                |path| {
-                    sidecar::read(path)
-                        .is_ok_and(|found| found.vault_id == vault_id && found.cipher_salt == salt)
-                },
-            )?;
         }
         promote_file(&partial_of(&target), &target, |path| {
             vault::vault_token(path).ok().as_deref() == Some(token.as_str())
@@ -747,17 +797,16 @@ fn remove_restored(session: &Session, manifest: &Manifest) {
             let _ = fs::remove_file(fsutil::with_suffix(&db, "-journal"));
         }
     }
-    if let Some(vault_id) = manifest.vault_id {
-        for path in [
-            sidecar::pending_path_for(&target),
-            sidecar::path_for(&target),
-        ] {
-            if sidecar::read(&path).is_ok_and(|found| found.vault_id == vault_id) {
-                let _ = fs::remove_file(&path);
-            }
-        }
+    // B, D: the payload work file, created new under the name this restore reserved (a restore
+    // never starts while that name exists); never promoted, never a vault.
+    let payload = payload_of(&target);
+    if manifest.mode == VaultMode::Encrypted && !active(&payload) {
+        let _ = fs::remove_file(&payload);
+        let _ = fs::remove_file(fsutil::with_suffix(&payload, "-journal"));
+    }
+    if let (Some(vault_id), Some(salt)) = (manifest.vault_id, manifest.cipher_salt) {
         if let Some(app) = session.env.app_dir.as_deref() {
-            key_store::remove_created(app, &vault_id, manifest.cipher_salt.as_ref());
+            key_store::remove_created(app, &vault_id, Some(&salt));
         }
     }
     if let Ok(path) = manifest_path(session) {

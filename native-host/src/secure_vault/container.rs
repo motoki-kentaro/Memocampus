@@ -8,10 +8,11 @@
 //! | header_len u32 LE (1..=65536) | header (strict JSON, deny_unknown_fields, non-secret values only)
 //! ```
 //!
-//! Version 2 (Recovery Spell) is what this build writes. Version 1 was written by Slice C with the
-//! 12-word recovery phrase: a version 1 B or D is refused as `LegacyRecoveryPhrase` (never opened
-//! as a spell envelope); a version 1 C, whose layout and keys do not involve the phrase at all and
-//! are unchanged in version 2, is still read. Any other version is `UnsupportedVersion`.
+//! Version 3 (Slice E: the vault key derived from the Recovery Spell and the payload's salt) is what
+//! this build writes. Versions 1 (Slice C, 12-word phrase) and 2 (Slices C–D, spell envelope) carry
+//! a random vault key wrapped in an envelope: a version 1 or 2 B or D is refused as `Legacy` before
+//! any secret is asked for. A version 1 or 2 C, whose layout and keys involve no spell and are
+//! unchanged in version 3, is still read. Any other version is `UnsupportedVersion`.
 //!
 //! Every length is checked before anything is allocated or derived, and the file length must be
 //! exactly what the header announces: a truncated file and a file with bytes appended are refused
@@ -22,16 +23,19 @@
 //! ```text
 //! prefix | payload (payloadLen: a SQLCipher 4 database, ciphertext) | policy copy (sealed, optional)
 //!        | HMAC-SHA256(K_mac, prefix || payload || policy copy)
-//! K_mac    = HKDF-SHA256(VK, info = "memocampus/backup-b/v2/mac")
-//! K_policy = HKDF-SHA256(VK, info = "memocampus/backup-b/v2/policy"),
-//!            XChaCha20-Poly1305, AAD = "memocampus/backup-b/v2/policy\0" || vaultId
+//! VK       = recovery::vault_key(spell, cipherSalt)      (cipherSalt = the payload's first 16 bytes)
+//! kcv      = recovery::key_check_value(VK, vaultId, cipherSalt)
+//! K_mac    = HKDF-SHA256(VK, info = "memocampus/backup-b/v3/mac")
+//! K_policy = HKDF-SHA256(VK, info = "memocampus/backup-b/v3/policy"),
+//!            XChaCha20-Poly1305, AAD = "memocampus/backup-b/v3/policy\0" || vaultId
 //! ```
 //!
-//! The header carries the vault id, the payload's SQLCipher salt and the recovery envelope (the
-//! vault key wrapped under keys derived from the Recovery Spell, `recovery`, scheme
-//! `recovery::SCHEME`), bound to the salt `recoverySalt` it was made for. Restoring needs the spell
-//! only: no key store, no DPAPI. The spell opens the envelope; the MAC and policy keys come from the
-//! VK it yields, each through its own HKDF label, so the spell's bytes are never a key themselves.
+//! The header carries the key scheme, the vault id (`recovery::vault_id(cipherSalt)`, checked), the
+//! payload's salt and the key check value. Restoring needs the spell only: no key store, no DPAPI,
+//! no sidecar. The spell and the salt give VK; the check value tells a wrong spell
+//! (`SpellRejected`) from altered content (`Tampered`, the MAC). The MAC and policy keys come from
+//! VK, each through its own HKDF label, so the spell's bytes are never a key themselves. The
+//! payload must start with `cipherSalt`.
 //!
 //! # C and D — password-protected backups
 //!
@@ -52,7 +56,7 @@
 //! still costs one Argon2id run, exactly as trying to decrypt the first chunk would.
 
 use super::fsutil::{hex, unhex};
-use super::recovery::{self, Envelope, UnwrapError};
+use super::recovery;
 use super::secret::{random_bytes, CipherSalt, RandomError, RecoverySpell, VaultId, VaultKey};
 use chacha20poly1305::aead::stream::{DecryptorBE32, EncryptorBE32};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
@@ -65,9 +69,9 @@ use std::io::{self, Read, Write};
 use zeroize::{Zeroize, Zeroizing};
 
 pub const MAGIC: [u8; 8] = [0x89, b'M', b'C', b'V', b'B', 0x0D, 0x0A, 0x1A];
-pub const VERSION: u16 = 2;
-/// Slice C's containers (12-word recovery phrase). See the module documentation.
-pub const LEGACY_VERSION: u16 = 1;
+pub const VERSION: u16 = 3;
+/// Containers of earlier slices (a random vault key in an envelope). See the module documentation.
+pub const LEGACY_VERSIONS: [u16; 2] = [1, 2];
 pub const FIXED_LEN: usize = 16;
 pub const MAX_HEADER: u32 = 64 * 1024;
 pub const CHUNK: usize = 64 * 1024;
@@ -79,9 +83,9 @@ pub const MAX_POLICY_COPY: u64 = 4 * 1024 * 1024;
 pub const MAX_META: u64 = 64 * 1024;
 
 const B_PAYLOAD: &str = "sqlcipher4";
-const MAC_INFO: &[u8] = b"memocampus/backup-b/v2/mac";
-const POLICY_INFO: &[u8] = b"memocampus/backup-b/v2/policy";
-const POLICY_AAD: &[u8] = b"memocampus/backup-b/v2/policy\0";
+const MAC_INFO: &[u8] = b"memocampus/backup-b/v3/mac";
+const POLICY_INFO: &[u8] = b"memocampus/backup-b/v3/policy";
+const POLICY_AAD: &[u8] = b"memocampus/backup-b/v3/policy\0";
 const ENC_INFO: &[u8] = b"memocampus/backup-p/v1/enc";
 const CHECK_INFO: &[u8] = b"memocampus/backup-p/v1/check";
 const CHECK_MSG: &[u8] = b"memocampus/backup-p/v1/password-check\0";
@@ -158,9 +162,9 @@ pub enum FormatError {
     UnsupportedFormat,
     /// A container of another version, scheme or KDF.
     UnsupportedVersion,
-    /// A B or D container of Slice C, protected by the 12-word recovery phrase this build no
-    /// longer reads.
-    LegacyRecoveryPhrase,
+    /// A B or D container of an earlier slice (version 1 or 2: a random vault key in an envelope),
+    /// which this build no longer reads.
+    Legacy,
     /// A length, count, parameter or field out of bounds or of the wrong shape.
     Malformed,
     /// The file is shorter or longer than its header says.
@@ -169,8 +173,6 @@ pub enum FormatError {
     SchemaMismatch,
     /// The spell is not the one of this backup's envelope.
     SpellRejected,
-    /// The spell matches but the envelope does not authenticate: damaged metadata.
-    RecoveryDamaged,
     /// The password check value does not match.
     PasswordRejected,
     /// Authentication failed after the key was accepted: altered or damaged content.
@@ -216,8 +218,8 @@ pub enum Detected {
     Container(Kind),
     /// The container magic with another version.
     UnsupportedVersion,
-    /// A version 1 B or D (12-word recovery phrase).
-    LegacyRecoveryPhrase,
+    /// A version 1 or 2 B or D (an earlier slice's envelope).
+    Legacy,
     /// Anything else, including a bare SQLCipher file and a container of an unknown kind.
     Unknown,
 }
@@ -230,12 +232,13 @@ pub fn detect(head: &[u8]) -> Detected {
         return Detected::Unknown;
     }
     let version = u16::from_le_bytes([head[8], head[9]]);
-    if version != VERSION && version != LEGACY_VERSION {
+    let legacy = LEGACY_VERSIONS.contains(&version);
+    if version != VERSION && !legacy {
         return Detected::UnsupportedVersion;
     }
     match Kind::from_byte(head[10]) {
         Some(Kind::C) if head[11] == 0 => Detected::Container(Kind::C),
-        Some(_) if head[11] == 0 && version == LEGACY_VERSION => Detected::LegacyRecoveryPhrase,
+        Some(_) if head[11] == 0 && legacy => Detected::Legacy,
         Some(kind) if head[11] == 0 => Detected::Container(kind),
         _ => Detected::Unknown,
     }
@@ -243,8 +246,8 @@ pub fn detect(head: &[u8]) -> Detected {
 
 #[cfg(test)]
 thread_local! {
-    /// Tests only: the version a container is written with, to produce a Slice C (version 1)
-    /// format C file byte for byte.
+    /// Tests only: the version a container is written with, to produce an earlier slice's format
+    /// C file byte for byte.
     static WRITE_VERSION: std::cell::Cell<u16> = const { std::cell::Cell::new(VERSION) };
 }
 
@@ -279,7 +282,7 @@ pub fn read_prefix(r: &mut impl Read) -> Result<Prefix, FormatError> {
     let kind = match detect(&fixed) {
         Detected::Container(kind) => kind,
         Detected::UnsupportedVersion => return Err(FormatError::UnsupportedVersion),
-        Detected::LegacyRecoveryPhrase => return Err(FormatError::LegacyRecoveryPhrase),
+        Detected::Legacy => return Err(FormatError::Legacy),
         _ => return Err(FormatError::UnsupportedFormat),
     };
     let len = u32::from_le_bytes(fixed[12..16].try_into().expect("4 bytes"));
@@ -327,12 +330,14 @@ pub struct SealedPolicy {
 pub struct HeaderB {
     pub payload: String,
     pub schema_version: i64,
+    /// `recovery::SCHEME`: how VK follows from the spell and the salt.
+    pub key_scheme: String,
+    /// `recovery::vault_id(cipher_salt)`.
     pub vault_id: VaultId,
-    /// The salt the payload (a SQLCipher file) starts with.
+    /// The salt the payload (a SQLCipher file) starts with: the public input of VK.
     pub cipher_salt: CipherSalt,
-    /// The salt the recovery envelope is bound to (the vault's when the envelope was made).
-    pub recovery_salt: CipherSalt,
-    pub recovery: Envelope,
+    /// `recovery::key_check_value(VK, vault_id, cipher_salt)`, 64 hex digits.
+    pub kcv: String,
     pub payload_len: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<SealedPolicy>,
@@ -345,9 +350,13 @@ impl HeaderB {
 
     /// Checks shape and bounds; returns the total length of the package with `prefix_len`.
     fn total_len(&self, prefix_len: usize) -> Result<u64, FormatError> {
-        if self.payload != B_PAYLOAD {
+        if self.payload != B_PAYLOAD || self.key_scheme != recovery::SCHEME {
             return Err(FormatError::UnsupportedVersion);
         }
+        if self.vault_id != recovery::vault_id(&self.cipher_salt) {
+            return Err(FormatError::Malformed);
+        }
+        fixed_hex::<32>(&self.kcv)?;
         if let Some(sealed) = &self.policy {
             fixed_hex::<24>(&sealed.nonce)?;
             if sealed.len < TAG as u64 || sealed.len > MAX_POLICY_COPY + TAG as u64 {
@@ -369,10 +378,7 @@ impl HeaderB {
 /// What a format B package states about its vault (all non-secret).
 pub struct VaultFacts {
     pub schema_version: i64,
-    pub vault_id: VaultId,
     pub cipher_salt: CipherSalt,
-    pub recovery_salt: CipherSalt,
-    pub recovery: Envelope,
 }
 
 /// A format B package ready to be written: prefix and sealed policy copy are computed, so its
@@ -391,12 +397,13 @@ impl PreparedB {
         payload_len: u64,
         policy: Option<&[u8]>,
     ) -> Result<Self, RandomError> {
+        let vault_id = recovery::vault_id(&facts.cipher_salt);
         let (sealed, policy_ct) = match policy {
             None => (None, Vec::new()),
             Some(plain) => {
                 let mut nonce = [0u8; 24];
                 random_bytes(&mut nonce)?;
-                let aad = [POLICY_AAD, facts.vault_id.as_bytes()].concat();
+                let aad = [POLICY_AAD, vault_id.as_bytes()].concat();
                 let ct = XChaCha20Poly1305::new(hkdf32(key.expose(), POLICY_INFO).as_ref().into())
                     .encrypt(
                         XNonce::from_slice(&nonce),
@@ -418,10 +425,14 @@ impl PreparedB {
         let header = serde_json::to_vec(&HeaderB {
             payload: B_PAYLOAD.into(),
             schema_version: facts.schema_version,
-            vault_id: facts.vault_id,
+            key_scheme: recovery::SCHEME.into(),
+            vault_id,
             cipher_salt: facts.cipher_salt,
-            recovery_salt: facts.recovery_salt,
-            recovery: facts.recovery,
+            kcv: hex(&recovery::key_check_value(
+                key,
+                &vault_id,
+                &facts.cipher_salt,
+            )),
             payload_len,
             policy: sealed,
         })
@@ -438,7 +449,8 @@ impl PreparedB {
         self.prefix.len() as u64 + self.payload_len + self.policy_ct.len() as u64 + MAC_LEN
     }
 
-    /// Writes the package; `payload` must yield exactly the announced length.
+    /// Writes the package; `payload` must yield exactly the announced length and start with the
+    /// salt the header names.
     pub fn write_to(&self, out: &mut impl Write, payload: &mut impl Read) -> io::Result<()> {
         let mut mac =
             <Hmac<Sha256> as Mac>::new_from_slice(self.mac_key.as_ref()).expect("any key length");
@@ -492,26 +504,17 @@ pub fn read_b_header(r: &mut impl Read, total: u64) -> Result<(Prefix, HeaderB),
     Ok((prefix, header))
 }
 
-/// The vault key of a package, from the Recovery Spell (restore).
+/// The vault key of a package, from the Recovery Spell (restore): derived from the spell and the
+/// payload's salt, then checked against the header's key check value.
 pub fn unlock_with_spell(header: &HeaderB, spell: &RecoverySpell) -> Result<VaultKey, FormatError> {
-    recovery::unwrap(
-        &header.recovery,
-        spell,
-        &header.vault_id,
-        &header.recovery_salt,
-    )
-    .map_err(|error| match error {
-        UnwrapError::SpellRejected => FormatError::SpellRejected,
-        UnwrapError::Damaged => FormatError::RecoveryDamaged,
-        UnwrapError::Unsupported => FormatError::UnsupportedVersion,
-        UnwrapError::Malformed => FormatError::Malformed,
-    })
+    Ok(recovery::vault_key(spell, &header.cipher_salt))
 }
 
 /// Reads a format B package of `total` bytes, streaming the payload into `sink`. `unlock` gives
 /// the vault key from the header (the spell on restore; the vault key itself when a new backup is
-/// verified). Nothing written to `sink` may be trusted unless this returns `Ok`: the MAC over the
-/// whole package is checked last.
+/// verified); a key that does not match the header's key check value is `SpellRejected` before
+/// anything is written. Nothing written to `sink` may be trusted unless this returns `Ok`: the MAC
+/// over the whole package is checked last.
 pub fn read_b(
     r: &mut impl Read,
     total: u64,
@@ -520,14 +523,23 @@ pub fn read_b(
 ) -> Result<RestoredB, FormatError> {
     let (prefix, header) = read_b_header(r, total)?;
     let key = unlock(&header)?;
+    let kcv: [u8; 32] = fixed_hex(&header.kcv)?;
+    if !recovery::key_check_matches(&key, &header.vault_id, &header.cipher_salt, &kcv) {
+        return Err(FormatError::SpellRejected);
+    }
     let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(hkdf32(key.expose(), MAC_INFO).as_ref())
         .expect("any key length");
     mac.update(&prefix.bytes);
     let mut left = header.payload_len;
     let mut buf = vec![0u8; CHUNK];
+    let mut first = true;
     while left > 0 {
         let n = (left as usize).min(CHUNK);
         r.read_exact(&mut buf[..n]).map_err(|e| classify(&e))?;
+        if std::mem::take(&mut first) && buf[..16] != header.cipher_salt.as_bytes()[..] {
+            // Not the database the header names (the payload is at least 512 bytes).
+            return Err(FormatError::Tampered);
+        }
         mac.update(&buf[..n]);
         sink.write_all(&buf[..n])
             .map_err(|e| FormatError::Output(e.kind()))?;

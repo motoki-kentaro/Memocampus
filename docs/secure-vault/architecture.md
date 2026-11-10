@@ -10,6 +10,14 @@ implementation differs from this text, the slice documents list the difference (
 > parsing, key derivation and domain separation, sidecar version 2, container version 2, handling of 12-word files — is
 > `recovery-spell.md`, which takes precedence over §2, §2.2, §4 error codes, §5–§6 and §9 below where they differ.
 
+> **Slice E (current key management).** The vault key is no longer random and wrapped in a `.mckey` sidecar: it is
+> **derived** from the Recovery Spell and the vault file's own SQLCipher salt
+> (`VK = HKDF-SHA256(spell, salt, "memocampus/vault-key/v3")`, vault id = `SHA-256("memocampus/vault-id/v3\0" || salt)[..16]`),
+> so the vault file and the spell are all a recovery needs. No sidecar is written or read; DPAPI only caches VK; backups B/D are
+> container version 3; re-issuing the spell makes a new vault. `slice-e.md` takes precedence over §2, §2.1, §2.2, §5.3, §6
+> and §9 below and over `recovery-spell.md` §3–§4 where they differ. Text below that mentions the recovery sidecar, a random
+> VK or envelopes describes earlier slices.
+
 > **Slice D (conversion).** The conversion between plain and encrypted vaults is implemented as described in `slice-d.md`,
 > which takes precedence over §8 below: no maintenance mode and no watchdog; the copy is made into a new vault without
 > holding the config lock, and refreshed under the switch's write fence when the user activates it; publication of the

@@ -95,7 +95,7 @@ impl Dialogs for NativeDialogs {
     ) -> Option<PathBuf> {
         let owner = owner::OwnerWindow::create();
         let title = if encrypt {
-            "暗号化した新しいVaultの保存先（元のVaultは残ります）"
+            "暗号化した新しいVault（新しいふっかつのじゅもん）の保存先（元のVaultは残ります）"
         } else {
             "暗号化を解除した新しいVault（平文）の保存先（元のVaultは残ります）"
         };

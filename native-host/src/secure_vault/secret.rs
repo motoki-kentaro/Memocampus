@@ -18,7 +18,9 @@ pub fn random_bytes(buf: &mut [u8]) -> Result<(), RandomError> {
     getrandom::fill(buf).map_err(|_| RandomError)
 }
 
-/// The 256-bit key of one encrypted vault (VK), the raw SQLCipher key.
+/// The 256-bit key of one encrypted vault (VK), the raw SQLCipher key. Since Slice E it is derived
+/// from the Recovery Spell and the vault's public salt (`recovery::vault_key`); `generate` remains
+/// for tests and for keys that are never a vault's.
 pub struct VaultKey([u8; 32]);
 
 impl VaultKey {
@@ -92,9 +94,9 @@ impl std::fmt::Debug for VaultKey {
     }
 }
 
-/// The 256 bits behind the Recovery Spell (ふっかつのじゅもん), from the OS CSPRNG. Independent
-/// of the vault key: the spell is not an encoding of VK, it unlocks an envelope that holds VK. Its
-/// bytes are only ever the input keying material of HKDF (`recovery`), never a key themselves.
+/// The 256 bits behind the Recovery Spell (ふっかつのじゅもん), from the OS CSPRNG: the one secret a
+/// recovery needs (Slice E). Its bytes are only ever the input keying material of HKDF
+/// (`recovery::vault_key`), never a key themselves.
 pub struct RecoverySpell([u8; 32]);
 
 impl RecoverySpell {
@@ -182,14 +184,24 @@ macro_rules! public_id {
 
 public_id!(
     VaultId,
-    "128 random bits naming one encrypted vault: in the config, the key store entry and the sidecar."
+    "128 bits naming one encrypted vault, in the config and the key store. Since Slice E a function of the vault's public salt (`recovery::vault_id`), so the vault file alone names it."
 );
 public_id!(
     CipherSalt,
-    "The first 16 bytes of a SQLCipher file (its random KDF salt, stored in the clear). Binds the key store entry and the sidecar to one vault file's content."
+    "The first 16 bytes of a SQLCipher file, stored in the clear: SQLCipher's salt and, since Slice E, the public salt the vault key is derived with. Random (OS CSPRNG) for every new vault."
 );
 
 impl VaultId {
+    /// 128 random bits: tests, and identifiers that are not a vault's.
+    pub fn generate() -> Result<Self, RandomError> {
+        let mut bytes = [0u8; 16];
+        random_bytes(&mut bytes)?;
+        Ok(Self(bytes))
+    }
+}
+
+impl CipherSalt {
+    /// A new vault's salt, from the OS CSPRNG.
     pub fn generate() -> Result<Self, RandomError> {
         let mut bytes = [0u8; 16];
         random_bytes(&mut bytes)?;

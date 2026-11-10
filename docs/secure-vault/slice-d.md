@@ -14,6 +14,12 @@ The slice adds two operations on the **active vault the side panel shows**:
 In both directions the source vault is never written, moved, re-keyed or removed, the active vault does not change until
 the user activates the converted vault, and the converted vault's MCP publication starts `pending`.
 
+> **Slice E.** D1 no longer generates a random VK or writes a `.mckey`: the new spell and a new salt are generated at start,
+> the salt and the vault id it names are recorded in the manifest before anything is written, and VK is derived from them
+> (`slice-e.md` §3, §8). A third direction, `reissue` (encrypted → a new encrypted vault under a new spell), reuses this
+> slice's states, fence and refresh (`slice-e.md` §7); its refresh uses two keyed connections. Where this document mentions
+> the sidecar or a random VK, `slice-e.md` supersedes it.
+
 ---
 
 ## 1. Invariants and where they are enforced

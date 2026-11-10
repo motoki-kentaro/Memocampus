@@ -357,6 +357,35 @@ test("end to end with the real host and MCP: a plain vault converted to encrypte
     assert.equal(readFileSync(encrypted).includes("converted-row"), false);
     assert.equal(readFileSync(plain).includes("converted-row"), true);
 
+    // Slice E: re-issuing the spell makes a new encrypted vault, publication pending again; the
+    // old vault is kept and the new spell is in no answer but the start's.
+    const before = await call({ type: "vault_status" });
+    const reissuedPath = path.join(root, "reissued.sqlite3");
+    const reissued = await call({ type: "vault_convert_start", direction: "reissue", expectedVaultToken: before.status.vaultToken, path: reissuedPath });
+    assert.equal(reissued.ok, true, JSON.stringify(reissued));
+    const newSpell = reissued.recoverySpell;
+    assert.match(newSpell, /^[A-Za-z0-9_-]{43}$/);
+    assert.notEqual(newSpell, spell);
+    assert.equal((await call({ type: "vault_convert_confirm", recoverySpell: spell })).error, "recovery_spell_rejected", "the old spell is not the new one");
+    await visit("v4", "https://public.test/during-reissue");
+    assert.equal((await call({ type: "vault_convert_confirm", recoverySpell: newSpell })).ok, true);
+    const switched = await call({ type: "vault_convert_activate", expectedVaultToken: reissued.vaultToken });
+    assert.equal(switched.ok, true, JSON.stringify(switched));
+    assert.equal(switched.status.mode, "encrypted");
+    assert.equal(switched.status.publication, "pending", "never inherited by a re-issued vault");
+    const refusedAgain = await failure(startMcpServer(servers, env, []).initialize("reissue-e2e"));
+    assert.match(refusedAgain.stderr, /vault refused: vault_publication_pending/);
+    await confirmPublication(call);
+    const mcpReissued = startMcpServer(servers, env, []);
+    await mcpReissued.initialize("reissue-e2e");
+    const foundReissued = JSON.stringify(await mcpReissued.request("tools/call", { name: "memocampus_search_visits", arguments: { query: "" } }));
+    assert.match(foundReissued, /during-reissue/);
+    assert.match(foundReissued, /during-conversion/);
+    assert.doesNotMatch(foundReissued, /CANARY/);
+    assert.equal(foundReissued.includes(newSpell), false);
+    await mcpReissued.close();
+    assert.equal(readFileSync(reissuedPath).includes("during-reissue"), false, "ciphertext at rest");
+
     // And back to plain: acknowledged, a new file, publication pending again.
     const current = await call({ type: "vault_status" });
     const back = path.join(root, "back.sqlite3");
@@ -370,7 +399,8 @@ test("end to end with the real host and MCP: a plain vault converted to encrypte
     assert.equal(done.status.publication, "pending");
     const again = await failure(startMcpServer(servers, env, []).initialize("convert-e2e-2"));
     assert.match(again.stderr, /vault refused: vault_publication_pending/);
-    assert.equal(existsSync(encrypted) && existsSync(`${encrypted}.mckey`), true, "the encrypted source is kept");
+    assert.equal(existsSync(encrypted) && existsSync(reissuedPath), true, "the encrypted sources are kept");
+    assert.equal(existsSync(`${encrypted}.mckey`) || existsSync(`${reissuedPath}.mckey`), false, "no sidecar (Slice E)");
   } finally {
     for (const server of servers) await server.close();
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

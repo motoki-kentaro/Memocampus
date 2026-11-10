@@ -1,7 +1,9 @@
 //! Keyed SQLCipher connections.
 //!
-//! The key is handed to SQLCipher through `sqlite3_key_v2`, as its raw-key literal `x'<64 hex>'`,
-//! built in a buffer that is zeroed afterwards. It never appears in SQL text, so no statement,
+//! The key is handed to SQLCipher through `sqlite3_key_v2`, as its raw-key literal `x'<64 hex>'`
+//! (a new database: `x'<64 hex key><32 hex salt>'`, so that SQLCipher uses the given salt, Slice E),
+//! built in a buffer that is zeroed afterwards. SQLCipher derives nothing from a raw key (no
+//! PBKDF2): VK is the database key itself, and the file's first 16 bytes are its salt. It never appears in SQL text, so no statement,
 //! trace, error message or log can carry it, and no quoting is involved. SQLCipher keeps the key in
 //! the connection's codec until the connection closes: the key's lifetime is the connection's.
 //!
@@ -63,6 +65,16 @@ pub fn read_head(path: &Path) -> io::Result<Head> {
     })
 }
 
+/// Whether a file whose head is a salt (not the SQLite magic) can be an encrypted vault at all:
+/// SQLCipher writes whole pages of at least 512 bytes, so its length is a non-zero multiple of 512.
+/// A file of any other length is not a vault. Since Slice E nothing else marks an encrypted vault
+/// before it is opened with its key (its first bytes are random), so this is what still tells a
+/// short or odd-sized junk file from a vault this user may recover.
+pub fn plausible_size(path: &Path) -> bool {
+    fs::metadata(path)
+        .is_ok_and(|meta| meta.is_file() && meta.len() >= 512 && meta.len() % 512 == 0)
+}
+
 /// True when this connection's engine is SQLCipher.
 pub fn is_available(db: &Connection) -> bool {
     db.query_row("PRAGMA cipher_version", [], |row| row.get::<_, String>(0))
@@ -98,13 +110,35 @@ pub fn apply_key_to(
     schema: &std::ffi::CStr,
     key: &VaultKey,
 ) -> Result<(), KeyingError> {
+    key_with_literal(db, schema, key, None)
+}
+
+/// Keys the database `schema` of `db`, which is new and empty, with `key` **and** `salt`: SQLCipher
+/// then writes `salt` as the file's first 16 bytes instead of drawing its own (Slice E, PoC P2/P3).
+/// Opening it later needs only the key (`apply_key`); the salt is read back from the file.
+pub fn apply_new_key_to(
+    db: &Connection,
+    schema: &std::ffi::CStr,
+    key: &VaultKey,
+    salt: &CipherSalt,
+) -> Result<(), KeyingError> {
+    key_with_literal(db, schema, key, Some(salt))
+}
+
+fn key_with_literal(
+    db: &Connection,
+    schema: &std::ffi::CStr,
+    key: &VaultKey,
+    salt: Option<&CipherSalt>,
+) -> Result<(), KeyingError> {
     if !is_available(db) {
         return Err(KeyingError::Unavailable);
     }
-    let mut literal = Zeroizing::new(Vec::with_capacity(67));
+    let mut literal = Zeroizing::new(Vec::with_capacity(99));
     literal.extend_from_slice(b"x'");
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    for byte in key.expose() {
+    let salt_bytes: &[u8] = salt.map_or(&[], |salt| salt.as_bytes());
+    for byte in key.expose().iter().chain(salt_bytes) {
         literal.push(DIGITS[usize::from(byte >> 4)]);
         literal.push(DIGITS[usize::from(byte & 15)]);
     }
@@ -149,8 +183,9 @@ pub enum CreateError {
 }
 
 /// Creates a new encrypted vault at `path` (which must not exist) holding the current schema, keyed
-/// with `key`, and returns its salt. Nothing is left behind on failure.
-pub fn create(path: &Path, key: &VaultKey) -> Result<CipherSalt, CreateError> {
+/// with `key`, whose file starts with `salt` (checked once written). Nothing is left behind on
+/// failure.
+pub fn create(path: &Path, key: &VaultKey, salt: &CipherSalt) -> Result<(), CreateError> {
     if ["-journal", "-wal", "-shm"]
         .iter()
         .any(|suffix| fsutil::with_suffix(path, suffix).exists())
@@ -168,15 +203,20 @@ pub fn create(path: &Path, key: &VaultKey) -> Result<CipherSalt, CreateError> {
         Err(_) => return Err(CreateError::Io),
     }
     let result = (|| {
-        let db = open(
+        let db = Connection::open_with_flags(
             path,
-            key,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
-        .map_err(|error| match error {
-            KeyingError::Unavailable => CreateError::Unavailable,
-            KeyingError::Sqlite(_) => CreateError::Db,
-        })?;
+        .map_err(|_| CreateError::Db)?;
+        apply_new_key_to(&db, c"main", key, salt)
+            .and_then(|()| {
+                db.execute_batch("PRAGMA cipher_compatibility = 4; PRAGMA temp_store = MEMORY;")
+                    .map_err(KeyingError::from)
+            })
+            .map_err(|error| match error {
+                KeyingError::Unavailable => CreateError::Unavailable,
+                KeyingError::Sqlite(_) => CreateError::Db,
+            })?;
         db.execute_batch(&format!("BEGIN; {} COMMIT;", schema::create_sql()))
             .map_err(|_| CreateError::Db)?;
         schema::check(&db).map_err(|_| CreateError::Db)?;
@@ -187,7 +227,7 @@ pub fn create(path: &Path, key: &VaultKey) -> Result<CipherSalt, CreateError> {
             .and_then(|file| file.sync_all())
             .map_err(|_| CreateError::Io)?;
         match read_head(path) {
-            Ok(Head::Salt(salt)) => Ok(salt),
+            Ok(Head::Salt(found)) if found == *salt => Ok(()),
             _ => Err(CreateError::Db),
         }
     })();
@@ -233,7 +273,8 @@ mod tests {
         let dir = dir();
         let path = dir.join("v.sqlite3");
         let key = VaultKey::generate().unwrap();
-        let salt = create(&path, &key).unwrap();
+        let salt = CipherSalt::generate().unwrap();
+        create(&path, &key, &salt).unwrap();
         assert_eq!(read_head(&path).unwrap(), Head::Salt(salt));
         let marker = "https://canary.example/CANARY-plaintext";
         {
@@ -301,13 +342,17 @@ mod tests {
         )));
         drop(keyed);
         assert_eq!(fs::read(&plain).unwrap(), before);
-        assert!(matches!(create(&plain, &key), Err(CreateError::Exists)));
+        let salt = CipherSalt::generate().unwrap();
+        assert!(matches!(
+            create(&plain, &key, &salt),
+            Err(CreateError::Exists)
+        ));
         assert_eq!(fs::read(&plain).unwrap(), before);
         // Opening never creates a missing file.
         assert!(open(&dir.join("missing.sqlite3"), &key, rw()).is_err());
         assert!(!dir.join("missing.sqlite3").exists());
         assert!(matches!(
-            create(&dir.join("no-such-dir").join("v.sqlite3"), &key),
+            create(&dir.join("no-such-dir").join("v.sqlite3"), &key, &salt),
             Err(CreateError::ParentMissing)
         ));
         fs::write(dir.join("short"), b"abc").unwrap();

@@ -1,162 +1,109 @@
-//! The recovery envelope: the vault key wrapped under keys derived from the Recovery Spell.
+//! The vault key of an encrypted vault, derived from its Recovery Spell (Issue #51, Slice E;
+//! `docs/secure-vault/slice-e.md`).
 //!
 //! ```text
 //! spell   = 32 bytes from the OS CSPRNG (shown once as 43 base64url characters, `spell`)
-//! (KEK, K_check) = HKDF-SHA256(ikm = spell, salt = 32 random bytes (per envelope),
-//!                              info = "memocampus/recovery-spell/v2/kek" | ".../check")
-//! check   = HMAC-SHA256(K_check, "memocampus/recovery-spell/v2/spell-check\0" || vaultId || cipherSalt)
-//! wrapped = XChaCha20-Poly1305(KEK, nonce = 24 random bytes,
-//!                              AAD = "memocampus/recovery-spell/v2/wrap\0" || vaultId || cipherSalt)(VK)
+//! salt    = 16 bytes from the OS CSPRNG: the vault file's first 16 bytes (SQLCipher's salt)
+//! VK      = HKDF-SHA256(ikm = spell, salt = salt, info = "memocampus/vault-key/v3")   (32 bytes)
+//! vaultId = SHA-256("memocampus/vault-id/v3\0" || salt)[..16]
 //! ```
 //!
-//! The spell's bytes are only the HKDF input: each use gets its own key through its own `info`
-//! label, and none of the labels is shared with the 12-word scheme this replaced
-//! (`bip39-128/.../v1`, refused as `Unsupported`) or with the keys derived from VK (key check
-//! value, backup MAC and policy copy, all `HKDF(VK, ...)` with their own labels).
+//! VK is SQLCipher's **raw key** (`x'<64 hex>'`, `cipher::apply_key`): SQLCipher derives nothing
+//! from it with PBKDF2. A new vault is keyed with the raw key **and** its salt
+//! (`x'<64 hex><32 hex>'`, `cipher::create`), so SQLCipher writes exactly that salt as the file's
+//! first 16 bytes; any later open reads the salt back from the file. The vault file and the spell
+//! are therefore all a recovery needs: no sidecar, no key store, no DPAPI, no other file.
 //!
-//! HKDF, not a slow KDF: the spell is 256 uniformly random bits, so stretching adds nothing. The
-//! check value separates a wrong spell (`SpellRejected`) from damaged or altered metadata
-//! (`Damaged`); it gives no shortcut, since each guess still costs one HKDF, exactly as testing the
-//! AEAD tag would. Both the check and the AAD bind the vault id and the vault file's salt, so an
-//! envelope moved to another vault is refused.
+//! Everything but the spell is public (the source, this derivation, the salt, the vault id). HKDF
+//! rather than a slow KDF: the spell is 256 uniformly random bits, so stretching adds nothing, and
+//! each guess costs at least one HKDF plus SQLCipher's page HMAC check. The salt makes VK unique
+//! to the vault (two vaults of one spell never share a key) and the label separates it from every
+//! other key in Memocampus (`kcv`, backup MAC and policy keys are `HKDF(VK, …)` with their own
+//! labels; the password backups' keys come from Argon2id). The vault id is a public name only,
+//! never key material.
+//!
+//! A new spell or a new salt means a new key: re-issuing the spell, converting a plain vault or
+//! restoring a backup writes a **new** vault (a new salt, so a new vault id) through
+//! `convert::export`; nothing ever re-keys a vault in place.
+//!
+//! Earlier schemes (the spell envelope in `<vault>.mckey`, version 2, and the 12-word phrase,
+//! version 1) wrapped a random VK. Their vaults cannot be opened by this derivation (the key is
+//! not a function of the spell and salt) and are refused as unsupported (`sidecar::legacy_*`).
 
-use super::fsutil::{hex, unhex};
 use super::secret::{random_bytes, CipherSalt, RandomError, RecoverySpell, VaultId, VaultKey};
-use chacha20poly1305::aead::{Aead, KeyInit, Payload};
-use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
-use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-pub const SCHEME: &str = "recovery-spell-256/hkdf-sha256/xchacha20poly1305/v2";
-/// The 12-word BIP-39 envelope of Slice B/C. Recognised only to be refused as unsupported.
-pub const LEGACY_SCHEME: &str = "bip39-128/hkdf-sha256/xchacha20poly1305/v1";
-const KEK_INFO: &[u8] = b"memocampus/recovery-spell/v2/kek";
-const CHECK_INFO: &[u8] = b"memocampus/recovery-spell/v2/check";
-const CHECK_LABEL: &[u8] = b"memocampus/recovery-spell/v2/spell-check\0";
-const WRAP_LABEL: &[u8] = b"memocampus/recovery-spell/v2/wrap\0";
+/// The name of this scheme, in the key store entry and the backup header.
+pub const SCHEME: &str = "spell-hkdf-sha256/sqlcipher4-raw/v3";
+const VK_INFO: &[u8] = b"memocampus/vault-key/v3";
+const ID_LABEL: &[u8] = b"memocampus/vault-id/v3\0";
 const KCV_INFO: &[u8] = b"memocampus/kcv/v1";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct Envelope {
-    pub scheme: String,
-    pub salt: String,
-    pub nonce: String,
-    pub wrapped: String,
-    pub check: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnwrapError {
-    /// Another scheme or version (including the 12-word scheme this replaced).
-    Unsupported,
-    /// A field of the wrong length or encoding.
-    Malformed,
-    /// The spell is not the one of this envelope.
-    SpellRejected,
-    /// The spell matches, but the wrapped key does not authenticate: the envelope (or the vault id
-    /// or salt it is bound to) was altered or damaged.
-    Damaged,
-}
-
-fn bound(label: &[u8], vault_id: &VaultId, salt: &CipherSalt) -> Vec<u8> {
-    [label, vault_id.as_bytes(), salt.as_bytes()].concat()
-}
-
-/// (KEK, K_check) for `spell` and the envelope salt.
-fn derive(spell: &RecoverySpell, salt: &[u8; 32]) -> (Zeroizing<[u8; 32]>, Zeroizing<[u8; 32]>) {
-    let hkdf = Hkdf::<Sha256>::new(Some(salt), spell.expose());
-    let (mut kek, mut check) = (Zeroizing::new([0u8; 32]), Zeroizing::new([0u8; 32]));
-    hkdf.expand(KEK_INFO, kek.as_mut())
+/// The vault key of the vault whose file starts with `salt`, for `spell`.
+pub fn vault_key(spell: &RecoverySpell, salt: &CipherSalt) -> VaultKey {
+    let mut out = Zeroizing::new([0u8; 32]);
+    Hkdf::<Sha256>::new(Some(salt.as_bytes()), spell.expose())
+        .expand(VK_INFO, out.as_mut())
         .expect("32 bytes is a valid HKDF-SHA256 length");
-    hkdf.expand(CHECK_INFO, check.as_mut())
-        .expect("32 bytes is a valid HKDF-SHA256 length");
-    (kek, check)
+    VaultKey::from_bytes(&mut out)
 }
 
-fn check_mac(k_check: &[u8; 32], vault_id: &VaultId, salt: &CipherSalt) -> Hmac<Sha256> {
-    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(k_check).expect("any key length");
-    mac.update(&bound(CHECK_LABEL, vault_id, salt));
-    mac
+/// The vault id of the vault whose file starts with `salt`. Public.
+pub fn vault_id(salt: &CipherSalt) -> VaultId {
+    let digest = Sha256::new()
+        .chain_update(ID_LABEL)
+        .chain_update(salt.as_bytes())
+        .finalize();
+    VaultId::from_array(digest[..16].try_into().expect("16 of 32 bytes"))
 }
 
-pub fn wrap(
-    key: &VaultKey,
-    spell: &RecoverySpell,
-    vault_id: &VaultId,
-    cipher_salt: &CipherSalt,
-) -> Result<Envelope, RandomError> {
-    let (mut salt, mut nonce) = ([0u8; 32], [0u8; 24]);
-    random_bytes(&mut salt)?;
-    random_bytes(&mut nonce)?;
-    let (kek, k_check) = derive(spell, &salt);
-    let wrapped = XChaCha20Poly1305::new(kek.as_ref().into())
-        .encrypt(
-            XNonce::from_slice(&nonce),
-            Payload {
-                msg: key.expose(),
-                aad: &bound(WRAP_LABEL, vault_id, cipher_salt),
-            },
-        )
-        .expect("XChaCha20-Poly1305 encryption of 32 bytes cannot fail");
-    let check = check_mac(&k_check, vault_id, cipher_salt)
-        .finalize()
-        .into_bytes();
-    Ok(Envelope {
-        scheme: SCHEME.into(),
-        salt: hex(&salt),
-        nonce: hex(&nonce),
-        wrapped: hex(&wrapped),
-        check: hex(&check),
-    })
+/// What a new encrypted vault is made of: a fresh spell and salt, and what follows from them.
+pub struct NewVault {
+    pub spell: RecoverySpell,
+    pub salt: CipherSalt,
+    pub key: VaultKey,
+    pub id: VaultId,
 }
 
-fn fixed<const N: usize>(text: &str) -> Result<[u8; N], UnwrapError> {
-    unhex(text)
-        .and_then(|bytes| bytes.try_into().ok())
-        .ok_or(UnwrapError::Malformed)
-}
-
-pub fn unwrap(
-    envelope: &Envelope,
-    spell: &RecoverySpell,
-    vault_id: &VaultId,
-    cipher_salt: &CipherSalt,
-) -> Result<VaultKey, UnwrapError> {
-    if envelope.scheme != SCHEME {
-        return Err(UnwrapError::Unsupported);
+impl NewVault {
+    pub fn generate() -> Result<Self, RandomError> {
+        let spell = RecoverySpell::generate()?;
+        let salt = CipherSalt::generate()?;
+        Ok(Self::of(spell, salt))
     }
-    let salt: [u8; 32] = fixed(&envelope.salt)?;
-    let nonce: [u8; 24] = fixed(&envelope.nonce)?;
-    let wrapped: [u8; 48] = fixed(&envelope.wrapped)?;
-    let check: [u8; 32] = fixed(&envelope.check)?;
-    let (kek, k_check) = derive(spell, &salt);
-    check_mac(&k_check, vault_id, cipher_salt)
-        .verify_slice(&check)
-        .map_err(|_| UnwrapError::SpellRejected)?;
-    let plain = Zeroizing::new(
-        XChaCha20Poly1305::new(kek.as_ref().into())
-            .decrypt(
-                XNonce::from_slice(&nonce),
-                Payload {
-                    msg: &wrapped,
-                    aad: &bound(WRAP_LABEL, vault_id, cipher_salt),
-                },
-            )
-            .map_err(|_| UnwrapError::Damaged)?,
-    );
-    let mut bytes: [u8; 32] = plain
-        .as_slice()
-        .try_into()
-        .map_err(|_| UnwrapError::Damaged)?;
-    Ok(VaultKey::from_bytes(&mut bytes))
+
+    /// The vault of `spell` and `salt` (a restore: the backup's spell, a new salt).
+    pub fn of(spell: RecoverySpell, salt: CipherSalt) -> Self {
+        let key = vault_key(&spell, &salt);
+        Self {
+            id: vault_id(&salt),
+            spell,
+            salt,
+            key,
+        }
+    }
 }
 
-/// Key check value: proves that a key (from DPAPI) is the key of this vault id and salt, without
-/// revealing it. `HMAC-SHA256(HKDF(VK, "memocampus/kcv/v1"), vaultId || cipherSalt)`.
+/// Fresh random bytes for a salt that must differ from `avoid` (a re-issue or restore never keeps
+/// the salt it replaces; a collision of 128 random bits is not expected, but costs nothing to rule
+/// out).
+pub fn fresh_salt(avoid: Option<&CipherSalt>) -> Result<CipherSalt, RandomError> {
+    loop {
+        let mut bytes = [0u8; 16];
+        random_bytes(&mut bytes)?;
+        let salt = CipherSalt::from_array(bytes);
+        if avoid != Some(&salt) {
+            return Ok(salt);
+        }
+    }
+}
+
+/// Key check value: proves that a key (from DPAPI, or derived from a typed spell) is the key of
+/// this vault id and salt, without revealing it.
+/// `HMAC-SHA256(HKDF(VK, "memocampus/kcv/v1"), vaultId || cipherSalt)`.
 pub fn key_check_value(key: &VaultKey, vault_id: &VaultId, cipher_salt: &CipherSalt) -> [u8; 32] {
     let mut derived = Zeroizing::new([0u8; 32]);
     Hkdf::<Sha256>::new(None, key.expose())
@@ -186,44 +133,55 @@ pub fn key_check_matches(
 
 #[cfg(test)]
 mod tests {
+    use super::super::fsutil::hex;
     use super::super::spell;
     use super::*;
 
-    fn fixture() -> (VaultKey, RecoverySpell, VaultId, CipherSalt) {
-        (
-            VaultKey::generate().unwrap(),
-            RecoverySpell::generate().unwrap(),
-            VaultId::generate().unwrap(),
-            CipherSalt::from_array([9; 16]),
-        )
+    fn spell_of(byte: u8) -> RecoverySpell {
+        let mut bytes = [byte; 32];
+        RecoverySpell::from_bytes(&mut bytes)
     }
 
     #[test]
-    fn the_right_spell_and_only_it_unwraps_the_key() {
-        let (key, secret, id, salt) = fixture();
-        let envelope = wrap(&key, &secret, &id, &salt).unwrap();
-        assert_eq!(envelope.scheme, SCHEME);
-        assert!(unwrap(&envelope, &secret, &id, &salt)
-            .unwrap()
-            .same_as(&key));
+    fn the_key_is_a_function_of_the_spell_and_the_salt_only() {
+        let (secret, salt) = (spell_of(0x11), CipherSalt::from_array([0x22; 16]));
+        let key = vault_key(&secret, &salt);
+        assert!(key.same_as(&vault_key(&secret, &salt)), "deterministic");
         // Through the 43 characters, as a user pastes them.
         let typed = spell::parse(&spell::encode(&secret)).unwrap();
-        assert!(unwrap(&envelope, &typed, &id, &salt).unwrap().same_as(&key));
-        let other = RecoverySpell::generate().unwrap();
+        assert!(key.same_as(&vault_key(&typed, &salt)));
+        assert!(!key.same_as(&vault_key(&spell_of(0x12), &salt)));
+        assert!(!key.same_as(&vault_key(&secret, &CipherSalt::from_array([0x23; 16]))));
+        assert_ne!(key.expose(), secret.expose(), "the spell is never the key");
+        // A fixed vector (HKDF-SHA256 as in tests/secure_vault_e_poc.rs): the derivation can never
+        // change silently, or every vault would stop opening.
         assert_eq!(
-            unwrap(&envelope, &other, &id, &salt).unwrap_err(),
-            UnwrapError::SpellRejected
+            hex(key.expose()),
+            hex(&{
+                let prk = <Hmac<Sha256> as Mac>::new_from_slice(&[0x22; 16])
+                    .unwrap()
+                    .chain_update([0x11; 32])
+                    .finalize()
+                    .into_bytes();
+                let t1: [u8; 32] = <Hmac<Sha256> as Mac>::new_from_slice(&prk)
+                    .unwrap()
+                    .chain_update(VK_INFO)
+                    .chain_update([1])
+                    .finalize()
+                    .into_bytes()
+                    .into();
+                t1
+            })
         );
-        let text = serde_json::to_string(&envelope).unwrap();
-        assert!(!key.appears_in(text.as_bytes()));
-        assert!(!text.contains(spell::encode(&secret).as_str()));
-        assert!(!text.contains(&hex(secret.expose())));
     }
 
     #[test]
-    fn every_single_character_change_of_the_spell_is_refused() {
-        let (key, secret, id, salt) = fixture();
-        let envelope = wrap(&key, &secret, &id, &salt).unwrap();
+    fn every_single_character_change_of_the_spell_changes_the_key() {
+        let (secret, salt) = (
+            RecoverySpell::generate().unwrap(),
+            CipherSalt::generate().unwrap(),
+        );
+        let key = vault_key(&secret, &salt);
         let text = spell::encode(&secret).to_string();
         let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         let mut parsed = 0;
@@ -237,10 +195,7 @@ mod tests {
                 let changed: String = changed.into_iter().collect();
                 if let Ok(candidate) = spell::parse(&changed) {
                     parsed += 1;
-                    assert_eq!(
-                        unwrap(&envelope, &candidate, &id, &salt).unwrap_err(),
-                        UnwrapError::SpellRejected
-                    );
+                    assert!(!vault_key(&candidate, &salt).same_as(&key));
                 }
             }
         }
@@ -248,133 +203,49 @@ mod tests {
     }
 
     #[test]
-    fn the_spell_bytes_are_never_a_key_themselves() {
-        // KEK and the check key come from HKDF with their own labels: even a spell equal to VK
-        // (not something generation produces, but the strongest case) yields an envelope that
-        // neither contains nor reveals it.
-        let (key, _, id, salt) = fixture();
-        let mut same = *key.expose();
-        let spell_equal_to_key = RecoverySpell::from_bytes(&mut same);
-        let envelope = wrap(&key, &spell_equal_to_key, &id, &salt).unwrap();
-        let text = serde_json::to_string(&envelope).unwrap();
-        assert!(!key.appears_in(text.as_bytes()));
-        let salt_bytes: [u8; 32] = unhex(&envelope.salt).unwrap().try_into().unwrap();
-        let (kek, k_check) = derive(&spell_equal_to_key, &salt_bytes);
-        assert_ne!(kek.as_ref(), key.expose());
-        assert_ne!(k_check.as_ref(), key.expose());
-        assert_ne!(kek.as_ref(), k_check.as_ref());
-        assert_ne!(&key_check_value(&key, &id, &salt), kek.as_ref());
-        // Two envelopes of one spell use fresh salts and nonces: nothing repeats.
-        let again = wrap(&key, &spell_equal_to_key, &id, &salt).unwrap();
-        assert_ne!(again.salt, envelope.salt);
-        assert_ne!(again.nonce, envelope.nonce);
-        assert_ne!(again.wrapped, envelope.wrapped);
-    }
-
-    #[test]
-    fn damage_is_told_apart_from_a_wrong_spell_and_another_vault_is_refused() {
-        let (key, secret, id, salt) = fixture();
-        let envelope = wrap(&key, &secret, &id, &salt).unwrap();
-        // Tag or ciphertext altered: the spell is right, the metadata is not.
-        for position in [0, 40, 95] {
-            let mut altered = envelope.clone();
-            let mut bytes = unhex(&altered.wrapped).unwrap();
-            bytes[position / 2] ^= 1;
-            altered.wrapped = hex(&bytes);
-            assert_eq!(
-                unwrap(&altered, &secret, &id, &salt).unwrap_err(),
-                UnwrapError::Damaged,
-                "{position}"
-            );
-        }
-        let mut altered = envelope.clone();
-        altered.nonce = hex(&[0u8; 24]);
-        assert_eq!(
-            unwrap(&altered, &secret, &id, &salt).unwrap_err(),
-            UnwrapError::Damaged
+    fn the_vault_id_is_public_and_follows_the_salt() {
+        let salt = CipherSalt::from_array([0x5a; 16]);
+        assert_eq!(vault_id(&salt), vault_id(&salt));
+        assert_ne!(
+            vault_id(&salt),
+            vault_id(&CipherSalt::from_array([0x5b; 16]))
         );
-        // The check value or the envelope salt altered: indistinguishable from a wrong spell.
-        let mut altered = envelope.clone();
-        altered.check = hex(&[0u8; 32]);
-        assert_eq!(
-            unwrap(&altered, &secret, &id, &salt).unwrap_err(),
-            UnwrapError::SpellRejected
-        );
-        let mut altered = envelope.clone();
-        altered.salt = hex(&[7u8; 32]);
-        assert_eq!(
-            unwrap(&altered, &secret, &id, &salt).unwrap_err(),
-            UnwrapError::SpellRejected
-        );
-        // Bound to the vault id and salt.
-        assert_eq!(
-            unwrap(&envelope, &secret, &VaultId::generate().unwrap(), &salt).unwrap_err(),
-            UnwrapError::SpellRejected
-        );
-        assert_eq!(
-            unwrap(&envelope, &secret, &id, &CipherSalt::from_array([8; 16])).unwrap_err(),
-            UnwrapError::SpellRejected
-        );
-        // Format: the 12-word scheme and any other scheme are unsupported, not "wrong spell".
-        for scheme in [
-            LEGACY_SCHEME,
-            "recovery-spell-256/hkdf-sha256/xchacha20poly1305/v3",
-            "",
-        ] {
-            let mut altered = envelope.clone();
-            altered.scheme = scheme.into();
-            assert_eq!(
-                unwrap(&altered, &secret, &id, &salt).unwrap_err(),
-                UnwrapError::Unsupported,
-                "{scheme}"
-            );
-        }
-        for field in 0..4 {
-            let mut altered = envelope.clone();
-            let target = match field {
-                0 => &mut altered.salt,
-                1 => &mut altered.nonce,
-                2 => &mut altered.wrapped,
-                _ => &mut altered.check,
-            };
-            target.pop();
-            assert_eq!(
-                unwrap(&altered, &secret, &id, &salt).unwrap_err(),
-                UnwrapError::Malformed
-            );
-        }
-        assert!(serde_json::from_str::<Envelope>(
-            &serde_json::to_string(&envelope)
-                .unwrap()
-                .replace('}', ",\"extra\":1}")
-        )
-        .is_err());
+        assert_ne!(vault_id(&salt).as_bytes(), salt.as_bytes());
+        let made = NewVault::generate().unwrap();
+        assert_eq!(made.id, vault_id(&made.salt));
+        assert!(made.key.same_as(&vault_key(&made.spell, &made.salt)));
+        let other = NewVault::generate().unwrap();
+        assert_ne!(other.salt, made.salt);
+        assert!(!other.key.same_as(&made.key));
+        assert_ne!(fresh_salt(Some(&made.salt)).unwrap(), made.salt);
     }
 
     #[test]
     fn the_key_check_value_belongs_to_one_key_vault_and_salt() {
-        let (key, _, id, salt) = fixture();
-        let kcv = key_check_value(&key, &id, &salt);
-        assert!(key_check_matches(&key, &id, &salt, &kcv));
+        let made = NewVault::generate().unwrap();
+        let (key, id, salt) = (&made.key, &made.id, &made.salt);
+        let kcv = key_check_value(key, id, salt);
+        assert!(key_check_matches(key, id, salt, &kcv));
         assert!(!key_check_matches(
             &VaultKey::generate().unwrap(),
-            &id,
-            &salt,
+            id,
+            salt,
             &kcv
         ));
         assert!(!key_check_matches(
-            &key,
+            key,
             &VaultId::generate().unwrap(),
-            &salt,
+            salt,
             &kcv
         ));
         assert!(!key_check_matches(
-            &key,
-            &id,
+            key,
+            id,
             &CipherSalt::from_array([1; 16]),
             &kcv
         ));
-        assert!(!key_check_matches(&key, &id, &salt, &kcv[..31]));
+        assert!(!key_check_matches(key, id, salt, &kcv[..31]));
         assert!(!key.appears_in(&kcv));
+        assert!(!kcv.windows(32).any(|w| w == made.spell.expose()));
     }
 }

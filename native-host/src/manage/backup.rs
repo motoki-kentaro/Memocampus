@@ -8,15 +8,16 @@
 //!
 //! # Steps (all under the vault binding of `Session::read_for`, see `manage::backup`)
 //!
-//! 1. B and D: the key from this user's key store and the recovery envelope from the sidecar,
-//!    both checked against the vault file's salt and id, **and the Recovery Spell the user
-//!    entered** (review finding C-03): it must open that envelope to exactly the key store's key. A
-//!    wrong spell, another vault's spell, altered metadata or a 12-word (version 1) sidecar refuses
-//!    the backup before any file exists.
+//! 1. B and D: the key from this user's key store, checked against the vault file's salt and id,
+//!    **and the Recovery Spell the user entered** (review finding C-03): with the vault file's
+//!    salt it must derive exactly that key (Slice E). A wrong spell or another vault's spell refuses
+//!    the backup before any file exists; a vault of an earlier scheme is `vault_legacy_unsupported`.
 //! 2. Snapshot.
 //!    - B, D: the SQLCipher Backup API, under one read transaction on the source, into a work file
-//!      `<app dir>\backup-work\<uuid>.sqlite3` keyed with the vault key: ciphertext with a new
-//!      salt. Checked: `integrity_check`, schema, row counts, first bytes (never plain SQLite).
+//!      `<app dir>\backup-work\<uuid>.sqlite3` keyed with the vault key **and the vault's salt**
+//!      (Slice E: the payload starts with the salt the spell derives the key with, so the backup and
+//!      the spell are all a restore needs). Checked: `integrity_check`, schema, row counts, first
+//!      bytes (the vault's salt, never plain SQLite).
 //!    - C (review finding C-01): **no work file**. Inside one read transaction (SHARED lock: no
 //!      writer can commit) the plain vault is checked (`integrity_check`, schema, counts) and its
 //!      pages are read one at a time from its own file and encrypted as they are read. A vault in
@@ -45,9 +46,9 @@ use memocampus_native_host::active_vault::VaultMode;
 use memocampus_native_host::policy::Policy;
 use memocampus_native_host::policy_store::{self, PolicyStore};
 use memocampus_native_host::secure_vault::container::{self, Kind, PasswordReader, PasswordWriter};
-use memocampus_native_host::secure_vault::recovery::{self, Envelope};
+use memocampus_native_host::secure_vault::recovery;
 use memocampus_native_host::secure_vault::secret::{CipherSalt, RecoverySpell, VaultId, VaultKey};
-use memocampus_native_host::secure_vault::{cipher, key_store, sidecar};
+use memocampus_native_host::secure_vault::{cipher, key_store, KeyError};
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 use std::fs::{self, File, OpenOptions};
@@ -113,6 +114,8 @@ pub(crate) enum Step {
     AfterRename,
     RestoreWrite,
     RestoreVerify,
+    /// Slice E: before an encrypted backup's payload is re-encrypted under the new salt.
+    RestoreRekey,
     RestoreKeys,
     RestorePromote,
     /// Slice D: before the copy into the work file, before its verification, before the new key
@@ -325,18 +328,16 @@ pub struct Source {
     pub spell: Option<RecoverySpell>,
 }
 
-/// The key and recovery metadata of an encrypted vault.
+/// The key and public salt of an encrypted vault.
 struct Material {
     key: VaultKey,
-    vault_id: VaultId,
-    recovery_salt: CipherSalt,
-    recovery: Envelope,
+    salt: CipherSalt,
 }
 
-/// The key and envelope of the encrypted vault, and proof that the user's spell recovers it: the
-/// spell must open the sidecar's envelope (bound to the vault id and the file's salt) to exactly
-/// the key this user's key store holds (itself checked by its key check value against the same id
-/// and salt). A well-formed spell of another vault, or altered metadata, is refused.
+/// The key of the encrypted vault, and proof that the user's spell recovers it: with the vault
+/// file's salt the spell must derive exactly the key this user's key store holds (itself checked by
+/// its key check value against the vault id and salt). A well-formed spell of another vault is
+/// refused.
 fn material(source: &Source) -> Result<Material, Failure> {
     let vault_id = source.vault_id.ok_or(VaultError::ConfigInvalid)?;
     let salt = match cipher::read_head(&source.path) {
@@ -344,44 +345,20 @@ fn material(source: &Source) -> Result<Material, Failure> {
         Ok(_) => return Err(VaultError::ModeMismatch.into()),
         Err(_) => return Err(VaultError::Io.into()),
     };
-    let key = key_store::unlock(&source.app, &vault_id, &salt)
-        .map_err(|_| Failure::from(VaultError::KeyUnavailable))?;
-    let found = sidecar::read(&sidecar::path_for(&source.path)).map_err(|error| match error {
-        sidecar::SidecarError::Missing => Failure::with("recovery_metadata_missing", json!({})),
-        sidecar::SidecarError::Invalid => Failure::with("recovery_metadata_damaged", json!({})),
-        sidecar::SidecarError::Unsupported => {
-            Failure::with("recovery_metadata_unsupported", json!({}))
-        }
-        sidecar::SidecarError::Io => VaultError::Io.into(),
+    let key = key_store::unlock(&source.app, &vault_id, &salt).map_err(|error| match error {
+        KeyError::Legacy => Failure::from(VaultError::LegacyUnsupported),
+        _ => Failure::from(VaultError::KeyUnavailable),
     })?;
-    if found.vault_id != vault_id || found.cipher_salt != salt {
-        return Err(Failure::with("recovery_metadata_mismatch", json!({})));
-    }
     let secret = source.spell.as_ref().ok_or_else(|| {
         Failure::with(
             "recovery_spell_invalid",
             json!({ "reason": "length", "count": 0 }),
         )
     })?;
-    let unwrapped = recovery::unwrap(&found.recovery, secret, &vault_id, &found.cipher_salt)
-        .map_err(|error| match error {
-            recovery::UnwrapError::SpellRejected => {
-                Failure::with("recovery_spell_rejected", json!({}))
-            }
-            _ => Failure::with("recovery_metadata_damaged", json!({})),
-        })?;
-    if !unwrapped.same_as(&key) {
-        // The envelope opens, but to another key than this vault's: the sidecar does not belong to
-        // the key the vault is encrypted with.
-        return Err(Failure::with("recovery_key_mismatch", json!({})));
+    if !recovery::vault_key(secret, &salt).same_as(&key) {
+        return Err(Failure::with("recovery_spell_rejected", json!({})));
     }
-    drop(unwrapped);
-    Ok(Material {
-        key,
-        vault_id,
-        recovery_salt: found.cipher_salt,
-        recovery: found.recovery,
-    })
+    Ok(Material { key, salt })
 }
 
 /// The global policy and approved domains as a copy for a backup, or None if there is no usable
@@ -466,24 +443,21 @@ pub fn write(
     };
     let written = match (&work, &material) {
         (None, _) => stream_plain_pages(db, source, &temp, policy, protection),
-        (Some(work), Some(material)) => {
-            snapshot(db, &work.db, &material.key).and_then(|(len, salt)| {
-                let mut file = BufReader::new(
-                    File::open(&work.db)
-                        .map_err(|error| output_failure(&error, "backup_failed"))?,
-                );
-                write_container(
-                    &temp,
-                    kind,
-                    &mut file,
-                    len,
-                    Some(salt),
-                    Some(material),
-                    policy,
-                    protection,
-                )
-            })
-        }
+        (Some(work), Some(material)) => snapshot(db, &work.db, material).and_then(|(len, salt)| {
+            let mut file = BufReader::new(
+                File::open(&work.db).map_err(|error| output_failure(&error, "backup_failed"))?,
+            );
+            write_container(
+                &temp,
+                kind,
+                &mut file,
+                len,
+                Some(salt),
+                Some(material),
+                policy,
+                protection,
+            )
+        }),
         (Some(_), None) => Err(VaultError::BackupFailed.into()),
     };
     let result = written.and_then(|digest| {
@@ -625,12 +599,12 @@ fn stream_plain_pages(
     result
 }
 
-/// The Backup API copy of an encrypted vault into the work file, keyed with the vault key, checked;
-/// returns its length and its (new) salt.
+/// The Backup API copy of an encrypted vault into the work file, keyed with the vault key and the
+/// vault's salt, checked; returns its length and its salt (the vault's).
 fn snapshot(
     source: &Connection,
     work: &Path,
-    key: &VaultKey,
+    material: &Material,
 ) -> Result<(u64, CipherSalt), Failure> {
     OpenOptions::new()
         .write(true)
@@ -638,7 +612,15 @@ fn snapshot(
         .open(work)
         .map_err(|error| output_failure(&error, "backup_failed"))?;
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-    let mut target = cipher::open(work, key, flags).map_err(|_| VaultError::BackupFailed)?;
+    let mut target = Connection::open_with_flags(work, flags)
+        .ok()
+        .filter(|db| {
+            cipher::apply_new_key_to(db, c"main", &material.key, &material.salt).is_ok()
+                && db
+                    .execute_batch("PRAGMA cipher_compatibility = 4; PRAGMA temp_store = MEMORY;")
+                    .is_ok()
+        })
+        .ok_or(VaultError::BackupFailed)?;
     let expected = vault::snapshot_into(source, &mut target)?;
     checkpoint(Step::Snapshot).map_err(|error| output_failure(&error, "backup_failed"))?;
     vault::verify_copy(&target, &expected)?;
@@ -653,9 +635,9 @@ fn snapshot(
         .map_err(|error| output_failure(&error, "backup_failed"))?;
     let len = file.metadata().map_err(|_| VaultError::BackupFailed)?.len();
     drop(file);
-    // An encrypted vault's snapshot is SQLCipher, never plain SQLite.
+    // An encrypted vault's snapshot is SQLCipher with the vault's salt, never plain SQLite.
     match cipher::read_head(work) {
-        Ok(cipher::Head::Salt(salt)) => Ok((len, salt)),
+        Ok(cipher::Head::Salt(salt)) if salt == material.salt => Ok((len, salt)),
         _ => Err(VaultError::BackupFailed.into()),
     }
 }
@@ -670,10 +652,7 @@ fn prepared_b(
         &material.key,
         container::VaultFacts {
             schema_version: memocampus_native_host::schema::SCHEMA_VERSION,
-            vault_id: material.vault_id,
             cipher_salt: salt,
-            recovery_salt: material.recovery_salt,
-            recovery: material.recovery.clone(),
         },
         len,
         policy,

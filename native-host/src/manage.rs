@@ -170,7 +170,8 @@ pub fn status(session: &Session) -> Value {
     // Issue #51 Slice B: an encrypted vault this user cannot unlock may be recovered with its
     // spell; a creation interrupted before its confirmation is shown so it can be cancelled.
     if mode == VaultMode::Encrypted && status["state"] != "ready" {
-        status["recoveryAvailable"] = encrypted::recovery_available(&path).into();
+        status["recoveryAvailable"] =
+            encrypted::recovery_available(&path, session.env.app_dir.as_deref()).into();
     }
     status
 }
@@ -900,9 +901,10 @@ mod tests {
             &FakeDialogs::default(),
             json!({ "type": "vault_status" }),
         );
-        // Slice B: no key for it in this user's key store, and no sidecar to recover from.
+        // No key for it in this user's key store. Slice E: the file alone is what a recovery
+        // with the spell needs, so the panel offers it.
         assert_eq!(status["status"]["state"], "key_unavailable");
-        assert_eq!(status["status"]["recoveryAvailable"], false);
+        assert_eq!(status["status"]["recoveryAvailable"], true);
         assert_eq!(status["status"]["mode"], "encrypted");
         assert_eq!(status["status"]["publication"], "pending");
         assert_eq!(status["status"]["vaultToken"], json!(null));

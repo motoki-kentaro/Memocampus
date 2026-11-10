@@ -12,7 +12,15 @@ use crate::vault::tests::TempDir;
 use crate::vault::{Environment, VaultKey};
 use memocampus_native_host::active_vault::{self, GateError};
 use memocampus_native_host::schema;
-use memocampus_native_host::secure_vault::{cipher, key_store, sidecar};
+use memocampus_native_host::secure_vault::{cipher, key_store, recovery, sidecar};
+
+/// The vault id an encrypted file's salt names (Slice E).
+fn id_of(path: &Path) -> crate::vault::VaultId {
+    match cipher::read_head(path).unwrap() {
+        cipher::Head::Salt(salt) => recovery::vault_id(&salt),
+        other => panic!("{other:?}"),
+    }
+}
 use rusqlite::{Connection, ErrorCode, OpenFlags};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
@@ -322,8 +330,14 @@ fn d1_a_plain_vault_becomes_a_new_encrypted_vault_only_through_spell_and_activat
     let work: Vec<&String> = files.iter().filter(|f| f.ends_with(".partial")).collect();
     assert_eq!(work.len(), 1, "{files:?}");
     assert!(work[0].starts_with(".encrypted.sqlite3."), "{files:?}");
-    assert!(files.contains(&"encrypted.sqlite3.mckey.pending".to_owned()));
-    let (new_id, _) = sidecar::identity(&sidecar::pending_path_for(&target)).unwrap();
+    // No sidecar (Slice E): the new vault id is the new salt's, recorded in the manifest.
+    assert!(!files.iter().any(|f| f.contains(".mckey")), "{files:?}");
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(app.join("vault-convert.json")).unwrap()).unwrap();
+    let new_id = crate::vault::VaultId::parse_hex(manifest["vaultId"].as_str().unwrap()).unwrap();
+    let new_salt =
+        crate::vault::CipherSalt::parse_hex(manifest["cipherSalt"].as_str().unwrap()).unwrap();
+    assert_eq!(recovery::vault_id(&new_salt), new_id);
     assert!(key_store::pending_path(&app, &new_id).exists());
     assert!(!key_store::entry_path(&app, &new_id).exists());
     // The active vault is unchanged; the panel sees the conversion waiting for the spell.
@@ -335,7 +349,7 @@ fn d1_a_plain_vault_becomes_a_new_encrypted_vault_only_through_spell_and_activat
     assert_eq!(shown["mode"], "plain");
     assert_eq!(shown["conversionPending"]["phase"], "verified");
     assert_eq!(shown["conversionPending"]["direction"], "encrypt");
-    // The spell is in no file: not in the manifest, the sidecar or anywhere under the folders.
+    // The spell is in no file: not in the manifest or anywhere under the folders.
     for file in tree(&tmp.0) {
         let bytes = fs::read(tmp.0.join(&file)).unwrap();
         assert!(!bytes.windows(43).any(|w| w == spell.as_bytes()), "{file}");
@@ -370,7 +384,7 @@ fn d1_a_plain_vault_becomes_a_new_encrypted_vault_only_through_spell_and_activat
     let confirmed = confirm(&mut session, &spell);
     assert_eq!(confirmed["ok"], true, "{confirmed}");
     assert_eq!(confirmed["phase"], "converted");
-    assert!(target.exists() && sidecar::path_for(&target).exists());
+    assert!(target.exists() && !sidecar::path_for(&target).exists());
     // Still not active; the source is byte for byte what it was.
     let shown = status_of(&mut session);
     assert!(same_file(
@@ -384,9 +398,10 @@ fn d1_a_plain_vault_becomes_a_new_encrypted_vault_only_through_spell_and_activat
     let Ok(cipher::Head::Salt(salt)) = cipher::read_head(&target) else {
         panic!("not encrypted")
     };
-    let sidecar_found = sidecar::read(&sidecar::path_for(&target)).unwrap();
-    assert_eq!(sidecar_found.cipher_salt, salt);
-    let key = key_store::unlock(&app, &sidecar_found.vault_id, &salt).unwrap();
+    // No sidecar (Slice E): the vault id is the salt's.
+    assert!(!sidecar::path_for(&target).exists());
+    assert!(!sidecar::pending_path_for(&target).exists());
+    let key = key_store::unlock(&app, &recovery::vault_id(&salt), &salt).unwrap();
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     assert_eq!(dump(&cipher::open(&target, &key, flags).unwrap()), before);
     assert!(not_a_database(
@@ -412,14 +427,14 @@ fn d1_a_plain_vault_becomes_a_new_encrypted_vault_only_through_spell_and_activat
     assert_eq!(shown["conversionPending"], json!(null));
     assert_ne!(shown["vaultToken"], source_token);
     let config = active_vault::read_config(&app).unwrap().unwrap();
-    assert_eq!(config.vault_id, Some(sidecar_found.vault_id));
+    assert_eq!(config.vault_id, Some(recovery::vault_id(&salt)));
     assert_eq!(gate(&app).unwrap_err(), GateError::PublicationPending);
     let after = active_dump(&mut session);
     assert!(after.iter().any(|row| row.contains("after-conversion")));
     assert_eq!(after.len(), before.len() + 1);
     // The source still holds everything, untouched by the activation.
     assert_eq!(plain_dump(&source), after);
-    assert!(fs::read(sidecar::path_for(&target)).is_ok());
+    assert!(!sidecar::path_for(&target).exists());
 
     // The spell recovers the new vault where this user's key store is not available.
     let mut other = Session::new(env_of(&tmp, "app2"));
@@ -482,7 +497,6 @@ fn d2_an_encrypted_vault_becomes_a_plain_vault_only_with_the_users_acknowledgeme
     let before = active_dump(&mut session);
     let source_status = status_of(&mut session);
     let source_hash = hash(&source);
-    let sidecar_hash = hash(&sidecar::path_for(&source));
     let keys_before: Vec<(String, String)> = keys_of(&app)
         .into_iter()
         .map(|k| (k.clone(), hash(&app.join("keys").join(&k))))
@@ -550,9 +564,8 @@ fn d2_an_encrypted_vault_becomes_a_plain_vault_only_with_the_users_acknowledgeme
     assert_eq!(plain_dump(&target), before);
     let bytes = fs::read(&target).unwrap();
     assert!(bytes.windows(10).any(|w| w == b"CANARY-url"));
-    // The source, its sidecar and every key store entry are unchanged; it is still active.
+    // The source and every key store entry are unchanged; it is still active.
     assert_eq!(hash(&source), source_hash);
-    assert_eq!(hash(&sidecar::path_for(&source)), sidecar_hash);
     let keys_now: Vec<(String, String)> = keys_of(&app)
         .into_iter()
         .map(|k| (k.clone(), hash(&app.join("keys").join(&k))))
@@ -590,8 +603,9 @@ fn d2_an_encrypted_vault_becomes_a_plain_vault_only_with_the_users_acknowledgeme
     assert_eq!(gate(&app).unwrap_err(), GateError::PublicationPending);
     let after = active_dump(&mut session);
     assert!(after.iter().any(|row| row.contains("after-conversion")));
-    // The encrypted source is kept and still recoverable with its spell (another PC).
-    assert!(source.exists() && sidecar::path_for(&source).exists());
+    // The encrypted source is kept and still recoverable with its spell (another PC), from the
+    // file alone.
+    assert!(source.exists() && !sidecar::path_for(&source).exists());
     let mut other = Session::new(env_of(&tmp, "app2"));
     let recovered = send(
         &mut other,
@@ -628,9 +642,175 @@ fn the_spell_of_an_earlier_vault_never_recovers_a_converted_one() {
     );
     assert_eq!(refused["error"], "recovery_spell_rejected");
     // Each vault answers to its own spell only; the ids differ.
-    let a = sidecar::read(&sidecar::path_for(&original)).unwrap();
-    let b = sidecar::read(&sidecar::path_for(&again)).unwrap();
-    assert_ne!(a.vault_id, b.vault_id);
+    assert_ne!(id_of(&original), id_of(&again));
+}
+
+// --- Slice E: re-issuing the Recovery Spell -------------------------------------------------------
+
+/// The key the key store of `app` holds for the encrypted vault at `path`.
+fn key_of(app: &Path, path: &Path) -> VaultKey {
+    let cipher::Head::Salt(salt) = cipher::read_head(path).unwrap() else {
+        panic!("not encrypted")
+    };
+    key_store::unlock(app, &recovery::vault_id(&salt), &salt).unwrap()
+}
+
+#[test]
+fn reissuing_the_spell_makes_a_new_vault_that_only_the_new_spell_recovers() {
+    let tmp = TempDir::new();
+    let env = tmp.env();
+    let app = env.app_dir.clone().unwrap();
+    let mut session = Session::new(env.clone());
+    memocampus_native_host::policy_store::PolicyStore::new(app.clone())
+        .unwrap()
+        .initialize()
+        .unwrap();
+    let source = tmp.0.join("enc.sqlite3");
+    let old_spell = create_encrypted(&mut session, &source);
+    fill(&mut session);
+    let token = token_of(&mut session);
+    let published = send(
+        &mut session,
+        json!({ "type": "vault_publication_confirm", "expectedVaultToken": token }),
+    );
+    assert_eq!(published["status"]["publication"], "confirmed");
+    let before = active_dump(&mut session);
+    let source_hash = hash(&source);
+    let source_token = token_of(&mut session);
+    let old_key = key_of(&app, &source);
+    let old_id = id_of(&source);
+
+    // The direction must fit: a plain vault has no spell to re-issue.
+    let target = tmp.0.join("enc-new.sqlite3");
+    let started = start(&mut session, "reissue", &target, json!({}));
+    assert_eq!(started["ok"], true, "{started}");
+    assert_eq!(started["direction"], "reissue");
+    assert_eq!(started["phase"], "verified");
+    let new_spell = started["recoverySpell"].as_str().unwrap().to_owned();
+    assert_eq!(new_spell.len(), 43);
+    assert_ne!(new_spell, old_spell, "a new spell");
+    // Nothing usable yet; the source is still active, unchanged and published.
+    assert!(!target.exists());
+    let shown = status_of(&mut session);
+    assert_eq!(shown["vaultToken"], source_token);
+    assert_eq!(shown["conversionPending"]["direction"], "reissue");
+    assert_eq!(shown["publication"], "confirmed");
+    assert!(!shown.to_string().contains(&new_spell));
+    // A second re-issue (or any conversion) is refused while this one is pending.
+    let again = start(
+        &mut session,
+        "reissue",
+        &tmp.0.join("third.sqlite3"),
+        json!({}),
+    );
+    assert_eq!(again["error"], "vault_convert_pending");
+    // Not active before the new spell is confirmed in full; the old spell is not the new one.
+    assert_eq!(
+        activate(&mut session, &started["vaultToken"])["error"],
+        "vault_convert_spell_unconfirmed"
+    );
+    assert_eq!(
+        confirm(&mut session, &old_spell)["error"],
+        "recovery_spell_rejected"
+    );
+    assert_eq!(
+        confirm(&mut session, &new_spell[..42])["error"],
+        "recovery_spell_invalid"
+    );
+    // Recording goes on into the source meanwhile.
+    add_visit(&mut session, "during-reissue");
+    assert_eq!(confirm(&mut session, &new_spell)["ok"], true);
+    add_visit(&mut session, "after-confirmation");
+    let activated = activate(&mut session, &started["vaultToken"]);
+    assert_eq!(activated["ok"], true, "{activated}");
+    let shown = &activated["status"];
+    assert_eq!(shown["mode"], "encrypted");
+    assert_eq!(shown["publication"], "pending", "never inherited");
+    assert_eq!(gate(&app).unwrap_err(), GateError::PublicationPending);
+    // Nothing recorded meanwhile was lost.
+    let after = active_dump(&mut session);
+    assert!(after.iter().any(|row| row.contains("during-reissue")));
+    assert!(after.iter().any(|row| row.contains("after-confirmation")));
+    assert_eq!(after.len(), before.len() + 2);
+    // A new salt, vault id and key; the old key is never reused.
+    let new_id = id_of(&target);
+    assert_ne!(new_id, old_id);
+    let new_key = key_of(&app, &target);
+    assert!(!new_key.same_as(&old_key));
+    assert_eq!(
+        active_vault::read_config(&app).unwrap().unwrap().vault_id,
+        Some(new_id)
+    );
+    // The old vault is kept as it was at the switch (its file never written by the re-issue).
+    assert!(source.exists());
+    let mut old_session = Session::new(env_of(&tmp, "app-old"));
+    let old_recovered = send(
+        &mut old_session,
+        json!({ "type": "vault_recover", "path": source, "recoverySpell": old_spell }),
+    );
+    assert_eq!(
+        old_recovered["ok"], true,
+        "the old spell still opens the old vault"
+    );
+    let _ = source_hash;
+    // Elsewhere, only the new spell opens the new vault, from the file alone.
+    let mut other = Session::new(env_of(&tmp, "app2"));
+    let refused = send(
+        &mut other,
+        json!({ "type": "vault_recover", "path": target, "recoverySpell": old_spell }),
+    );
+    assert_eq!(refused["error"], "recovery_spell_rejected");
+    let recovered = send(
+        &mut other,
+        json!({ "type": "vault_recover", "path": target, "recoverySpell": new_spell }),
+    );
+    assert_eq!(recovered["ok"], true, "{recovered}");
+    assert_eq!(recovered["status"]["publication"], "pending");
+    assert_eq!(active_dump(&mut other), after);
+    // The new spell is in no file.
+    for file in tree(&tmp.0) {
+        let bytes = fs::read(tmp.0.join(&file)).unwrap();
+        assert!(
+            !bytes.windows(43).any(|w| w == new_spell.as_bytes()),
+            "{file}"
+        );
+        assert!(!new_key.appears_in(&bytes), "{file}");
+    }
+}
+
+#[test]
+fn a_reissue_is_refused_for_a_plain_vault_and_can_be_discarded_leaving_the_source_as_it_was() {
+    let tmp = TempDir::new();
+    let env = tmp.env();
+    let app = env.app_dir.clone().unwrap();
+    let mut session = Session::new(env.clone());
+    let plain = tmp.0.join("plain.sqlite3");
+    create_plain(&mut session, &plain);
+    let refused = start(&mut session, "reissue", &tmp.0.join("x.sqlite3"), json!({}));
+    assert_eq!(refused["error"], "vault_convert_mode_mismatch");
+    let source = tmp.0.join("enc.sqlite3");
+    create_encrypted(&mut session, &source);
+    fill(&mut session);
+    let source_hash = hash(&source);
+    let keys_before = keys_of(&app);
+    let files_before = tree(&tmp.0);
+    let target = tmp.0.join("enc-new.sqlite3");
+    let started = start(&mut session, "reissue", &target, json!({}));
+    assert_eq!(started["ok"], true, "{started}");
+    let discarded = send(&mut session, json!({ "type": "vault_convert_discard" }));
+    assert_eq!(discarded["ok"], true);
+    assert_eq!(tree(&tmp.0), files_before);
+    assert_eq!(keys_of(&app), keys_before);
+    assert_eq!(hash(&source), source_hash);
+    assert!(same_file(
+        Path::new(discarded["status"]["vaultPath"].as_str().unwrap()),
+        &source
+    ));
+    // The same target can be used again.
+    assert_eq!(
+        start(&mut session, "reissue", &target, json!({}))["ok"],
+        true
+    );
 }
 
 // --- Refusals ----------------------------------------------------------------------------------
@@ -799,10 +979,10 @@ fn with_fault<T>(step: Step, fault: Fault, f: impl FnOnce() -> T) -> T {
 
 #[test]
 fn a_failed_conversion_leaves_nothing_and_a_crashed_one_is_never_usable_until_finished() {
-    for direction in ["encrypt", "decrypt"] {
+    for direction in ["encrypt", "decrypt", "reissue"] {
         let steps: &[Step] = match direction {
-            "encrypt" => &[Step::ConvertCopy, Step::ConvertVerify, Step::ConvertKeys],
-            _ => &[Step::ConvertCopy, Step::ConvertVerify, Step::ConvertPromote],
+            "decrypt" => &[Step::ConvertCopy, Step::ConvertVerify, Step::ConvertPromote],
+            _ => &[Step::ConvertCopy, Step::ConvertVerify, Step::ConvertKeys],
         };
         for &step in steps {
             for fault in [Fault::Error, Fault::DiskFull, Fault::Crash] {
@@ -878,7 +1058,7 @@ fn a_failed_conversion_leaves_nothing_and_a_crashed_one_is_never_usable_until_fi
                     "vault_convert_incomplete",
                     "{case}"
                 );
-                if direction == "encrypt" {
+                if direction != "decrypt" {
                     assert_eq!(
                         confirm(&mut restarted, OTHER_SPELL)["error"],
                         "vault_convert_incomplete",
