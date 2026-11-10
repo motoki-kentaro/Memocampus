@@ -107,7 +107,7 @@ pub fn status(session: &Session) -> Value {
         "publication": null,
         "publicationPolicyRevision": null,
         // Issue #51 Slice B: whether new vaults can be encrypted here (DPAPI: Windows only), and
-        // the target of a creation interrupted before its phrase was confirmed (to be cancelled).
+        // the target of a creation interrupted before its spell was confirmed (to be cancelled).
         "encryptionAvailable": cfg!(windows),
         "creationPending": encrypted::pending_creation(session),
         // Issue #51 Slice C: a restored vault not yet activated (or a restore interrupted).
@@ -159,7 +159,7 @@ pub fn status(session: &Session) -> Value {
         status["publication"] = "pending".into();
     }
     // Issue #51 Slice B: an encrypted vault this user cannot unlock may be recovered with its
-    // phrase; a creation interrupted before its confirmation is shown so it can be cancelled.
+    // spell; a creation interrupted before its confirmation is shown so it can be cancelled.
     if mode == VaultMode::Encrypted && status["state"] != "ready" {
         status["recoveryAvailable"] = encrypted::recovery_available(&path).into();
     }
@@ -376,7 +376,7 @@ fn open(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Result
 /// Issue #51 Slice C: `protection` is `"normal"` (default) or `"password"` (with `password`). A plain
 /// vault's normal backup is format A (a plain SQLite file, as before); the others are containers
 /// (`backup.rs`): B (encrypted vault), C (plain, password) and D (encrypted, password). B and D also
-/// need `recoveryPhrase`, which must recover this very vault.
+/// need `recoverySpell`, which must recover this very vault.
 fn backup(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Result<Value, Failure> {
     require_management(session)?;
     let expected = message
@@ -392,23 +392,11 @@ fn backup(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Resu
         return Err(VaultError::Switched.into());
     }
     let kind = backup::kind_for(active.mode, &protection);
-    // B and D (review finding C-03): the phrase the user holds, checked for syntax before the
-    // dialog and against this vault's envelope and key before anything is written.
-    let phrase = match kind {
-        Some(memocampus_native_host::secure_vault::container::Kind::B)
-        | Some(memocampus_native_host::secure_vault::container::Kind::D) => {
-            let typed = zeroize::Zeroizing::new(
-                message
-                    .get("recoveryPhrase")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
-            );
-            Some(
-                memocampus_native_host::secure_vault::phrase::parse(&typed)
-                    .map_err(encrypted::phrase_failure)?,
-            )
-        }
+    // B and D (review finding C-03): the spell the user holds, checked for form before the
+    // dialog and against this vault's envelope and key before anything is written. A and C never
+    // take one.
+    let spell = match kind {
+        Some(kind) if kind.needs_spell() => Some(encrypted::requested_spell(message)?),
         _ => None,
     };
     // Neither a connection nor a lock is held while the dialog is open.
@@ -438,7 +426,7 @@ fn backup(session: &mut Session, dialogs: &dyn Dialogs, message: &Value) -> Resu
             .clone()
             .ok_or(VaultError::AppDirUnavailable)?,
         token: ticket.token.clone(),
-        phrase,
+        spell,
     };
     let written = session.read_for(&ticket, |db| {
         backup::write(db, &source, &dir, kind, &protection, SystemTime::now())

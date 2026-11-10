@@ -1,5 +1,5 @@
 use super::*;
-use crate::secure_vault::phrase;
+use crate::secure_vault::spell;
 use std::io::Cursor;
 
 /// The cheapest parameters a restore accepts, to keep the tests fast.
@@ -7,12 +7,12 @@ fn cheap_kdf() -> Kdf {
     Kdf::with_cost(ARGON_M_KIB_MIN, 1, 1).unwrap()
 }
 
-fn fixture() -> (VaultKey, RecoverySeed, VaultFacts) {
+fn fixture() -> (VaultKey, RecoverySpell, VaultFacts) {
     let key = VaultKey::generate().unwrap();
-    let seed = RecoverySeed::generate().unwrap();
+    let secret = RecoverySpell::generate().unwrap();
     let vault_id = VaultId::generate().unwrap();
     let recovery_salt = CipherSalt::from_array([7; 16]);
-    let recovery = recovery::wrap(&key, &seed, &vault_id, &recovery_salt).unwrap();
+    let recovery = recovery::wrap(&key, &secret, &vault_id, &recovery_salt).unwrap();
     let facts = VaultFacts {
         schema_version: crate::schema::SCHEMA_VERSION,
         vault_id,
@@ -20,7 +20,7 @@ fn fixture() -> (VaultKey, RecoverySeed, VaultFacts) {
         recovery_salt,
         recovery,
     };
-    (key, seed, facts)
+    (key, secret, facts)
 }
 
 fn payload(len: usize) -> Vec<u8> {
@@ -35,63 +35,67 @@ fn package_b(key: &VaultKey, facts: VaultFacts, data: &[u8], policy: Option<&[u8
     out
 }
 
-fn restore_b(bytes: &[u8], seed: &RecoverySeed) -> Result<(RestoredB, Vec<u8>), FormatError> {
+fn restore_b(bytes: &[u8], secret: &RecoverySpell) -> Result<(RestoredB, Vec<u8>), FormatError> {
     let mut sink = Vec::new();
     let restored = read_b(
         &mut Cursor::new(bytes),
         bytes.len() as u64,
-        |header| unlock_with_phrase(header, seed),
+        |header| unlock_with_spell(header, secret),
         &mut sink,
     )?;
     Ok((restored, sink))
 }
 
 #[test]
-fn format_b_round_trips_with_the_phrase_only() {
-    let (key, seed, facts) = fixture();
+fn format_b_round_trips_with_the_spell_only() {
+    let (key, secret, facts) = fixture();
     let data = payload(3 * CHUNK + 123);
     let policy = br#"{"policy":"CANARY-policy-rule"}"#;
     let bytes = package_b(&key, facts, &data, Some(policy));
     assert_eq!(detect(&bytes[..16]), Detected::Container(Kind::B));
-    let (restored, sink) = restore_b(&bytes, &seed).unwrap();
+    let (restored, sink) = restore_b(&bytes, &secret).unwrap();
     assert_eq!(sink, data);
     assert!(restored.key.same_as(&key));
     assert_eq!(
         restored.policy.as_deref().map(Vec::as_slice),
         Some(&policy[..])
     );
-    // The phrase as a user types it.
-    let typed = phrase::parse(&phrase::encode(&seed).to_ascii_uppercase()).unwrap();
+    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), VERSION);
+    let header: serde_json::Value =
+        serde_json::from_slice(&read_prefix(&mut Cursor::new(&bytes)).unwrap().header).unwrap();
+    assert_eq!(header["recovery"]["scheme"], recovery::SCHEME);
+    // The spell as a user pastes it.
+    let typed = spell::parse(&spell::encode(&secret)).unwrap();
     assert!(restore_b(&bytes, &typed).is_ok());
     // Nothing secret in the file: the key in no form, the policy copy only sealed.
     assert!(!key.appears_in(&bytes));
     assert!(!bytes.windows(6).any(|w| w == b"CANARY"));
     assert!(!bytes
-        .windows(phrase::encode(&seed).len())
-        .any(|w| w == phrase::encode(&seed).as_bytes()));
+        .windows(spell::encode(&secret).len())
+        .any(|w| w == spell::encode(&secret).as_bytes()));
 }
 
 #[test]
-fn format_b_refuses_a_wrong_phrase_before_writing_anything() {
+fn format_b_refuses_a_wrong_spell_before_writing_anything() {
     let (key, _, facts) = fixture();
     let bytes = package_b(&key, facts, &payload(4096), None);
     let mut sink = Vec::new();
-    let other = RecoverySeed::generate().unwrap();
+    let other = RecoverySpell::generate().unwrap();
     let error = read_b(
         &mut Cursor::new(&bytes),
         bytes.len() as u64,
-        |header| unlock_with_phrase(header, &other),
+        |header| unlock_with_spell(header, &other),
         &mut sink,
     )
     .err()
     .unwrap();
-    assert_eq!(error, FormatError::PhraseRejected);
+    assert_eq!(error, FormatError::SpellRejected);
     assert!(sink.is_empty());
 }
 
 #[test]
 fn every_altered_byte_of_a_format_b_package_is_refused() {
-    let (key, seed, facts) = fixture();
+    let (key, secret, facts) = fixture();
     let bytes = package_b(&key, facts, &payload(2 * CHUNK + 7), Some(b"{}"));
     let prefix_len = 16 + u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
     let mut positions: Vec<usize> = (0..prefix_len).collect();
@@ -100,31 +104,34 @@ fn every_altered_byte_of_a_format_b_package_is_refused() {
     for position in positions {
         let mut altered = bytes.clone();
         altered[position] ^= 0x01;
-        assert!(restore_b(&altered, &seed).is_err(), "byte {position}");
+        assert!(restore_b(&altered, &secret).is_err(), "byte {position}");
     }
 }
 
 #[test]
 fn a_format_b_package_that_is_cut_or_extended_is_refused_before_any_crypto() {
-    let (key, seed, facts) = fixture();
+    let (key, secret, facts) = fixture();
     let bytes = package_b(&key, facts, &payload(CHUNK), None);
     for cut in [1, 31, 32, 1000, bytes.len() - 20] {
         let short = &bytes[..bytes.len() - cut];
         assert_eq!(
-            restore_b(short, &seed).err(),
+            restore_b(short, &secret).err(),
             Some(FormatError::Incomplete),
             "{cut}"
         );
     }
     let mut long = bytes.clone();
     long.extend_from_slice(b"appended");
-    assert_eq!(restore_b(&long, &seed).err(), Some(FormatError::Incomplete));
+    assert_eq!(
+        restore_b(&long, &secret).err(),
+        Some(FormatError::Incomplete)
+    );
     // A file whose real length is less than the header claims, read with the claimed length.
     let mut sink = Vec::new();
     let error = read_b(
         &mut Cursor::new(&bytes[..bytes.len() - 10]),
         bytes.len() as u64,
-        |header| unlock_with_phrase(header, &seed),
+        |header| unlock_with_spell(header, &secret),
         &mut sink,
     )
     .err();
@@ -146,7 +153,7 @@ fn with_header(bytes: &[u8], edit: impl FnOnce(&mut serde_json::Value)) -> Vec<u
 
 #[test]
 fn crafted_format_b_headers_are_refused_without_allocating() {
-    let (key, seed, facts) = fixture();
+    let (key, secret, facts) = fixture();
     let bytes = package_b(&key, facts, &payload(4096), None);
     for (edit, expected) in [
         (
@@ -177,14 +184,14 @@ fn crafted_format_b_headers_are_refused_without_allocating() {
         ),
     ] {
         let altered = with_header(&bytes, edit);
-        assert_eq!(restore_b(&altered, &seed).err(), Some(expected));
+        assert_eq!(restore_b(&altered, &secret).err(), Some(expected));
     }
     // A header length of zero, or beyond the limit.
     for len in [0u32, MAX_HEADER + 1, u32::MAX] {
         let mut altered = bytes.clone();
         altered[12..16].copy_from_slice(&len.to_le_bytes());
         assert_eq!(
-            restore_b(&altered, &seed).err(),
+            restore_b(&altered, &secret).err(),
             Some(FormatError::Malformed)
         );
     }
@@ -204,11 +211,20 @@ fn detection_never_takes_a_file_for_a_container_it_is_not() {
     );
     assert_eq!(detect(&[]), Detected::Unknown);
     let mut head = MAGIC.to_vec();
-    head.extend_from_slice(&2u16.to_le_bytes());
+    head.extend_from_slice(&3u16.to_le_bytes());
     head.extend_from_slice(&[b'B', 0, 1, 0, 0, 0]);
     assert_eq!(detect(&head), Detected::UnsupportedVersion);
+    head[8] = 0;
+    assert_eq!(detect(&head), Detected::UnsupportedVersion, "version 0");
+    head[8] = 2;
+    assert_eq!(detect(&head), Detected::Container(Kind::B));
+    head[10] = b'D';
+    assert_eq!(detect(&head), Detected::Container(Kind::D));
+    // Slice C (12-word phrase): B and D are named as such, C is unchanged and still read.
     head[8] = 1;
-    head[9] = 0;
+    assert_eq!(detect(&head), Detected::LegacyRecoveryPhrase);
+    head[10] = b'B';
+    assert_eq!(detect(&head), Detected::LegacyRecoveryPhrase);
     head[10] = b'Z';
     assert_eq!(detect(&head), Detected::Unknown);
     head[10] = b'C';
@@ -509,11 +525,11 @@ fn a_c_container_is_not_opened_as_d_and_a_b_package_is_not_a_c_container() {
         .err(),
         Some(FormatError::UnsupportedFormat)
     );
-    let (key, seed, facts) = fixture();
+    let (key, secret, facts) = fixture();
     let b = package_b(&key, facts, &payload(4096), None);
     assert!(PasswordReader::open(Cursor::new(&b), b.len() as u64, b"password", Kind::C).is_err());
     assert_eq!(
-        restore_b(&bytes, &seed).err(),
+        restore_b(&bytes, &secret).err(),
         Some(FormatError::UnsupportedFormat)
     );
 }
@@ -540,7 +556,7 @@ fn container_d(password: &[u8], key: &VaultKey, facts: VaultFacts, data: &[u8]) 
 fn open_d(
     bytes: &[u8],
     password: &[u8],
-    seed: &RecoverySeed,
+    secret: &RecoverySpell,
 ) -> Result<(RestoredB, Vec<u8>), FormatError> {
     let (header, mut reader) =
         PasswordReader::open(Cursor::new(bytes), bytes.len() as u64, password, Kind::D)?;
@@ -548,7 +564,7 @@ fn open_d(
     let restored = read_b(
         &mut reader,
         header.sections[0].len,
-        |b| unlock_with_phrase(b, seed),
+        |b| unlock_with_spell(b, secret),
         &mut sink,
     )?;
     if !reader.is_complete() {
@@ -558,27 +574,27 @@ fn open_d(
 }
 
 #[test]
-fn format_d_needs_both_the_password_and_the_phrase() {
-    let (key, seed, facts) = fixture();
+fn format_d_needs_both_the_password_and_the_spell() {
+    let (key, secret, facts) = fixture();
     let data = payload(2 * CHUNK + 999);
     let bytes = container_d(b"outer password", &key, facts, &data);
     assert_eq!(detect(&bytes[..16]), Detected::Container(Kind::D));
-    let (restored, sink) = open_d(&bytes, b"outer password", &seed).unwrap();
+    let (restored, sink) = open_d(&bytes, b"outer password", &secret).unwrap();
     assert_eq!(sink, data);
     assert!(restored.key.same_as(&key));
     assert_eq!(
         restored.policy.as_deref().map(Vec::as_slice),
         Some(&b"{\"p\":1}"[..])
     );
-    // The password alone: the phrase is still asked for.
-    let other = RecoverySeed::generate().unwrap();
+    // The password alone: the spell is still asked for.
+    let other = RecoverySpell::generate().unwrap();
     assert_eq!(
         open_d(&bytes, b"outer password", &other).err(),
-        Some(FormatError::PhraseRejected)
+        Some(FormatError::SpellRejected)
     );
-    // The phrase alone does nothing against the outer layer.
+    // The spell alone does nothing against the outer layer.
     assert_eq!(
-        open_d(&bytes, b"wrong password", &seed).err(),
+        open_d(&bytes, b"wrong password", &secret).err(),
         Some(FormatError::PasswordRejected)
     );
     // The inner package's header (vault id, envelope) is not readable from the file.
@@ -588,7 +604,7 @@ fn format_d_needs_both_the_password_and_the_phrase() {
         let mut altered = bytes.clone();
         altered[position] ^= 0x04;
         assert!(
-            open_d(&altered, b"outer password", &seed).is_err(),
+            open_d(&altered, b"outer password", &secret).is_err(),
             "{position}"
         );
     }
@@ -650,4 +666,120 @@ fn every_backup_gets_a_new_salt_and_nonce() {
     };
     assert_ne!(header(&a).kdf.salt, header(&b).kdf.salt);
     assert_ne!(header(&a).nonce_prefix, header(&b).nonce_prefix);
+}
+
+#[test]
+fn slice_c_phrase_containers_are_refused_as_such_before_any_key_is_derived() {
+    let (key, secret, facts) = fixture();
+    let b = package_b(&key, facts, &payload(4096), None);
+    let mut legacy_b = b.clone();
+    legacy_b[8..10].copy_from_slice(&LEGACY_VERSION.to_le_bytes());
+    assert_eq!(
+        restore_b(&legacy_b, &secret).err(),
+        Some(FormatError::LegacyRecoveryPhrase)
+    );
+    let (key, _, facts) = fixture();
+    let d = container_d(b"outer password", &key, facts, &payload(4096));
+    let mut legacy_d = d.clone();
+    legacy_d[8..10].copy_from_slice(&LEGACY_VERSION.to_le_bytes());
+    assert_eq!(
+        PasswordReader::open(
+            Cursor::new(&legacy_d),
+            legacy_d.len() as u64,
+            b"outer password",
+            Kind::D
+        )
+        .err(),
+        Some(FormatError::LegacyRecoveryPhrase)
+    );
+    // A version 2 D whose inner package is a version 1 B: refused at the inner prefix.
+    let (key, secret, facts) = fixture();
+    let prepared = PreparedB::new(&key, facts, 4096, None).unwrap();
+    let mut inner = Vec::new();
+    prepared
+        .write_to(&mut inner, &mut Cursor::new(payload(4096)))
+        .unwrap();
+    inner[8..10].copy_from_slice(&LEGACY_VERSION.to_le_bytes());
+    let mut writer = PasswordWriter::start(
+        Vec::new(),
+        b"outer password",
+        Kind::D,
+        cheap_kdf(),
+        vec![Section {
+            kind: SECTION_PACKAGE.into(),
+            len: inner.len() as u64,
+        }],
+    )
+    .unwrap();
+    writer.write_all(&inner).unwrap();
+    let nested = writer.finish().unwrap();
+    assert_eq!(
+        open_d(&nested, b"outer password", &secret).err(),
+        Some(FormatError::LegacyRecoveryPhrase)
+    );
+}
+
+#[test]
+fn a_slice_c_format_c_file_is_still_read_and_new_ones_are_version_2() {
+    let meta = Meta::plain();
+    let meta_bytes = serde_json::to_vec(&meta).unwrap();
+    let vault = payload(CHUNK + 77);
+    let write = |version: u16| {
+        WRITE_VERSION.with(|v| v.set(version));
+        let mut writer = PasswordWriter::start(
+            Vec::new(),
+            b"password",
+            Kind::C,
+            cheap_kdf(),
+            sections_c(&meta_bytes, None, &vault),
+        )
+        .unwrap();
+        writer.write_all(&meta_bytes).unwrap();
+        writer.write_all(&vault).unwrap();
+        let bytes = writer.finish().unwrap();
+        WRITE_VERSION.with(|v| v.set(VERSION));
+        bytes
+    };
+    for version in [LEGACY_VERSION, VERSION] {
+        let bytes = write(version);
+        assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), version);
+        assert_eq!(detect(&bytes[..16]), Detected::Container(Kind::C));
+        let (header, mut reader) = PasswordReader::open(
+            Cursor::new(&bytes),
+            bytes.len() as u64,
+            b"password",
+            Kind::C,
+        )
+        .unwrap();
+        let mut plain = Vec::new();
+        reader.read_to_end(&mut plain).unwrap();
+        assert!(reader.is_complete());
+        assert_eq!(header.sections.len(), 2);
+        assert_eq!(&plain[meta_bytes.len()..], &vault[..]);
+        // The version is authenticated: a version 1 file relabelled 2 (or the reverse) fails.
+        let mut relabelled = bytes.clone();
+        relabelled[8..10].copy_from_slice(
+            &(if version == VERSION {
+                LEGACY_VERSION
+            } else {
+                VERSION
+            })
+            .to_le_bytes(),
+        );
+        let opened = PasswordReader::open(
+            Cursor::new(&relabelled),
+            relabelled.len() as u64,
+            b"password",
+            Kind::C,
+        );
+        let failed = match opened {
+            Err(_) => true,
+            Ok((_, mut reader)) => {
+                let mut sink = Vec::new();
+                reader.read_to_end(&mut sink).is_err()
+            }
+        };
+        assert!(failed, "{version}");
+    }
+    assert_eq!(write_version(), VERSION);
 }

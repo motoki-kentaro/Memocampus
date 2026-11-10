@@ -1,6 +1,6 @@
 //! Key material and identifiers.
 //!
-//! `VaultKey` and `RecoverySeed` are secrets: they cannot be printed, cloned, compared with `==` or
+//! `VaultKey` and `RecoverySpell` are secrets: they cannot be printed, cloned, compared with `==` or
 //! serialized, and their bytes are zeroed when they are dropped. Their bytes are visible only inside
 //! this module tree (`expose`), where they are handed to a cipher or the key protector.
 //!
@@ -92,37 +92,43 @@ impl std::fmt::Debug for VaultKey {
     }
 }
 
-/// The 128 bits behind the 12-word recovery phrase (BIP-39 entropy). Independent of the vault key:
-/// the phrase is not an encoding of VK, it unlocks an envelope that holds VK.
-pub struct RecoverySeed([u8; 16]);
+/// The 256 bits behind the Recovery Spell (ふっかつのじゅもん), from the OS CSPRNG. Independent
+/// of the vault key: the spell is not an encoding of VK, it unlocks an envelope that holds VK. Its
+/// bytes are only ever the input keying material of HKDF (`recovery`), never a key themselves.
+pub struct RecoverySpell([u8; 32]);
 
-impl RecoverySeed {
+impl RecoverySpell {
     pub fn generate() -> Result<Self, RandomError> {
-        let mut seed = Self([0u8; 16]);
-        random_bytes(&mut seed.0)?;
-        Ok(seed)
+        let mut spell = Self([0u8; 32]);
+        random_bytes(&mut spell.0)?;
+        Ok(spell)
     }
 
-    pub(crate) fn from_bytes(bytes: &mut [u8; 16]) -> Self {
-        let seed = Self(*bytes);
+    pub(crate) fn from_bytes(bytes: &mut [u8; 32]) -> Self {
+        let spell = Self(*bytes);
         bytes.zeroize();
-        seed
+        spell
     }
 
-    pub(crate) fn expose(&self) -> &[u8; 16] {
+    pub(crate) fn expose(&self) -> &[u8; 32] {
         &self.0
+    }
+
+    /// Constant-time equality.
+    pub fn same_as(&self, other: &Self) -> bool {
+        self.0.ct_eq(&other.0).into()
     }
 }
 
-impl Drop for RecoverySeed {
+impl Drop for RecoverySpell {
     fn drop(&mut self) {
         self.0.zeroize();
     }
 }
 
-impl std::fmt::Debug for RecoverySeed {
+impl std::fmt::Debug for RecoverySpell {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("RecoverySeed(..)")
+        f.write_str("RecoverySpell(..)")
     }
 }
 
@@ -204,8 +210,8 @@ mod tests {
                 assert!(!a.same_as(b));
             }
         }
-        let shown = format!("{:?} {:?}", keys[0], RecoverySeed::generate().unwrap());
-        assert_eq!(shown, "VaultKey(..) RecoverySeed(..)");
+        let shown = format!("{:?} {:?}", keys[0], RecoverySpell::generate().unwrap());
+        assert_eq!(shown, "VaultKey(..) RecoverySpell(..)");
         assert!(!keys[0].appears_in(shown.as_bytes()));
     }
 

@@ -55,8 +55,12 @@ const ERROR_MESSAGES = {
   vault_creation_pending: "作成途中の暗号化Vaultがあります。破棄してから、もう一度作成してください。",
   vault_creation_not_pending: "作成途中の暗号化Vaultが見つかりません。最初から作成し直してください。",
   vault_creation_damaged: "作成途中の暗号化Vaultのファイルが壊れているか、見つかりません。破棄して作成し直してください。",
-  recovery_phrase_invalid: "リカバリーフレーズの形式が正しくありません。",
-  recovery_phrase_rejected: "リカバリーフレーズが、このVaultのものと一致しません。Vaultも鍵も変更していません。",
+  recovery_spell_invalid: "ふっかつのじゅもんの形式が正しくありません。",
+  recovery_spell_rejected: "ふっかつのじゅもんが、このVaultのものと一致しません。Vaultも鍵も変更していません。",
+  recovery_metadata_unsupported:
+    "このVaultの復旧情報ファイル（.mckey）は、以前の12単語のリカバリーフレーズ方式のもので、この版では使えません。このWindowsユーザーで開けるVaultはそのまま使えますが、別の環境での復旧や形式B・Dのバックアップはできません。",
+  backup_legacy_recovery_phrase:
+    "このバックアップは、以前の12単語のリカバリーフレーズ方式で作られたもの（形式BまたはD）で、この版では復元できません。何も変更していません。",
   recovery_metadata_missing: "このVaultの復旧情報ファイル（.mckey）が見つかりません。Vaultと同じフォルダに置いてください。",
   recovery_metadata_damaged: "このVaultの復旧情報ファイル（.mckey）が壊れているか、改変されています。",
   recovery_metadata_mismatch: "復旧情報ファイル（.mckey）が、このVaultファイルのものではありません。",

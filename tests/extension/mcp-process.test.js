@@ -170,9 +170,10 @@ test("end to end with the real host and MCP: an encrypted vault written by the h
     assert.equal((await call({ type: "policy_initialize" })).ok, true);
     const begun = await call({ type: "vault_create_encrypted", path: vault });
     assert.equal(begun.ok, true, JSON.stringify(begun));
-    assert.equal(begun.recoveryPhrase.length, 12);
-    const phrase = begun.recoveryPhrase.join(" ");
-    const created = await call({ type: "vault_create_encrypted_commit", recoveryPhrase: phrase });
+    assert.match(begun.recoverySpell, /^[A-Za-z0-9_-]{43}$/);
+    assert.equal(begun.recoveryPhrase, undefined);
+    const spell = begun.recoverySpell;
+    const created = await call({ type: "vault_create_encrypted_commit", recoverySpell: spell });
     assert.equal(created.ok, true, JSON.stringify(created));
     assert.equal(created.status.mode, "encrypted");
     assert.equal(created.status.publication, "pending");
@@ -183,13 +184,13 @@ test("end to end with the real host and MCP: an encrypted vault written by the h
       const ack = await call({ type: "visit", id, url, title, incognito: false, visitedAt: "2026-11-09T10:00:00.000Z" });
       assert.equal(ack.ok, true, JSON.stringify(ack));
     }
-    // At rest: neither the rows nor the phrase are readable in any file of the app directory.
+    // At rest: neither the rows nor the spell are readable in any file of the app directory.
     for (const name of readdirSync(appDir, { recursive: true })) {
       const file = path.join(appDir, String(name));
       if (!statSync(file).isFile()) continue;
       const bytes = readFileSync(file);
       assert.equal(bytes.includes("encrypted-row"), false, file);
-      assert.equal(bytes.includes(phrase), false, file);
+      assert.equal(bytes.includes(spell), false, file);
     }
 
     const pending = await failure(startMcpServer(servers, env, []).initialize("enc-e2e"));
@@ -201,7 +202,7 @@ test("end to end with the real host and MCP: an encrypted vault written by the h
     const text = JSON.stringify(found);
     assert.match(text, /encrypted-row/);
     assert.doesNotMatch(text, /CANARY/, "the privacy gate applies to encrypted vaults too");
-    assert.equal(text.includes(phrase), false);
+    assert.equal(text.includes(spell), false);
   } finally {
     for (const server of servers) await server.close();
     rmSync(appDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -249,23 +250,23 @@ test("end to end with the real host and MCP: a password backup of an encrypted v
   try {
     assert.equal((await first.call({ type: "policy_initialize" })).ok, true);
     const begun = await first.call({ type: "vault_create_encrypted", path: path.join(root, "enc.sqlite3") });
-    const phrase = begun.recoveryPhrase.join(" ");
-    assert.equal((await first.call({ type: "vault_create_encrypted_commit", recoveryPhrase: phrase })).ok, true);
+    const spell = begun.recoverySpell;
+    assert.equal((await first.call({ type: "vault_create_encrypted_commit", recoverySpell: spell })).ok, true);
     const ack = await first.call({ type: "visit", id: "v1", url: "https://public.test/restored-row", title: "Restored row", incognito: false, visitedAt: "2026-11-09T10:00:00.000Z" });
     assert.equal(ack.ok, true, JSON.stringify(ack));
     const shown = await first.call({ type: "vault_status" });
-    const backedUp = await first.call({ type: "vault_backup", expectedVaultToken: shown.status.vaultToken, directory: backups, protection: "password", password: "e2e password", recoveryPhrase: phrase });
+    const backedUp = await first.call({ type: "vault_backup", expectedVaultToken: shown.status.vaultToken, directory: backups, protection: "password", password: "e2e password", recoverySpell: spell });
     assert.equal(backedUp.ok, true, JSON.stringify(backedUp));
     assert.equal(backedUp.format, "D");
     const bytes = readFileSync(backedUp.backupPath);
-    for (const secret of ["restored-row", "e2e password", phrase, "SQLite format 3"]) assert.equal(bytes.includes(secret), false, secret);
+    for (const secret of ["restored-row", "e2e password", spell, "SQLite format 3"]) assert.equal(bytes.includes(secret), false, secret);
 
     // The new PC: a policy of its own is ready, which must not publish the restored vault.
     assert.equal((await second.call({ type: "policy_initialize" })).ok, true);
     const inspected = await second.call({ type: "vault_restore_inspect", path: backedUp.backupPath });
-    assert.deepEqual([inspected.format, inspected.needsPassword, inspected.needsPhrase], ["D", true, true]);
+    assert.deepEqual([inspected.format, inspected.needsPassword, inspected.needsSpell], ["D", true, true]);
     const target = path.join(root, "restored.sqlite3");
-    const restored = await second.call({ type: "vault_restore", backupPath: backedUp.backupPath, path: target, password: "e2e password", recoveryPhrase: phrase });
+    const restored = await second.call({ type: "vault_restore", backupPath: backedUp.backupPath, path: target, password: "e2e password", recoverySpell: spell });
     assert.equal(restored.ok, true, JSON.stringify(restored));
     assert.equal(restored.policyCopy.state, "valid");
     assert.equal(restored.status.state, "not_configured", "restored, not active yet");
@@ -278,7 +279,7 @@ test("end to end with the real host and MCP: a password backup of an encrypted v
     await mcp.initialize("restore-e2e");
     const found = JSON.stringify(await mcp.request("tools/call", { name: "memocampus_search_visits", arguments: { query: "" } }));
     assert.match(found, /restored-row/);
-    for (const secret of ["e2e password", phrase]) assert.equal(found.includes(secret), false);
+    for (const secret of ["e2e password", spell]) assert.equal(found.includes(secret), false);
     // Nothing of the restore is readable at rest on the new PC.
     for (const name of readdirSync(path.join(root, "app2"), { recursive: true })) {
       const file = path.join(root, "app2", String(name));

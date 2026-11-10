@@ -1,5 +1,8 @@
 # Secure Vault — PoC results (Issue #51, Slice A)
 
+> Note: the A-3 measurements below concern the 12-word BIP-39 recovery phrase, which the build no longer uses; it was
+> replaced by the Recovery Spell (`recovery-spell.md`). They are kept as the record of the PoC.
+
 ## Environment
 
 | Item | Value |

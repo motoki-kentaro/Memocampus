@@ -1,5 +1,12 @@
 # Secure Vault — Slice C: portable backups, password-protected backups, restore (Issue #51)
 
+> **Superseded in part by `recovery-spell.md`.** This is the record of Slice C as it was reviewed. Wherever it says
+> "phrase" (12 words, `recoveryPhrase`, `needsPhrase`, `recovery_phrase_*`), the current build uses the **Recovery Spell
+> (ふっかつのじゅもん)**: `recoverySpell`, `needsSpell`, `recovery_spell_*`. Containers are now written as version 2 (B
+> MAC/policy labels `memocampus/backup-b/v2/...`); a version 1 B or D is refused as `backup_legacy_recovery_phrase`, a
+> version 1 C is still read. Formats A and C, the page streaming of C, the WAL refusal and the restore transaction are
+> unchanged. Where this document and `recovery-spell.md` differ, `recovery-spell.md` describes the current build.
+
 Status: implemented on `feature/51-secure-vault-c`, **not committed**. The independent review's findings C-01 (plaintext
 work file of a C backup) and C-03 (phrase not proven when a B/D backup is made) are fixed (§3.1, §3.2); C-02 (plaintext
 `.partial` while a plain vault is restored) is accepted by the PO and unchanged. Waiting for the differential review,

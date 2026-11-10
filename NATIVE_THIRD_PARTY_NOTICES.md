@@ -26,10 +26,11 @@ own license applies. (The browser extension does not contain it; its notices are
 | License | Apache License, Version 2.0, full text in `LICENSES/OpenSSL.txt` (copied unchanged from the OpenSSL source) |
 | Changes by Memocampus | None |
 
-The Rust crates used for key handling (`bip39`, `chacha20poly1305`, `hkdf`, `hmac`, `sha2`,
-`subtle`, `zeroize`, `getrandom`) and, since Slice C, for password-protected backups (`argon2` 0.5.3
-with its dependencies `blake2` 0.10.6, `password-hash` 0.5.0 and `base64ct` 1.8.3) are licensed
-under MIT and/or Apache-2.0 (`bip39`: CC0-1.0), like the crates already used before Slice B; see each
-crate's metadata in `Cargo.lock`.
+The Rust crates used for key handling (`chacha20poly1305`, `hkdf`, `hmac`, `sha2`, `subtle`,
+`zeroize`, `getrandom`, and `base64` for the Recovery Spell's encoding) and, since Slice C, for
+password-protected backups (`argon2` 0.5.3 with its dependencies `blake2` 0.10.6, `password-hash`
+0.5.0 and `base64ct` 1.8.3) are licensed under MIT and/or Apache-2.0, like the crates already used
+before Slice B; see each crate's metadata in `Cargo.lock`. The `bip39` crate (12-word recovery
+phrase, Slice B/C) is no longer used.
 
 This file is not legal advice.

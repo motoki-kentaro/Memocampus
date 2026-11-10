@@ -3,6 +3,11 @@
 Nothing below is approved for implementation. Every slice ends with an independent review and PO
 approval. Commits, pushes and PRs happen only after that approval.
 
+
+> **Recovery Spell (Issue #51).** The 12-word recovery phrase of S2/S3 has been replaced by the Recovery Spell
+> (ふっかつのじゅもん); see `recovery-spell.md` for the specification, the version changes and the handling of 12-word
+> vaults and backups.
+
 ## Slice dependencies
 
 ```
@@ -20,7 +25,7 @@ A (this design + PoC) ── A' (SQLCipher PoC, blocked) ──► S0 build swit
                      S4 mode conversion without silent loss (Phase D)
                         │
                         ▼
-                     S5 phrase regeneration, rotation decision, adversarial tests, dogfood (Phase E)
+                     S5 spell regeneration, rotation decision, adversarial tests, dogfood (Phase E)
 ```
 
 S1 can start once A is accepted. It is useful even without encryption, because it closes HIGH-1,
@@ -91,7 +96,8 @@ replace (POSIX rename instead of `MOVEFILE_WRITE_THROUGH`). Its differences are 
 ### S2 — encrypted vault creation and onboarding (Phase B) — **implemented as Slice B** (`slice-b.md`; review and dogfood pending)
 
 - **Scope.**
-  - Key store (DPAPI), recovery sidecar (P1), phrase display and 3-word confirmation.
+  - Key store (DPAPI), recovery sidecar (P1), recovery secret display and confirmation (since the Recovery Spell,
+    `recovery-spell.md`: 43 characters shown once, confirmed by entering all of them again).
   - Keyed open in host, VisibleStore and MCP.
   - `.pending` life cycle (Q6).
 - **Done when.**
@@ -100,7 +106,7 @@ replace (POSIX rename instead of `MOVEFILE_WRITE_THROUGH`). Its differences are 
   - The encrypted vault passes every existing feature test in encrypted mode, with the suites run in
     both modes.
 - **Tests:**
-  - phrase parser fuzzing;
+  - spell parser edge cases (length, alphabet, canonical form; `spell::tests`);
   - DPAPI failure injection (corrupt blob, missing entry, kcv mismatch);
   - the key-store/vault swap matrix.
 
@@ -108,7 +114,7 @@ replace (POSIX rename instead of `MOVEFILE_WRITE_THROUGH`). Its differences are 
 
 > Status: implemented as Slice C (`slice-c.md`). Differences: B is a Backup API snapshot, not a raw copy (DC1); C over B is
 > format D (DC4). "No plaintext temp file": met after review finding C-01 (C streams the vault's pages, no work file;
-> `slice-c.md` §3.1); a plain vault in WAL mode gets no C backup. B and D need the phrase when made (C-03, §3.2).
+> `slice-c.md` §3.1); a plain vault in WAL mode gets no C backup. B and D need the spell when made (C-03, §3.2).
 
 - **Scope.**
   - Normal backups A (as today) and B (raw ciphertext copy).
@@ -117,7 +123,7 @@ replace (POSIX rename instead of `MOVEFILE_WRITE_THROUGH`). Its differences are 
   - Policy copy in B and C, and the review UI.
   - #48 identity binding kept for every backup kind.
 - **Done when.**
-  - New-PC restore works from the file plus the phrase alone, simulated by a fresh app dir and a
+  - New-PC restore works from the file plus the spell alone, simulated by a fresh app dir and a
     fresh key store; a real second PC in dogfood.
   - Every tamper, truncation and parameter case fails closed.
   - No plaintext temp file is made, checked by a directory scan during operation.
@@ -147,17 +153,18 @@ replace (POSIX rename instead of `MOVEFILE_WRITE_THROUGH`). Its differences are 
 ### S5 — regeneration, rotation, hardening (Phase E)
 
 - **Scope.**
-  - Phrase regeneration (re-wrap).
+  - Spell regeneration (re-wrap), and possibly issuing a spell for a vault made with the 12-word phrase
+    (`recovery-spell.md` §11).
   - VK rotation, if P6 says so, built on the S4 machinery.
   - An adversarial review and a security review.
 - **Done when.**
-  - Old backups behave as documented (old phrase only).
+  - Old backups behave as documented (old spell only).
   - The UI wording never claims revocation.
 
 ## Windows dogfood items
 
 1. A real second PC, or a fresh Windows account after an OS reinstall: restore B and C(B) with the
-   phrase only; DPAPI re-protect.
+   spell only; DPAPI re-protect.
 2. A second Windows user on the same PC cannot unlock (A-2.4).
 3. Vaults on OneDrive, a USB drive or a network share: location warnings plus sidecar behaviour.
 4. An 8.3 short path and junction paths for the vault, the sidecar and the backup target (#48 lesson).
@@ -183,7 +190,7 @@ replace (POSIX rename instead of `MOVEFILE_WRITE_THROUGH`). Its differences are 
 | P3 | Grandfather the current active vault as MCP-confirmed at upgrade; all other or new vaults start pending | yes |
 | P4 | Accept OpenSSL (Apache-2.0) and SQLCipher (BSD) notices, the native-Perl build requirement (+12 min cold build, +3 MB per binary) and the SQLite 3.46.0 → 3.45.3 downgrade (existing Rust suites pass), or upgrade rusqlite as part of S0 | accept; keep rusqlite 0.32 for S0 |
 | P5 | Recovery security level 128 bits (12 words) for backups and the sidecar | accept (24 words would give 256, at a UX cost) |
-| P6 | Offer VK rotation for compromise (new vault, new key); old backups remain readable with the old phrase | offer it as "re-encrypt into a new vault"; no claim of revocation |
+| P6 | Offer VK rotation for compromise (new vault, new key); old backups remain readable with the old spell | offer it as "re-encrypt into a new vault"; no claim of revocation |
 | P7 | Conversion watchdog cancels when queue headroom falls below a threshold, rather than pausing indefinitely | yes (M3) |
 | P8 | Fixed-path MCP mode refused unless the path is the active vault; an explicit flag for tests | yes |
 | P9 | Pending capture queue in `chrome.storage.local` stays plaintext (R1) | accept for now, track separately |

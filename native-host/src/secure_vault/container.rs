@@ -4,9 +4,14 @@
 //! # Common prefix
 //!
 //! ```text
-//! magic 8 = 89 'M' 'C' 'V' 'B' 0D 0A 1A | version u16 LE = 1 | kind u8 ('B'|'C'|'D') | flags u8 = 0
+//! magic 8 = 89 'M' 'C' 'V' 'B' 0D 0A 1A | version u16 LE = 2 | kind u8 ('B'|'C'|'D') | flags u8 = 0
 //! | header_len u32 LE (1..=65536) | header (strict JSON, deny_unknown_fields, non-secret values only)
 //! ```
+//!
+//! Version 2 (Recovery Spell) is what this build writes. Version 1 was written by Slice C with the
+//! 12-word recovery phrase: a version 1 B or D is refused as `LegacyRecoveryPhrase` (never opened
+//! as a spell envelope); a version 1 C, whose layout and keys do not involve the phrase at all and
+//! are unchanged in version 2, is still read. Any other version is `UnsupportedVersion`.
 //!
 //! Every length is checked before anything is allocated or derived, and the file length must be
 //! exactly what the header announces: a truncated file and a file with bytes appended are refused
@@ -17,14 +22,16 @@
 //! ```text
 //! prefix | payload (payloadLen: a SQLCipher 4 database, ciphertext) | policy copy (sealed, optional)
 //!        | HMAC-SHA256(K_mac, prefix || payload || policy copy)
-//! K_mac    = HKDF-SHA256(VK, info = "memocampus/backup-b/v1/mac")
-//! K_policy = HKDF-SHA256(VK, info = "memocampus/backup-b/v1/policy"),
-//!            XChaCha20-Poly1305, AAD = "memocampus/backup-b/v1/policy\0" || vaultId
+//! K_mac    = HKDF-SHA256(VK, info = "memocampus/backup-b/v2/mac")
+//! K_policy = HKDF-SHA256(VK, info = "memocampus/backup-b/v2/policy"),
+//!            XChaCha20-Poly1305, AAD = "memocampus/backup-b/v2/policy\0" || vaultId
 //! ```
 //!
 //! The header carries the vault id, the payload's SQLCipher salt and the recovery envelope (the
-//! vault key wrapped under the phrase, `recovery`), bound to the salt `recoverySalt` it was made for.
-//! Restoring needs the phrase only: no key store, no DPAPI.
+//! vault key wrapped under keys derived from the Recovery Spell, `recovery`, scheme
+//! `recovery::SCHEME`), bound to the salt `recoverySalt` it was made for. Restoring needs the spell
+//! only: no key store, no DPAPI. The spell opens the envelope; the MAC and policy keys come from the
+//! VK it yields, each through its own HKDF label, so the spell's bytes are never a key themselves.
 //!
 //! # C and D — password-protected backups
 //!
@@ -37,7 +44,7 @@
 //!
 //! - C (plain vault): sections `meta` (JSON), `policy` (optional), `vault-sqlite3` (the SQLite file).
 //! - D (encrypted vault): one section `package-b`, a whole format B file. The password yields only
-//!   that package, which still needs the phrase; the phrase cannot open the outer layer.
+//!   that package, which still needs the spell; the spell cannot open the outer layer.
 //!
 //! The chunk counter and the last-chunk flag are in the nonce, and the total plaintext length is
 //! fixed by the (authenticated) header: a removed, reordered, duplicated or truncated chunk fails.
@@ -46,7 +53,7 @@
 
 use super::fsutil::{hex, unhex};
 use super::recovery::{self, Envelope, UnwrapError};
-use super::secret::{random_bytes, CipherSalt, RandomError, RecoverySeed, VaultId, VaultKey};
+use super::secret::{random_bytes, CipherSalt, RandomError, RecoverySpell, VaultId, VaultKey};
 use chacha20poly1305::aead::stream::{DecryptorBE32, EncryptorBE32};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
@@ -58,7 +65,9 @@ use std::io::{self, Read, Write};
 use zeroize::{Zeroize, Zeroizing};
 
 pub const MAGIC: [u8; 8] = [0x89, b'M', b'C', b'V', b'B', 0x0D, 0x0A, 0x1A];
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
+/// Slice C's containers (12-word recovery phrase). See the module documentation.
+pub const LEGACY_VERSION: u16 = 1;
 pub const FIXED_LEN: usize = 16;
 pub const MAX_HEADER: u32 = 64 * 1024;
 pub const CHUNK: usize = 64 * 1024;
@@ -70,9 +79,9 @@ pub const MAX_POLICY_COPY: u64 = 4 * 1024 * 1024;
 pub const MAX_META: u64 = 64 * 1024;
 
 const B_PAYLOAD: &str = "sqlcipher4";
-const MAC_INFO: &[u8] = b"memocampus/backup-b/v1/mac";
-const POLICY_INFO: &[u8] = b"memocampus/backup-b/v1/policy";
-const POLICY_AAD: &[u8] = b"memocampus/backup-b/v1/policy\0";
+const MAC_INFO: &[u8] = b"memocampus/backup-b/v2/mac";
+const POLICY_INFO: &[u8] = b"memocampus/backup-b/v2/policy";
+const POLICY_AAD: &[u8] = b"memocampus/backup-b/v2/policy\0";
 const ENC_INFO: &[u8] = b"memocampus/backup-p/v1/enc";
 const CHECK_INFO: &[u8] = b"memocampus/backup-p/v1/check";
 const CHECK_MSG: &[u8] = b"memocampus/backup-p/v1/password-check\0";
@@ -137,27 +146,30 @@ impl Kind {
         matches!(self, Self::C | Self::D)
     }
 
-    pub fn needs_phrase(self) -> bool {
+    pub fn needs_spell(self) -> bool {
         matches!(self, Self::B | Self::D)
     }
 }
 
-/// Why a container was refused. No value carries key material, a password, a phrase or a path.
+/// Why a container was refused. No value carries key material, a password, a spell or a path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatError {
     /// Not a Memocampus backup container (or an unknown kind).
     UnsupportedFormat,
     /// A container of another version, scheme or KDF.
     UnsupportedVersion,
+    /// A B or D container of Slice C, protected by the 12-word recovery phrase this build no
+    /// longer reads.
+    LegacyRecoveryPhrase,
     /// A length, count, parameter or field out of bounds or of the wrong shape.
     Malformed,
     /// The file is shorter or longer than its header says.
     Incomplete,
     /// The vault inside has another schema version than this build uses.
     SchemaMismatch,
-    /// The phrase is not the one of this backup's envelope.
-    PhraseRejected,
-    /// The phrase matches but the envelope does not authenticate: damaged metadata.
+    /// The spell is not the one of this backup's envelope.
+    SpellRejected,
+    /// The spell matches but the envelope does not authenticate: damaged metadata.
     RecoveryDamaged,
     /// The password check value does not match.
     PasswordRejected,
@@ -204,6 +216,8 @@ pub enum Detected {
     Container(Kind),
     /// The container magic with another version.
     UnsupportedVersion,
+    /// A version 1 B or D (12-word recovery phrase).
+    LegacyRecoveryPhrase,
     /// Anything else, including a bare SQLCipher file and a container of an unknown kind.
     Unknown,
 }
@@ -215,18 +229,35 @@ pub fn detect(head: &[u8]) -> Detected {
     if head.len() < FIXED_LEN || head[..8] != MAGIC {
         return Detected::Unknown;
     }
-    if u16::from_le_bytes([head[8], head[9]]) != VERSION {
+    let version = u16::from_le_bytes([head[8], head[9]]);
+    if version != VERSION && version != LEGACY_VERSION {
         return Detected::UnsupportedVersion;
     }
     match Kind::from_byte(head[10]) {
+        Some(Kind::C) if head[11] == 0 => Detected::Container(Kind::C),
+        Some(_) if head[11] == 0 && version == LEGACY_VERSION => Detected::LegacyRecoveryPhrase,
         Some(kind) if head[11] == 0 => Detected::Container(kind),
         _ => Detected::Unknown,
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests only: the version a container is written with, to produce a Slice C (version 1)
+    /// format C file byte for byte.
+    static WRITE_VERSION: std::cell::Cell<u16> = const { std::cell::Cell::new(VERSION) };
+}
+
+fn write_version() -> u16 {
+    #[cfg(test)]
+    return WRITE_VERSION.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    VERSION
+}
+
 fn make_prefix(kind: Kind, header: &[u8]) -> Vec<u8> {
     let mut out = MAGIC.to_vec();
-    out.extend_from_slice(&VERSION.to_le_bytes());
+    out.extend_from_slice(&write_version().to_le_bytes());
     out.push(kind.byte());
     out.push(0);
     out.extend_from_slice(&(header.len() as u32).to_le_bytes());
@@ -248,6 +279,7 @@ pub fn read_prefix(r: &mut impl Read) -> Result<Prefix, FormatError> {
     let kind = match detect(&fixed) {
         Detected::Container(kind) => kind,
         Detected::UnsupportedVersion => return Err(FormatError::UnsupportedVersion),
+        Detected::LegacyRecoveryPhrase => return Err(FormatError::LegacyRecoveryPhrase),
         _ => return Err(FormatError::UnsupportedFormat),
     };
     let len = u32::from_le_bytes(fixed[12..16].try_into().expect("4 bytes"));
@@ -460,16 +492,16 @@ pub fn read_b_header(r: &mut impl Read, total: u64) -> Result<(Prefix, HeaderB),
     Ok((prefix, header))
 }
 
-/// The vault key of a package, from the phrase (restore).
-pub fn unlock_with_phrase(header: &HeaderB, seed: &RecoverySeed) -> Result<VaultKey, FormatError> {
+/// The vault key of a package, from the Recovery Spell (restore).
+pub fn unlock_with_spell(header: &HeaderB, spell: &RecoverySpell) -> Result<VaultKey, FormatError> {
     recovery::unwrap(
         &header.recovery,
-        seed,
+        spell,
         &header.vault_id,
         &header.recovery_salt,
     )
     .map_err(|error| match error {
-        UnwrapError::PhraseRejected => FormatError::PhraseRejected,
+        UnwrapError::SpellRejected => FormatError::SpellRejected,
         UnwrapError::Damaged => FormatError::RecoveryDamaged,
         UnwrapError::Unsupported => FormatError::UnsupportedVersion,
         UnwrapError::Malformed => FormatError::Malformed,
@@ -477,7 +509,7 @@ pub fn unlock_with_phrase(header: &HeaderB, seed: &RecoverySeed) -> Result<Vault
 }
 
 /// Reads a format B package of `total` bytes, streaming the payload into `sink`. `unlock` gives
-/// the vault key from the header (the phrase on restore; the vault key itself when a new backup is
+/// the vault key from the header (the spell on restore; the vault key itself when a new backup is
 /// verified). Nothing written to `sink` may be trusted unless this returns `Ok`: the MAC over the
 /// whole package is checked last.
 pub fn read_b(

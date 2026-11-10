@@ -132,35 +132,30 @@ fn create_plain(session: &mut Session, path: &Path) {
 }
 
 thread_local! {
-    /// The phrase of each encrypted vault the tests created, by path: what the user holds.
-    static PHRASES: RefCell<std::collections::HashMap<String, String>> = RefCell::default();
+    /// The Recovery Spell of each encrypted vault the tests created, by path: what the user holds.
+    static SPELLS: RefCell<std::collections::HashMap<String, String>> = RefCell::default();
 }
 
-/// Creates an encrypted vault and returns its phrase.
+/// Creates an encrypted vault and returns its spell.
 fn create_encrypted(session: &mut Session, path: &Path) -> String {
     let begun = send(
         session,
         json!({ "type": "vault_create_encrypted", "path": path }),
     );
     assert_eq!(begun["ok"], true, "{begun}");
-    let phrase = begun["recoveryPhrase"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|w| w.as_str().unwrap())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let spell = begun["recoverySpell"].as_str().unwrap().to_owned();
+    assert_eq!(spell.len(), 43);
     let done = send(
         session,
-        json!({ "type": "vault_create_encrypted_commit", "recoveryPhrase": phrase }),
+        json!({ "type": "vault_create_encrypted_commit", "recoverySpell": spell }),
     );
     assert_eq!(done["ok"], true, "{done}");
-    PHRASES.with(|phrases| {
-        phrases
+    SPELLS.with(|spells| {
+        spells
             .borrow_mut()
-            .insert(done["path"].as_str().unwrap().to_owned(), phrase.clone())
+            .insert(done["path"].as_str().unwrap().to_owned(), spell.clone())
     });
-    phrase
+    spell
 }
 
 fn token(session: &mut Session) -> Value {
@@ -168,8 +163,8 @@ fn token(session: &mut Session) -> Value {
     shown["status"]["vaultToken"].clone()
 }
 
-/// A backup of the active vault. An encrypted vault's backup (B, D) carries the phrase the user
-/// holds, unless `extra` sets `recoveryPhrase` itself.
+/// A backup of the active vault. An encrypted vault's backup (B, D) carries the spell the user
+/// holds, unless `extra` sets `recoverySpell` itself.
 fn backup_to(session: &mut Session, dir: &Path, extra: Value) -> Value {
     let shown = send(session, json!({ "type": "vault_status" }));
     let token = shown["status"]["vaultToken"].clone();
@@ -180,8 +175,8 @@ fn backup_to(session: &mut Session, dir: &Path, extra: Value) -> Value {
             .as_str()
             .unwrap_or_default()
             .to_owned();
-        if let Some(phrase) = PHRASES.with(|phrases| phrases.borrow().get(&path).cloned()) {
-            message["recoveryPhrase"] = phrase.into();
+        if let Some(spell) = SPELLS.with(|spells| spells.borrow().get(&path).cloned()) {
+            message["recoverySpell"] = spell.into();
         }
     }
     for (key, value) in extra.as_object().unwrap() {
@@ -286,7 +281,7 @@ fn a_plain_vault_backs_up_as_plain_sqlite_and_restores_as_a_new_pending_vault() 
     assert_eq!(inspected["ok"], true, "{inspected}");
     assert_eq!(inspected["format"], "A");
     assert_eq!(inspected["needsPassword"], false);
-    assert_eq!(inspected["needsPhrase"], false);
+    assert_eq!(inspected["needsSpell"], false);
     let target = tmp.0.join("restored.sqlite3");
     let restored = restore_to(&mut other, &backup, &target, json!({}));
     assert_eq!(restored["ok"], true, "{restored}");
@@ -309,12 +304,12 @@ fn a_plain_vault_backs_up_as_plain_sqlite_and_restores_as_a_new_pending_vault() 
 // --- Format B ----------------------------------------------------------------------------------
 
 #[test]
-fn an_encrypted_vault_backs_up_encrypted_and_restores_on_another_pc_with_the_phrase_only() {
+fn an_encrypted_vault_backs_up_encrypted_and_restores_on_another_pc_with_the_spell_only() {
     let tmp = TempDir::new();
     let env = tmp.env();
     let mut session = Session::new(env.clone());
     let source = tmp.0.join("enc.sqlite3");
-    let phrase = create_encrypted(&mut session, &source);
+    let spell = create_encrypted(&mut session, &source);
     init_policy(&env);
     fill(&mut session);
     let original = active_dump(&mut session);
@@ -342,7 +337,7 @@ fn an_encrypted_vault_backs_up_encrypted_and_restores_on_another_pc_with_the_phr
         !contains(&bytes, "SQLite format 3"),
         "never plain SQLite inside"
     );
-    assert!(!contains(&bytes, &phrase));
+    assert!(!contains(&bytes, &spell));
     assert_eq!(names_in(&dir).len(), 1);
     assert!(backup::work_dir_entries(env.app_dir.as_deref().unwrap()).is_empty());
 
@@ -354,36 +349,35 @@ fn an_encrypted_vault_backs_up_encrypted_and_restores_on_another_pc_with_the_phr
         json!({ "type": "vault_restore_inspect", "path": backup }),
     );
     assert_eq!(inspected["format"], "B", "{inspected}");
-    assert_eq!(inspected["needsPhrase"], true);
+    assert_eq!(inspected["needsSpell"], true);
     assert_eq!(inspected["needsPassword"], false);
     assert_eq!(inspected["policyCopy"], true);
     let target = tmp.0.join("restored.sqlite3");
-    // No phrase, a malformed phrase, another vault's phrase: refused, nothing created.
-    for (phrase, code) in [
-        (json!(null), "recovery_phrase_invalid"),
-        (json!("abandon abandon"), "recovery_phrase_invalid"),
-        (
-            json!(phrase.replace(phrase.split(' ').next().unwrap(), "zoo")),
-            "recovery_phrase_invalid",
-        ),
+    // No spell, a malformed spell, another vault's spell: refused, nothing created.
+    for (spell, code) in [
+        (json!(null), "recovery_spell_invalid"),
+        (json!("abandon abandon"), "recovery_spell_invalid"),
+        (json!(format!("+{}", &spell[1..])), "recovery_spell_invalid"),
+        (json!(&spell[..42]), "recovery_spell_invalid"),
+        (json!(format!("{spell}=")), "recovery_spell_invalid"),
     ] {
         let refused = restore_to(
             &mut other,
             &json!(backup),
             &target,
-            json!({ "recoveryPhrase": phrase }),
+            json!({ "recoverySpell": spell }),
         );
         assert_eq!(refused["error"], code, "{refused}");
     }
     let mut someone_else = Session::new(env_of(&tmp, "app3"));
-    let other_phrase = create_encrypted(&mut someone_else, &tmp.0.join("x.sqlite3"));
+    let other_spell = create_encrypted(&mut someone_else, &tmp.0.join("x.sqlite3"));
     let refused = restore_to(
         &mut other,
         &json!(backup),
         &target,
-        json!({ "recoveryPhrase": other_phrase }),
+        json!({ "recoverySpell": other_spell }),
     );
-    assert_eq!(refused["error"], "recovery_phrase_rejected", "{refused}");
+    assert_eq!(refused["error"], "recovery_spell_rejected", "{refused}");
     assert!(!target.exists());
     assert!(!other_env
         .app_dir
@@ -392,11 +386,26 @@ fn an_encrypted_vault_backs_up_encrypted_and_restores_on_another_pc_with_the_phr
         .join("vault-restore.json")
         .exists());
 
+    // Case-sensitive: the spell in other case is not this spell.
+    let refused = restore_to(
+        &mut other,
+        &json!(backup),
+        &target,
+        json!({ "recoverySpell": spell.to_uppercase() }),
+    );
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("recovery_spell_"),
+        "{refused}"
+    );
+    assert!(!target.exists());
     let restored = restore_to(
         &mut other,
         &json!(backup),
         &target,
-        json!({ "recoveryPhrase": phrase.to_uppercase() }),
+        json!({ "recoverySpell": spell }),
     );
     assert_eq!(restored["ok"], true, "{restored}");
     assert_eq!(restored["mode"], "encrypted");
@@ -415,7 +424,7 @@ fn an_encrypted_vault_backs_up_encrypted_and_restores_on_another_pc_with_the_phr
     assert_eq!(activated["ok"], true, "{activated}");
     assert_eq!(activated["status"]["mode"], "encrypted");
     assert_eq!(activated["status"]["publication"], "pending");
-    // A new vault id, a key in this PC's key store (DPAPI) and a new sidecar for the same phrase.
+    // A new vault id, a key in this PC's key store (DPAPI) and a new sidecar for the same spell.
     let config = match vault::resolve(&other_env).unwrap() {
         Active::Configured(config) => config,
         other => panic!("{other:?}"),
@@ -428,14 +437,14 @@ fn an_encrypted_vault_backs_up_encrypted_and_restores_on_another_pc_with_the_phr
     assert!(key_store::unlock(other_env.app_dir.as_deref().unwrap(), &new_id, &salt).is_ok());
     let found = sidecar::read(&sidecar::path_for(&target)).unwrap();
     assert_eq!((found.vault_id, found.cipher_salt), (new_id, salt));
-    // A fresh host process unlocks it without the phrase, and the content is the source's.
+    // A fresh host process unlocks it without the spell, and the content is the source's.
     let mut fresh = Session::new(other_env.clone());
     assert_eq!(active_dump(&mut fresh), original);
-    // The phrase still recovers the restored vault (its new sidecar).
+    // The spell still recovers the restored vault (its new sidecar).
     let mut third = Session::new(env_of(&tmp, "app4"));
     let recovered = send(
         &mut third,
-        json!({ "type": "vault_recover", "path": target, "recoveryPhrase": phrase }),
+        json!({ "type": "vault_recover", "path": target, "recoverySpell": spell }),
     );
     assert_eq!(recovered["ok"], true, "{recovered}");
     // Nothing readable at rest in the restored vault or its metadata.
@@ -454,7 +463,7 @@ fn an_encrypted_vault_backs_up_encrypted_and_restores_on_another_pc_with_the_phr
 fn restoring_next_to_the_original_and_twice_never_collides() {
     let tmp = TempDir::new();
     let mut session = Session::new(tmp.env());
-    let phrase = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
+    let spell = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
     fill(&mut session);
     let done = backup_to(&mut session, &tmp.0, json!({}));
     let backup = done["backupPath"].clone();
@@ -462,7 +471,7 @@ fn restoring_next_to_the_original_and_twice_never_collides() {
         &mut session,
         &backup,
         &tmp.0.join("one.sqlite3"),
-        json!({ "recoveryPhrase": phrase }),
+        json!({ "recoverySpell": spell }),
     );
     assert_eq!(first["ok"], true, "{first}");
     // One restore at a time: the first is waiting for the user's decision.
@@ -470,7 +479,7 @@ fn restoring_next_to_the_original_and_twice_never_collides() {
         &mut session,
         &backup,
         &tmp.0.join("two.sqlite3"),
-        json!({ "recoveryPhrase": phrase }),
+        json!({ "recoverySpell": spell }),
     );
     assert_eq!(second["error"], "vault_restore_pending");
     assert!(!tmp.0.join("two.sqlite3").exists());
@@ -479,7 +488,7 @@ fn restoring_next_to_the_original_and_twice_never_collides() {
         &mut session,
         &backup,
         &tmp.0.join("two.sqlite3"),
-        json!({ "recoveryPhrase": phrase }),
+        json!({ "recoverySpell": spell }),
     );
     assert_eq!(second["ok"], true, "{second}");
     let id_of = |path: &Path| sidecar::read(&sidecar::path_for(path)).unwrap().vault_id;
@@ -539,7 +548,7 @@ fn a_password_backup_of_a_plain_vault_needs_the_password_and_keeps_nothing_in_th
     );
     assert_eq!(inspected["format"], "C");
     assert_eq!(inspected["needsPassword"], true);
-    assert_eq!(inspected["needsPhrase"], false);
+    assert_eq!(inspected["needsSpell"], false);
     assert_eq!(inspected["policyCopy"], true);
     let target = tmp.0.join("restored.sqlite3");
     for (extra, code) in [
@@ -573,10 +582,10 @@ fn a_password_backup_of_a_plain_vault_needs_the_password_and_keeps_nothing_in_th
 }
 
 #[test]
-fn a_password_backup_of_an_encrypted_vault_needs_both_the_password_and_the_phrase() {
+fn a_password_backup_of_an_encrypted_vault_needs_both_the_password_and_the_spell() {
     let tmp = TempDir::new();
     let mut session = Session::new(tmp.env());
-    let phrase = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
+    let spell = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
     fill(&mut session);
     let original = active_dump(&mut session);
     let done = backup_to(&mut session, &tmp.0, password("outer password!"));
@@ -595,27 +604,27 @@ fn a_password_backup_of_an_encrypted_vault_needs_both_the_password_and_the_phras
     );
     assert_eq!(inspected["format"], "D");
     assert_eq!(inspected["needsPassword"], true);
-    assert_eq!(inspected["needsPhrase"], true);
+    assert_eq!(inspected["needsSpell"], true);
     assert_eq!(inspected["policyCopy"], json!(null));
     let target = tmp.0.join("restored.sqlite3");
     let mut someone_else = Session::new(env_of(&tmp, "app3"));
-    let other_phrase = create_encrypted(&mut someone_else, &tmp.0.join("x.sqlite3"));
+    let other_spell = create_encrypted(&mut someone_else, &tmp.0.join("x.sqlite3"));
     for (extra, code) in [
         (
             json!({ "password": "outer password!" }),
-            "recovery_phrase_invalid",
+            "recovery_spell_invalid",
         ),
         (
-            json!({ "recoveryPhrase": phrase }),
+            json!({ "recoverySpell": spell }),
             "backup_password_required",
         ),
         (
-            json!({ "password": "wrong password!", "recoveryPhrase": phrase }),
+            json!({ "password": "wrong password!", "recoverySpell": spell }),
             "backup_password_rejected",
         ),
         (
-            json!({ "password": "outer password!", "recoveryPhrase": other_phrase }),
-            "recovery_phrase_rejected",
+            json!({ "password": "outer password!", "recoverySpell": other_spell }),
+            "recovery_spell_rejected",
         ),
     ] {
         let refused = restore_to(&mut other, &backup, &target, extra);
@@ -626,7 +635,7 @@ fn a_password_backup_of_an_encrypted_vault_needs_both_the_password_and_the_phras
         &mut other,
         &backup,
         &target,
-        json!({ "password": "outer password!", "recoveryPhrase": phrase }),
+        json!({ "password": "outer password!", "recoverySpell": spell }),
     );
     assert_eq!(restored["ok"], true, "{restored}");
     assert_eq!(restored["format"], "D");
@@ -634,7 +643,7 @@ fn a_password_backup_of_an_encrypted_vault_needs_both_the_password_and_the_phras
     assert_eq!(activate(&mut other, &restored)["ok"], true);
     assert_eq!(active_dump(&mut other), original);
     let text = restored.to_string();
-    assert!(!text.contains("outer password") && !text.contains(&phrase));
+    assert!(!text.contains("outer password") && !text.contains(&spell));
 }
 
 // --- Restore safety ----------------------------------------------------------------------------
@@ -769,14 +778,35 @@ fn files_that_are_not_backups_are_refused_and_nothing_is_created() {
             "backup_schema_mismatch",
         ),
         (
-            "v2",
+            "v3",
             {
                 let mut bytes = container::MAGIC.to_vec();
-                bytes.extend_from_slice(&2u16.to_le_bytes());
+                bytes.extend_from_slice(&3u16.to_le_bytes());
                 bytes.extend_from_slice(&[b'B', 0, 2, 0, 0, 0, b'{', b'}']);
                 bytes
             },
             "backup_unsupported_version",
+        ),
+        // Slice C's B and D (12-word phrase): named as such, before any secret is asked for.
+        (
+            "v1-b",
+            {
+                let mut bytes = container::MAGIC.to_vec();
+                bytes.extend_from_slice(&1u16.to_le_bytes());
+                bytes.extend_from_slice(&[b'B', 0, 2, 0, 0, 0, b'{', b'}']);
+                bytes
+            },
+            "backup_legacy_recovery_phrase",
+        ),
+        (
+            "v1-d",
+            {
+                let mut bytes = container::MAGIC.to_vec();
+                bytes.extend_from_slice(&1u16.to_le_bytes());
+                bytes.extend_from_slice(&[b'D', 0, 2, 0, 0, 0, b'{', b'}']);
+                bytes
+            },
+            "backup_legacy_recovery_phrase",
         ),
         (
             "huge-header",
@@ -823,7 +853,7 @@ fn files_that_are_not_backups_are_refused_and_nothing_is_created() {
 fn a_damaged_backup_is_refused_after_streaming_and_leaves_nothing() {
     let tmp = TempDir::new();
     let mut session = Session::new(tmp.env());
-    let phrase = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
+    let spell = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
     fill(&mut session);
     let b = backup_to(&mut session, &tmp.0, json!({}));
     let d = backup_to(&mut session, &tmp.0, password("password123"));
@@ -840,7 +870,7 @@ fn a_damaged_backup_is_refused_after_streaming_and_leaves_nothing() {
             &mut other,
             &json!(damaged),
             &target,
-            json!({ "password": "password123", "recoveryPhrase": phrase }),
+            json!({ "password": "password123", "recoverySpell": spell }),
         );
         assert_eq!(refused["error"], code, "{refused}");
         assert!(!target.exists() && !tmp.0.join("t.sqlite3.partial").exists());
@@ -858,7 +888,7 @@ fn a_damaged_backup_is_refused_after_streaming_and_leaves_nothing() {
                 &mut other,
                 &json!(damaged),
                 &target,
-                json!({ "password": "password123", "recoveryPhrase": phrase }),
+                json!({ "password": "password123", "recoverySpell": spell }),
             );
             assert_eq!(refused["error"], "backup_incomplete", "{refused}");
         }
@@ -939,7 +969,7 @@ fn a_backup_process_dying_leaves_only_partial_files_which_never_pass_for_backups
     let tmp = TempDir::new();
     let env = tmp.env();
     let mut session = Session::new(env.clone());
-    let phrase = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
+    let spell = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
     fill(&mut session);
     let app = env.app_dir.clone().unwrap();
     for step in [
@@ -994,7 +1024,7 @@ fn a_backup_process_dying_leaves_only_partial_files_which_never_pass_for_backups
         &mut other,
         &json!(dir.join(&finished[0])),
         &tmp.0.join("from-crash.sqlite3"),
-        json!({ "recoveryPhrase": phrase }),
+        json!({ "recoverySpell": spell }),
     );
     assert_eq!(restored["ok"], true, "{restored}");
 }
@@ -1005,7 +1035,7 @@ fn a_backup_process_dying_leaves_only_partial_files_which_never_pass_for_backups
 fn a_restore_failing_at_any_step_removes_everything_it_created() {
     let tmp = TempDir::new();
     let mut session = Session::new(tmp.env());
-    let phrase = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
+    let spell = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
     fill(&mut session);
     let backups = [
         backup_to(&mut session, &tmp.0, json!({}))["backupPath"].clone(),
@@ -1028,7 +1058,7 @@ fn a_restore_failing_at_any_step_removes_everything_it_created() {
                         &mut other,
                         backup,
                         &target,
-                        json!({ "password": "password123", "recoveryPhrase": phrase }),
+                        json!({ "password": "password123", "recoverySpell": spell }),
                     )
                 });
                 assert_eq!(refused["ok"], false, "{step:?}");
@@ -1060,14 +1090,14 @@ fn a_restore_failing_at_any_step_removes_everything_it_created() {
 fn a_restore_interrupted_by_a_crash_is_reported_and_can_be_discarded_or_finished() {
     let tmp = TempDir::new();
     let mut session = Session::new(tmp.env());
-    let phrase = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
+    let spell = create_encrypted(&mut session, &tmp.0.join("enc.sqlite3"));
     fill(&mut session);
     let original = active_dump(&mut session);
     let backup = backup_to(&mut session, &tmp.0, json!({}))["backupPath"].clone();
     let other_env = env_of(&tmp, "app2");
     let app2 = other_env.app_dir.clone().unwrap();
     let target = tmp.0.join("restored.sqlite3");
-    let args = json!({ "recoveryPhrase": phrase });
+    let args = json!({ "recoverySpell": spell });
     // Crashes before verification and while the keys are written: discard, then restore again.
     for step in [Step::RestoreWrite, Step::RestoreVerify, Step::RestoreKeys] {
         let mut other = Session::new(other_env.clone());
@@ -1163,7 +1193,7 @@ fn a_larger_vault_round_trips_through_every_container_format() {
     let mut plain = Session::new(tmp.env());
     create_plain(&mut plain, &tmp.0.join("plain.sqlite3"));
     let mut encrypted = Session::new(env_of(&tmp, "app-enc"));
-    let phrase = create_encrypted(&mut encrypted, &tmp.0.join("enc.sqlite3"));
+    let spell = create_encrypted(&mut encrypted, &tmp.0.join("enc.sqlite3"));
     // About 24 MiB of image data: hundreds of 64 KiB chunks, several Backup API pages per row.
     let blob: Vec<u8> = (0..(3 << 20))
         .map(|i: u32| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
@@ -1206,7 +1236,7 @@ fn a_larger_vault_round_trips_through_every_container_format() {
             &mut other,
             &done["backupPath"],
             &target,
-            json!({ "password": "large password", "recoveryPhrase": phrase }),
+            json!({ "password": "large password", "recoverySpell": spell }),
         );
         assert_eq!(restored["ok"], true, "{restored}");
         assert_eq!(activate(&mut other, &restored)["ok"], true);
@@ -1411,11 +1441,11 @@ fn a_plain_vault_in_wal_mode_is_refused_for_format_c_and_nothing_is_written() {
     assert_eq!(count, 1);
 }
 
-// --- Review finding C-03: B and D need the phrase of this very vault ---------------------------
+// --- Review finding C-03: B and D need the spell of this very vault ---------------------------
 
 #[test]
-fn b_and_d_backups_need_the_phrase_that_recovers_this_vault() {
-    use memocampus_native_host::secure_vault::{phrase, recovery, secret::VaultKey};
+fn b_and_d_backups_need_the_spell_that_recovers_this_vault() {
+    use memocampus_native_host::secure_vault::{recovery, secret::VaultKey, spell};
     let tmp = TempDir::new();
     let env = tmp.env();
     let mut session = Session::new(env.clone());
@@ -1424,42 +1454,45 @@ fn b_and_d_backups_need_the_phrase_that_recovers_this_vault() {
     fill(&mut session);
     let mut someone_else = Session::new(env_of(&tmp, "app-other"));
     let other_vault = tmp.0.join("other.sqlite3");
-    let other_phrase = create_encrypted(&mut someone_else, &other_vault);
+    let other_spell = create_encrypted(&mut someone_else, &other_vault);
     let dir = tmp.0.join("backups");
     fs::create_dir(&dir).unwrap();
-    let mut words: Vec<&str> = right.split(' ').collect();
-    words.swap(0, 1);
-    let swapped = words.join(" ");
+    // Two characters swapped (a typo that keeps the spell well-formed when both are inner).
+    let mut chars: Vec<char> = right.chars().collect();
+    let first = (0..41).find(|&i| chars[i] != chars[i + 1]).unwrap();
+    chars.swap(first, first + 1);
+    let swapped: String = chars.into_iter().collect();
     for protection in [json!({}), password("password123")] {
         for (typed, code) in [
-            (json!(null), "recovery_phrase_invalid"),
-            (json!("abandon abandon abandon"), "recovery_phrase_invalid"),
-            (json!(other_phrase), "recovery_phrase_rejected"),
-            // Checksum failure (invalid) or, if the swap passes it, the envelope (rejected).
-            (json!(swapped), "recovery_phrase_"),
+            (json!(null), "recovery_spell_invalid"),
+            (json!("abandon abandon abandon"), "recovery_spell_invalid"),
+            (json!(other_spell), "recovery_spell_rejected"),
+            (json!(swapped), "recovery_spell_rejected"),
+            (json!(&right[..42]), "recovery_spell_invalid"),
+            (json!(right.to_uppercase()), "recovery_spell_"),
         ] {
             let mut extra = protection.clone();
-            extra["recoveryPhrase"] = typed.clone();
+            extra["recoverySpell"] = typed.clone();
             let refused = backup_to(&mut session, &dir, extra);
             let error = refused["error"].as_str().unwrap_or_default();
             assert!(error.starts_with(code), "{typed}: {refused}");
             assert!(
                 names_in(&dir).is_empty(),
-                "nothing is written for a refused phrase"
+                "nothing is written for a refused spell"
             );
             assert!(!refused.to_string().contains(&right[..20]));
         }
     }
-    // Altered recovery metadata: refused even with the right phrase.
+    // Altered recovery metadata: refused even with the right spell.
     let sidecar_path = sidecar::path_for(&source);
     let original = fs::read(&sidecar_path).unwrap();
     let found = sidecar::read(&sidecar_path).unwrap();
-    let seed = phrase::parse(&right).unwrap();
+    let secret = spell::parse(&right).unwrap();
     let foreign_key = VaultKey::generate().unwrap();
     let foreign = sidecar::Sidecar::new(
         found.vault_id,
         found.cipher_salt,
-        recovery::wrap(&foreign_key, &seed, &found.vault_id, &found.cipher_salt).unwrap(),
+        recovery::wrap(&foreign_key, &secret, &found.vault_id, &found.cipher_salt).unwrap(),
     );
     let mut flipped = found.clone();
     let mut wrapped = flipped.recovery.wrapped.into_bytes();
@@ -1490,7 +1523,7 @@ fn b_and_d_backups_need_the_phrase_that_recovers_this_vault() {
         assert!(names_in(&dir).is_empty());
     }
     fs::write(&sidecar_path, &original).unwrap();
-    // The right phrase: B and D are made, and both restore with that phrase.
+    // The right spell: B and D are made, and both restore with that spell.
     let original_rows = active_dump(&mut session);
     for (index, protection) in [json!({}), password("password123")].into_iter().enumerate() {
         let done = backup_to(&mut session, &dir, protection);
@@ -1503,12 +1536,12 @@ fn b_and_d_backups_need_the_phrase_that_recovers_this_vault() {
             &mut fresh,
             &done["backupPath"],
             &tmp.0.join(format!("restored-{index}.sqlite3")),
-            json!({ "password": "password123", "recoveryPhrase": right }),
+            json!({ "password": "password123", "recoverySpell": right }),
         );
         assert_eq!(activate(&mut fresh, &restored)["ok"], true, "{restored}");
         assert_eq!(active_dump(&mut fresh), original_rows);
     }
-    // Nothing about the phrase is stored by the backups: not in the app directory either.
+    // Nothing about the spell is stored by the backups: not in the app directory either.
     for file in files_in(env.app_dir.as_deref().unwrap()) {
         assert!(
             !contains(&fs::read(&file).unwrap(), &right),

@@ -1,4 +1,12 @@
-# Secure Vault — Slice B: encrypted vaults, DPAPI key store, recovery phrase (Issue #51)
+# Secure Vault — Slice B: encrypted vaults, DPAPI key store, recovery secret (Issue #51)
+
+> **Superseded in part by `recovery-spell.md`.** This is the record of Slice B as it was reviewed. Its recovery secret, the
+> 12-word BIP-39 phrase (`phrase.rs`, scheme `bip39-128/.../v1`, sidecar version 1, `recoveryPhrase`,
+> `recovery_phrase_invalid|rejected`, three-word confirmation), has been replaced by the **Recovery Spell
+> (ふっかつのじゅもん)**: 43 base64url characters (256 bits), `spell.rs`, scheme `recovery-spell-256/.../v2`, sidecar
+> version 2, message field `recoverySpell`, `recovery_spell_invalid|rejected`, confirmation by entering all 43 characters
+> again. The DPAPI key store, the key check value, the creation manifest and its phases are unchanged. Where this
+> document and `recovery-spell.md` differ, `recovery-spell.md` describes the current build.
 
 Status: implemented on `feature/51-secure-vault-b`, **not committed**; waiting for an independent security review,
 Windows dogfood and PO approval. Basis: `main` at `cca6aac` (Slice B0 merged).

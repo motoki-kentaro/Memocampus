@@ -8,8 +8,8 @@
 | Saved images and their sources | vault | high |
 | Per-image MCP permission (`mcpPublic`) | vault | medium (it decides exposure) |
 | Privacy policy (`neverSave`/`saveButNoMcp` rules), PSL approvals | `policy.json`, `settings.sqlite3` (global) | high: the rules themselves reveal sensitive domains |
-| Vault key VK | memory; DPAPI blob in the key store; phrase envelopes | critical |
-| Recovery phrase | user's paper or password manager; memory during onboarding | critical |
+| Vault key VK | memory; DPAPI blob in the key store; spell envelopes | critical |
+| Recovery Spell (ふっかつのじゅもん) | wherever the user keeps it (paper, password manager); memory during onboarding; possibly the clipboard | critical |
 | Backup password | memory only | critical (format C) |
 | Backups A, B, C | user-chosen folders, cloud, USB | high |
 | Pending capture queue | `chrome.storage.local` (Chrome profile) | high, **not covered by Secure Vault** |
@@ -28,29 +28,31 @@
 | T7 | Malware running as the logged-in user; compromised extension or Native Host | everything the user can do | **no** (PO: out of scope) |
 | T8 | Admin/SYSTEM, kernel, cold-boot or DMA attacks | memory and keys | **no** |
 | T9 | Attacker who knows the user's Windows password (or NT hash) plus the disk | can decrypt DPAPI offline [DOC] | **no** (equivalent to T7 for DPAPI) |
-| T10 | Holder of an old phrase together with an old backup | decrypts that backup | accepted (no revocation; §5) |
+| T10 | Holder of an old spell together with an old backup | decrypts that backup | accepted (no revocation; §5) |
 
 ## 3. Trust boundaries
 
 1. **Chrome extension ↔ Native Host** (native messaging, same user).
    - The host is the only process that unlocks.
-   - Secrets never cross into the extension, except the phrase entered by the user during recovery,
-     which goes extension → host once.
+   - Secrets never cross into the extension, except the Recovery Spell: host → extension once when a vault is created,
+     extension → host when the user re-enters it (creation commit, recovery, B/D backup, B/D restore). It never reaches the
+     service worker, its queue or `chrome.storage` (`recovery-spell.md` §6).
 2. **Native Host / MCP ↔ file system** (vault, sidecar, key store, config, backups).
 3. **MCP server ↔ MCP client** (stdio, or localhost HTTP with a token). Only VisibleStore results
    cross this boundary.
 4. **Restore parser ↔ untrusted backup file.**
-5. **User ↔ screen.** The phrase is shown once; shoulder-surfing and screenshots are out of scope,
-   but the UI does not keep the phrase in the DOM after confirmation.
+5. **User ↔ screen and clipboard.** The spell is shown once; shoulder-surfing, screenshots and the Windows clipboard
+   (history, cloud clipboard) after an explicit **コピー** are out of scope for erasure, but the UI does not keep the spell
+   in the DOM after the confirmation and tells the user to clear the clipboard.
 
 ## 4. Attacks considered and defences
 
 | Attack | Defence | Status |
 |---|---|---|
-| T1/T3 read a stolen encrypted vault | SQLCipher AES-256 + HMAC per page under a random 256-bit VK; VK only in DPAPI and phrase envelopes | [TEST] Slice B (`slice-b.md`: no plaintext row, key or phrase in any file) |
-| T3 steal the vault plus `.mckey` sidecar | the sidecar is phrase-wrapped (128-bit); not enough without the phrase | [POC A-3] |
-| T2 brute-force a B backup | 128-bit phrase; HKDF + AEAD per guess | accepted level (P5) |
-| T2 brute-force a C backup | Argon2id (64 MiB, t=3) per guess; C over B still needs the phrase | [POC A-5]; weak passwords stay weak (R3) |
+| T1/T3 read a stolen encrypted vault | SQLCipher AES-256 + HMAC per page under a random 256-bit VK; VK only in DPAPI and spell envelopes | [TEST] Slice B, `recovery-spell.md` (no plaintext row, key or spell in any file) |
+| T3 steal the vault plus `.mckey` sidecar | the sidecar is spell-wrapped (256-bit); not enough without the spell | [TEST] `recovery::tests` |
+| T2 brute-force a B backup | 256-bit spell; HKDF + HMAC per guess | 2²⁵⁶ (was 2¹²⁸ with the 12-word phrase, P5) |
+| T2 brute-force a C or D backup | Argon2id (64 MiB, t=3) per guess; D still needs the spell | [POC A-5]; weak passwords stay weak (R3) |
 | T2/T5 tamper with a backup (header, payload, truncation, chunk reordering) | B: exact length + HMAC under a VK-derived key; C: STREAM AEAD with the header as AAD, password check, exact length | [POC A-5.1/A-5.2] |
 | T5 resource exhaustion (header length, Argon2 parameters, section count) | bounds checked before allocation | [POC A-5.2] |
 | T5 restore overwriting the active vault or config | always a new target; `create_new`/`rename_no_replace`; config untouched until explicit activation | design (§6) |
@@ -61,8 +63,8 @@
 | Stale MCP keeps reading the old plain vault after conversion (HIGH-1) | follow-active resolution per call; fixed-path mode refused unless active | design |
 | Restored vault exposed to MCP under a different or empty policy (HIGH-3) | publication gate: `pending` until confirmed; never auto-overwrite global policy | design |
 | Approval given under one policy carried over to a policy initialized again after a loss (review F-02) | `policy_initialize`/`policy_start` withdraw the active vault's publication (`confirmed` → `pending`) under the policy lock before writing; a failed withdrawal writes no policy; a failed policy write leaves `pending`. Ordinary rule edits keep the approval; each read applies the current policy | [TEST] `slice-b0.md` §10; hand-made valid policy files are not detected |
-| Secrets leak through logs, IPC, MCP or errors | fixed error codes; key handed to SQLCipher through its C API, never SQL text; canary tests (`VaultKey::appears_in`) over host output, MCP answers, the MCP log and every file | [TEST] Slice B; the phrase itself crosses Native Messaging at creation and recovery (`slice-b.md` D3, R-B1) |
-| Wrong recovery phrase or altered sidecar overwrites a working key, or activates a vault | the phrase must open the envelope and the key must open the vault before anything is written; damaged metadata told apart by the check value | [TEST] Slice B |
+| Secrets leak through logs, IPC, MCP or errors | fixed error codes; key handed to SQLCipher through its C API, never SQL text; canary tests (`VaultKey::appears_in`) over host output, MCP answers, the MCP log and every file | [TEST] Slice B; the spell itself crosses Native Messaging at creation, recovery, B/D backup and restore (`recovery-spell.md` §6, R-S1) |
+| Wrong spell or altered sidecar overwrites a working key, or activates a vault | the spell must open the envelope and the key must open the vault before anything is written; damaged metadata told apart by the check value; a 12-word sidecar or backup is reported as unsupported, never as damage or a wrong spell | [TEST] Slice B, `recovery-spell.md` §7 |
 | Interrupted creation leaves a half-made vault active, or mixes keys on retry | manifest + `.pending` files, commit point = config rename, one creation at a time, cancel removes only files bound to that creation | [TEST] Slice B |
 | Plaintext temp files during secure backup | raw ciphertext copy under SHARED; stream encryption for C; `temp_store = MEMORY` | [POC A-4.2] (plain); SQLCipher [DOC] |
 | Silent loss of capture during conversion | `vault_maintenance` is temporary, so events stay queued; watchdog cancels before overflow; policy evaluation unaffected | design (§8) |
@@ -72,21 +74,21 @@
 - T7, T8 and T9.
 - Old plaintext vault files and old format A backups. They stay readable; the UI states this when
   converting to encrypted.
-- Revocation of distributed backups: anyone with an old backup and its phrase keeps access.
+- Revocation of distributed backups: anyone with an old backup and its spell keeps access.
 - Traffic analysis of file sizes and page counts. SQLCipher hides content, not size; the
   `cipherSalt` is public.
 - Hibernation file and pagefile copies of VK. Windows BitLocker is the mitigation, outside the app.
-- Screenshots or photos of the phrase.
+- Screenshots or photos of the spell, and copies of it left in the clipboard or its history.
 
 ## 6. Impact if compromised
 
 | Compromise | Impact |
 |---|---|
 | VK | all data of that vault and all its backups B/C, past and future, until rotation (new VK, new vault) |
-| Phrase | same as VK for every artifact carrying that phrase's envelope (the sidecar, backups made before regeneration) |
-| Backup password | C over A: that backup fully; C over B: nothing without the phrase |
+| Recovery Spell | same as VK for every artifact carrying that spell's envelope (the sidecar, backups made before regeneration) |
+| Backup password | C: that backup fully; D: nothing without the spell |
 | DPAPI (T7/T9) | VK of every vault in that user's key store |
-| Policy copy in a backup | readable by anyone holding VK/phrase (B) or the password (C); not by T2 alone |
+| Policy copy in a backup | readable by anyone holding VK/spell (B) or the password (C); not by T2 alone |
 
 ## 7. Residual risks
 

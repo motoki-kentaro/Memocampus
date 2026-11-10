@@ -3,10 +3,9 @@
 // (manage::backup_restore_tests) and, end to end, in mcp-process.test.js.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadSidePanel, pages, settle } from "./fake-dom.js";
+import { OTHER_SPELL, TEST_SPELL, loadSidePanel, pages, settle } from "./fake-dom.js";
 import { backupFormat, checkBackupPassword, describePolicyCopy } from "../../extension/vault-client.js";
 
-const PHRASE = "abandon ability able about above absent absorb abstract absurd abuse access accident";
 const BACKUP = "C:\\Backups\\memocampus-backup.mcbackup";
 const TARGET = "C:\\Restored\\memocampus-restored.sqlite3";
 
@@ -87,57 +86,71 @@ test("a password backup needs the password twice, sends it once and forgets it",
   assert.equal(sent(host, "vault_backup")[1].password, undefined);
 });
 
-test("an encrypted vault's backup (B or D) needs the phrase that recovers it, sent once and forgotten", async () => {
+test("an encrypted vault's backup (B or D) needs the spell that recovers it, sent once and forgotten", async () => {
   const { $, host } = await loadSidePanel({ vaults: { A: pages("A", 1), P: pages("P", 1) }, active: "A", restore: true, encryption: true });
   host.encrypted.add("A");
   await settle(30);
   await openSettings($);
-  assert.match($("#vault-backup-note").textContent, /^形式B.*リカバリーフレーズ/);
-  assert.equal($("#vault-backup-phrase-row").hidden, false, "B asks for the phrase");
-  assert.match($("#vault-backup-phrase-note").textContent, /復旧できるフレーズでなければ/);
+  assert.match($("#vault-backup-note").textContent, /^形式B.*ふっかつのじゅもん/);
+  assert.doesNotMatch($("#vault-backup-note").textContent, /12単語|リカバリーフレーズ/);
+  assert.equal($("#vault-backup-spell-row").hidden, false, "B asks for the spell");
+  assert.match($("#vault-backup-spell-note").textContent, /復旧できる呪文でなければ/);
 
-  // No phrase, or not 12 words: nothing is sent.
+  // No spell, or not 43 valid characters: nothing is sent.
   $("#vault-backup-pick").dispatch("click");
   await settle(20);
   assert.equal(sent(host, "vault_backup").length, 0);
-  assert.match($("#vault-message").textContent, /12単語/);
-  $("#vault-backup-phrase").value = "abandon ability able";
-  $("#vault-backup-pick").dispatch("click");
-  await settle(20);
-  assert.equal(sent(host, "vault_backup").length, 0);
+  assert.match($("#vault-message").textContent, /43文字です（0文字でした）[\s\S]*バックアップは作成していません/);
+  for (const typed of [TEST_SPELL.slice(0, 42), `${TEST_SPELL}=`, `${TEST_SPELL.slice(0, 9)}/${TEST_SPELL.slice(10)}`]) {
+    $("#vault-backup-spell").value = typed;
+    $("#vault-backup-pick").dispatch("click");
+    await settle(20);
+    assert.equal(sent(host, "vault_backup").length, 0, typed);
+  }
 
-  // A phrase that is not this vault's: refused by the host, no backup, the phrase forgotten.
-  $("#vault-backup-phrase").value = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong";
+  // A spell that is not this vault's: refused by the host, no backup, the spell forgotten.
+  $("#vault-backup-spell").value = OTHER_SPELL;
   $("#vault-backup-pick").dispatch("click");
   await settle(40);
   assert.equal(sent(host, "vault_backup").length, 1);
   assert.match($("#vault-message").textContent, /一致しません/);
   assert.deepEqual(host.backups, []);
-  assert.equal($("#vault-backup-phrase").value, "");
+  assert.equal($("#vault-backup-spell").value, "");
 
-  // D: the password and the phrase.
+  // D: the password and the spell (pasted with surrounding spaces).
   choose($, "#vault-backup-password");
   assert.match($("#vault-backup-note").textContent, /^形式D.*両方/);
   $("#vault-backup-password-input").value = "password-123";
   $("#vault-backup-password-confirm").value = "password-123";
-  $("#vault-backup-phrase").value = ` ${PHRASE.toUpperCase()} `;
+  $("#vault-backup-spell").value = ` ${TEST_SPELL} `;
   $("#vault-backup-pick").dispatch("click");
   await settle(40);
   const request = sent(host, "vault_backup").at(-1);
-  assert.equal(request.recoveryPhrase, ` ${PHRASE.toUpperCase()} `);
+  assert.equal(request.recoverySpell, TEST_SPELL);
+  assert.equal(request.recoveryPhrase, undefined);
   assert.equal(request.password, "password-123");
   assert.deepEqual(host.backupFormats.map(({ format }) => format), ["D"]);
-  assert.equal($("#vault-backup-phrase").value, "", "the phrase is used once");
+  assert.equal($("#vault-backup-spell").value, "", "the spell is used once");
   assert.equal($("#vault-backup-password-input").value, "");
-  const carriers = host.requests.filter((message) => JSON.stringify(message).toLowerCase().includes("absurd abuse"));
+  const carriers = host.requests.filter((message) => JSON.stringify(message).includes(TEST_SPELL));
   assert.deepEqual(carriers.map((message) => message.type), ["vault_backup"]);
+  assert.ok(!JSON.stringify(host.workerMessages ?? []).includes(TEST_SPELL.slice(0, 12)), "never to the service worker or its queue");
 
-  // A plain vault asks for no phrase.
+  // A plain vault (A, C) asks for no spell and sends none.
   host.active = "P";
   $("#tab-url").dispatch("click");
   await settle(10);
   await openSettings($);
-  assert.equal($("#vault-backup-phrase-row").hidden, true);
+  assert.equal($("#vault-backup-spell-row").hidden, true);
+  for (const id of ["#vault-backup-normal", "#vault-backup-password"]) {
+    choose($, id);
+    $("#vault-backup-password-input").value = "password-123";
+    $("#vault-backup-password-confirm").value = "password-123";
+    $("#vault-backup-pick").dispatch("click");
+    await settle(40);
+    assert.equal(sent(host, "vault_backup").at(-1).recoverySpell, undefined, id);
+  }
+  assert.deepEqual(host.backupFormats.map(({ format }) => format), ["D", "A", "C"]);
 });
 
 test("restoring: the backup is checked first, secrets are asked only as needed, and nothing is active before the user decides", async () => {
@@ -146,7 +159,7 @@ test("restoring: the backup is checked first, secrets are asked only as needed, 
     format: "D",
     mode: "encrypted",
     password: "outer password",
-    phrase: PHRASE,
+    spell: TEST_SPELL,
     pages: pages("R", 3),
     policyCopy: { state: "valid", revision: 7, policy: { revision: 7, rule: "CANARY-rule" }, approvedDomains: ["example.com"] },
   };
@@ -160,7 +173,8 @@ test("restoring: the backup is checked first, secrets are asked only as needed, 
   assert.match($("#vault-restore-title").textContent, /形式D/);
   assert.match($("#vault-restore-title").textContent, /上書きしません/);
   assert.equal($("#vault-restore-password-row").hidden, false);
-  assert.equal($("#vault-restore-phrase-row").hidden, false);
+  assert.equal($("#vault-restore-spell-row").hidden, false);
+  assert.match($("#vault-restore-title").textContent, /パスワードとふっかつのじゅもんの両方/);
 
   // No password: nothing is sent.
   $("#vault-restore-submit").dispatch("click");
@@ -170,7 +184,21 @@ test("restoring: the backup is checked first, secrets are asked only as needed, 
 
   // A wrong password: refused, the box stays for another try, nothing changed.
   $("#vault-restore-password").value = "wrong password";
-  $("#vault-restore-phrase").value = PHRASE;
+  // A malformed spell is caught in the page.
+  $("#vault-restore-spell").value = TEST_SPELL.slice(0, 40);
+  $("#vault-restore-submit").dispatch("click");
+  await settle(20);
+  assert.equal(sent(host, "vault_restore").length, 0);
+  assert.match($("#vault-message").textContent, /43文字です（40文字でした）[\s\S]*何も復元していません/);
+  // Another vault's spell: refused by the host.
+  $("#vault-restore-password").value = "outer password";
+  $("#vault-restore-spell").value = OTHER_SPELL;
+  $("#vault-restore-submit").dispatch("click");
+  await settle(40);
+  assert.match($("#vault-message").textContent, /一致しません/);
+  assert.equal($("#vault-restore").hidden, false);
+  $("#vault-restore-password").value = "wrong password";
+  $("#vault-restore-spell").value = TEST_SPELL;
   $("#vault-restore-submit").dispatch("click");
   await settle(40);
   assert.match($("#vault-message").textContent, /パスワードが違います/);
@@ -182,16 +210,16 @@ test("restoring: the backup is checked first, secrets are asked only as needed, 
   $("#vault-restore-submit").dispatch("click");
   await settle(40);
   const requests = sent(host, "vault_restore");
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 3);
   assert.deepEqual(
-    { backupPath: requests[1].backupPath, password: requests[1].password, recoveryPhrase: requests[1].recoveryPhrase, path: requests[1].path },
-    { backupPath: BACKUP, password: "outer password", recoveryPhrase: PHRASE, path: undefined },
+    { backupPath: requests[2].backupPath, password: requests[2].password, recoverySpell: requests[2].recoverySpell, path: requests[2].path },
+    { backupPath: BACKUP, password: "outer password", recoverySpell: TEST_SPELL, path: undefined },
   );
   // Restored, not active: the panel shows what was restored and the policy copy (never applied).
   assert.equal(host.active, "A");
   assert.equal($("#vault-restore").hidden, true);
   assert.equal($("#vault-restore-password").value, "", "secrets are forgotten once used");
-  assert.equal($("#vault-restore-phrase").value, "");
+  assert.equal($("#vault-restore-spell").value, "");
   assert.equal($("#vault-restored").hidden, false);
   assert.match($("#vault-restored-title").textContent, /まだ使用していません/);
   assert.match($("#vault-restored-title").textContent, /閲覧 3件/);
@@ -211,12 +239,13 @@ test("restoring: the backup is checked first, secrets are asked only as needed, 
   assert.match($("#vault-message").textContent, /使い始めました[\s\S]*MCPへの公開は未承認/);
   assert.match($("#vault-publication-state").textContent, /未承認/);
   assert.equal($("#vault-restore-pick").disabled, false);
-  // Only the restore request carried the password and the phrase.
+  // Only the restore requests carried the password and the spell.
   const carriers = host.requests.filter((message) => {
     const text = JSON.stringify(message);
-    return text.includes("outer password") || text.includes("absurd abuse");
+    return text.includes("outer password") || text.includes(TEST_SPELL);
   });
-  assert.deepEqual(carriers.map((message) => message.type), ["vault_restore", "vault_restore"]);
+  assert.deepEqual(carriers.map((message) => message.type), ["vault_restore", "vault_restore", "vault_restore"]);
+  assert.ok(!JSON.stringify(host.workerMessages ?? []).includes(TEST_SPELL.slice(0, 12)));
 });
 
 test("a restored vault can be discarded, and a restore found at start is offered for a decision", async () => {
@@ -249,17 +278,17 @@ test("a restored vault can be discarded, and a restore found at start is offered
 
 test("a cancelled restore forgets the backup and what was typed", async () => {
   const { $, host } = await loadSidePanel({ vaults: { A: pages("A", 1) }, active: "A", restore: true });
-  host.backupFiles[BACKUP] = { format: "B", mode: "encrypted", phrase: PHRASE, pages: [] };
+  host.backupFiles[BACKUP] = { format: "B", mode: "encrypted", spell: TEST_SPELL, pages: [] };
   await settle(30);
   await openSettings($);
   $("#vault-restore-pick").dispatch("click");
   await settle(30);
   assert.equal($("#vault-restore-password-row").hidden, true, "a B backup needs no password");
-  assert.equal($("#vault-restore-phrase-row").hidden, false);
-  $("#vault-restore-phrase").value = PHRASE;
+  assert.equal($("#vault-restore-spell-row").hidden, false);
+  $("#vault-restore-spell").value = TEST_SPELL;
   $("#vault-restore-cancel").dispatch("click");
   assert.equal($("#vault-restore").hidden, true);
-  assert.equal($("#vault-restore-phrase").value, "");
+  assert.equal($("#vault-restore-spell").value, "");
   assert.equal(sent(host, "vault_restore").length, 0);
   // A file that is not a backup is reported, and nothing is asked.
   host.restoreDialog = "C:\\Downloads\\notes.txt";

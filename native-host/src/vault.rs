@@ -48,7 +48,7 @@ pub enum VaultError {
     Db,
     /// The vault's key could not be obtained (no key store entry, protector failure, mismatch).
     KeyUnavailable,
-    /// The key exists but is not unlocked in this process (needs the user, e.g. a recovery phrase).
+    /// The key exists but is not unlocked in this process (needs the user, e.g. the Recovery Spell).
     Locked,
     /// A key was applied but the vault refuses it: never proof that the file is unusable.
     DecryptFailed,

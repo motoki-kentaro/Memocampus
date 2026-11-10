@@ -643,3 +643,26 @@ button.danger { color: var(--error-fg); border-color: var(--error-fg); font-weig
 .vault-secret-fields label { display: block; margin: 4px 0; }
 .vault-secret-fields input, .vault-secret-fields textarea { width: 100%; box-sizing: border-box; }
 .vault-policy-copy { max-height: 240px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+
+/* Issue #51: the Recovery Spell (ふっかつのじゅもん), shown once. */
+.vault-spell-title { font-weight: 700; font-size: 14px; }
+.vault-spell-lead { font-weight: 600; }
+.vault-spell-caution { color: var(--error-fg); font-weight: 600; }
+.vault-spell {
+  display: block;
+  margin: 6px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--hover);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  line-height: 1.5;
+  word-break: break-all;
+  user-select: all;
+}
+.vault-spell-input { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+@media (forced-colors: active) {
+  .vault-spell { border-color: CanvasText; }
+}
