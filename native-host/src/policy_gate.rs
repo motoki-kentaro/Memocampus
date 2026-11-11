@@ -126,7 +126,7 @@ impl PolicyGate {
         store: &PolicyStore,
         policy: &Policy,
     ) -> Result<Snapshot, StoreError> {
-        store.initialize_with_then(policy, || match &self.vaults {
+        store.start_with_then(policy, || match &self.vaults {
             None => Ok(()),
             Some(env) => {
                 vault::withdraw_publication(env)
@@ -166,6 +166,22 @@ impl PolicyGate {
         self.load().map(|snapshot| snapshot.compiled.evaluate(url))
     }
 
+    /// Automatic events keep their original occurrence time through every asynchronous step/retry.
+    pub fn decide_visit(&self, url: &str, at: Option<&str>) -> Result<Decision, &'static str> {
+        let snapshot = self.load()?;
+        if let Some(started) = snapshot.recording_started_at {
+            let boundary = memocampus_native_host::domain_approvals::timestamp(
+                std::time::SystemTime::UNIX_EPOCH + Duration::from_millis(started),
+            );
+            if !at
+                .is_some_and(|at| crate::page_metadata::is_timestamp(at) && at > boundary.as_str())
+            {
+                return Ok(Decision::NeverSave);
+            }
+        }
+        Ok(snapshot.compiled.evaluate(url))
+    }
+
     pub fn evaluate_batch(&self, message: &Value) -> Value {
         let Some(id) = request_id(message) else {
             return json!({ "ok": false, "type": BATCH_RESULT, "requestId": null, "error": "invalid_request_id" });
@@ -185,10 +201,15 @@ impl PolicyGate {
     fn judge_batch(&self, message: &Value) -> Result<(String, u64, Vec<Value>), &'static str> {
         let items = batch_items(message)?;
         let snapshot = self.load()?;
+        let before_start = snapshot.recording_started_at.is_some_and(|started| {
+            message
+                .get("occurredAt")
+                .is_some_and(|at| !at.as_u64().is_some_and(|at| at > started))
+        });
         let answers = items
             .into_iter()
             .map(|(id, url)| {
-                json!({ "id": id, "decision": decision_code(snapshot.compiled.evaluate(url)) })
+                json!({ "id": id, "decision": decision_code(if before_start { Decision::NeverSave } else { snapshot.compiled.evaluate(url) }) })
             })
             .collect();
         Ok((snapshot.etag, snapshot.policy.revision, answers))
@@ -199,6 +220,11 @@ impl PolicyGate {
             return json!({ "ok": false, "type": "policy_result", "requestId": null, "error": "invalid_request_id" });
         };
         let initialize = message.get("type").and_then(Value::as_str) == Some("policy_initialize");
+        // Kept only for legacy unit fixtures. The Native Messaging protocol cannot initialize
+        // defaults without the reviewed onboarding draft and usable-vault check in policy_start.
+        if initialize && !cfg!(test) {
+            return json!({ "ok": false, "type": "policy_result", "requestId": id, "error": "policy_start_required" });
+        }
         let loaded = if initialize {
             self.initialize()
         } else {

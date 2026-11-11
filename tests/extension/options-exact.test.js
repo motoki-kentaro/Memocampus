@@ -103,7 +103,8 @@ test("end to end with the real host: an exact rule checked, applied, read again,
     });
   const judge = async (url) => (await call({ type: "policy_evaluate_batch", requestId: "e", items: [{ id: "u", url }] })).items[0].decision;
   try {
-    assert.equal((await call({ type: "policy_initialize", requestId: "p" })).ok, true);
+    const { seedLegacyPolicy } = await import("./real-processes.js");
+    seedLegacyPolicy(appDir);
     const opened = await openPage({ send: call });
     const { page, $, controls, ruleTexts } = opened;
     await settleHost();

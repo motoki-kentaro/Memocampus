@@ -89,7 +89,10 @@ fn visit(id: &str, url: &str) -> Value {
 }
 
 fn init_policy(app: &Path) {
-    assert_eq!(one(app, json!({ "type": "policy_initialize" }))["ok"], true);
+    memocampus_native_host::policy_store::PolicyStore::new(app.to_owned())
+        .unwrap()
+        .initialize()
+        .unwrap();
 }
 
 /// Begins a creation at `target`; returns the spell (43 base64url characters).

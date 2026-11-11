@@ -210,7 +210,6 @@ test("a version 1 policy is shown but not editable and asks for an explicit migr
 });
 
 for (const [state, label, text] of [
-  ["uninitialized", "Not Initialized（未初期化）", /まだ初期化されていません.*自動記録は行われません.*この画面から初期化することはありません/],
   ["invalid", "Invalid（設定ファイルが無効です）", /自動記録を停止しています.*変更していません/],
   ["unsupported", "Unsupported（現在のバージョンでは対応していません）", /自動記録を停止しています[^]*Native Hostを更新/],
   ["busy", "Unavailable（使用中）", /使用中です/],
@@ -536,7 +535,7 @@ test("a clean page reloads at once", async () => {
 
 // --- Host messages ------------------------------------------------------------------------------
 
-test("the page never initializes, starts or migrates, and only reads while nothing is asked of it", async () => {
+test("opening, reloading and discarding never start recording or apply a preset", async () => {
   for (const name of SOURCES) {
     assert.doesNotMatch(read(name), /policy_(start|initialize|migrate|preset|evaluate)|policy-initialize|sendMessage/, name);
   }
@@ -551,7 +550,7 @@ test("the page never initializes, starts or migrates, and only reads while nothi
   $("discard").dispatch("click");
   $("apply").dispatch("click");
   await settle(0);
-  assert.deepEqual([...new Set(host.requests.map((message) => message.type))].sort(), ["policy_get", "policy_status"]);
+  assert.deepEqual([...new Set(host.requests.map((message) => message.type))].sort(), ["policy_get", "policy_preset", "policy_status", "vault_status"]);
   assert.ok(host.requests.every((message) => typeof message.requestId === "string" && message.requestId !== ""));
 });
 

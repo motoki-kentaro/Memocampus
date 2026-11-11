@@ -17,6 +17,7 @@ use std::time::SystemTime;
 
 const MAX_BYTES: u64 = 1_048_576;
 const MARKER: &[u8] = b"Memocampus policy initialization v1\n";
+const START_MARKER: &str = "Memocampus recording start v2\n";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreError {
     Unavailable,
@@ -37,6 +38,8 @@ pub enum StoreError {
 }
 #[derive(Debug, Clone)]
 pub struct Snapshot {
+    /// None for policies initialized before onboarding. Kept across edits and worker restarts.
+    pub recording_started_at: Option<u64>,
     pub policy: Policy,
     /// Hash of exact bytes, also detects unsupported external edits without a revision bump.
     pub etag: String,
@@ -163,11 +166,11 @@ impl PolicyStore {
         Ok(lock)
     }
     fn load_unlocked(&self) -> Result<Snapshot, StoreError> {
-        if read_regular(&self.marker_path())? != MARKER {
-            return Err(StoreError::Invalid);
-        }
+        let started = recording_start(&read_regular(&self.marker_path())?)?;
         let bytes = read_regular(&self.policy_path())?;
-        snapshot(&bytes, || self.approvals())
+        let mut loaded = snapshot(&bytes, || self.approvals())?;
+        loaded.recording_started_at = started;
+        Ok(loaded)
     }
     /// True only before any initialization attempt. A lost policy or marker is not first use, and
     /// a lone `policy.lock` proves nothing either way.
@@ -185,9 +188,7 @@ impl PolicyStore {
     /// policy a reader started with is still the stored one, which was valid when it was loaded.
     pub fn current_etag(&self) -> Result<String, StoreError> {
         let _lock = self.read_lock()?;
-        if read_regular(&self.marker_path())? != MARKER {
-            return Err(StoreError::Invalid);
-        }
+        recording_start(&read_regular(&self.marker_path())?)?;
         Ok(etag_of(&read_regular(&self.policy_path())?))
     }
     /// Explicit first-run operation only. An interrupted initialization requires manual recovery;
@@ -207,6 +208,23 @@ impl PolicyStore {
         &self,
         policy: &Policy,
         before_write: impl FnOnce() -> Result<(), StoreError>,
+    ) -> Result<Snapshot, StoreError> {
+        self.initialize_inner(policy, before_write, false)
+    }
+    /// The onboarding start fence is completed after the policy is durable, under the same lock.
+    /// An interrupted start leaves an invalid marker; it can never become legacy or first use.
+    pub fn start_with_then(
+        &self,
+        policy: &Policy,
+        before_write: impl FnOnce() -> Result<(), StoreError>,
+    ) -> Result<Snapshot, StoreError> {
+        self.initialize_inner(policy, before_write, true)
+    }
+    fn initialize_inner(
+        &self,
+        policy: &Policy,
+        before_write: impl FnOnce() -> Result<(), StoreError>,
+        recording: bool,
     ) -> Result<Snapshot, StoreError> {
         let mut first = policy.clone();
         first.revision = 1;
@@ -233,11 +251,32 @@ impl PolicyStore {
             .create_new(true)
             .open(self.marker_path())
             .map_err(|_| StoreError::Io)?;
-        marker.write_all(MARKER).map_err(|_| StoreError::Io)?;
+        marker
+            .write_all(if recording {
+                START_MARKER.as_bytes()
+            } else {
+                MARKER
+            })
+            .map_err(|_| StoreError::Io)?;
         marker.sync_all().map_err(|_| StoreError::Io)?;
         drop(marker);
         sync_dir(&self.dir)?;
         self.persist(&first)?;
+        if recording {
+            let at = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_err(|_| StoreError::Io)?
+                .as_millis();
+            let mut marker = OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(self.marker_path())
+                .map_err(|_| StoreError::Io)?;
+            marker
+                .write_all(format!("{START_MARKER}{at}\n").as_bytes())
+                .map_err(|_| StoreError::Io)?;
+            marker.sync_all().map_err(|_| StoreError::Io)?;
+        }
         self.load_unlocked()
     }
     /// Callers edit the loaded policy without changing revision. Host increments it under lock.
@@ -359,10 +398,24 @@ fn snapshot(
     };
     let compiled = CompiledPolicy::compile_with(&policy, &approvals).map_err(refused)?;
     Ok(Snapshot {
+        recording_started_at: None,
         policy,
         etag: etag_of(bytes),
         compiled: Arc::new(compiled),
     })
+}
+fn recording_start(bytes: &[u8]) -> Result<Option<u64>, StoreError> {
+    if bytes == MARKER {
+        return Ok(None);
+    }
+    let at = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| text.strip_prefix(START_MARKER))
+        .and_then(|text| text.strip_suffix('\n'))
+        .and_then(|text| text.parse::<u64>().ok())
+        .filter(|at| *at > 0 && *at <= 253_402_300_799_999)
+        .ok_or(StoreError::Invalid)?;
+    Ok(Some(at))
 }
 fn etag_of(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -837,6 +890,32 @@ mod tests {
             StoreError::AlreadyInitialized
         );
         assert_eq!(store.current_etag().unwrap(), started.etag);
+    }
+
+    #[test]
+    fn an_interrupted_start_marker_is_invalid_not_legacy_or_first_use() {
+        let dir = Scratch::new();
+        let store = dir.store();
+        store
+            .start_with_then(&Policy::default(), || Ok(()))
+            .unwrap();
+        for bytes in [
+            START_MARKER.as_bytes(),
+            b"",
+            b"Memocampus recording start v2\n18446744073709551615\n",
+        ] {
+            fs::write(store.marker_path(), bytes).unwrap();
+            assert!(!store.never_initialized());
+            assert_eq!(store.load().unwrap_err(), StoreError::Invalid);
+            assert_eq!(store.current_etag().unwrap_err(), StoreError::Invalid);
+            assert_eq!(store.evaluate("https://public.test/"), Decision::NeverSave);
+            assert_eq!(
+                store
+                    .start_with_then(&Policy::default(), || Ok(()))
+                    .unwrap_err(),
+                StoreError::AlreadyInitialized
+            );
+        }
     }
 
     #[test]
