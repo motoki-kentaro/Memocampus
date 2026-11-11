@@ -153,11 +153,11 @@ export function fakeWindow() {
   };
 }
 
-export async function openPage(hostOptions = {}) {
+export async function openPage(hostOptions = {}, pageOptions = {}) {
   const host = hostOptions.send ? hostOptions : fakeHost(hostOptions);
   const document = createDocument();
   const window = fakeWindow();
-  const page = startOptionsPage({ document, window, send: host.send });
+  const page = startOptionsPage({ document, window, send: host.send, ...pageOptions });
   await page.ready;
   const $ = (id) => document.querySelector(`#${id}`);
   const rowsOf = (layer) => $(`${layer}-rules`).children;
