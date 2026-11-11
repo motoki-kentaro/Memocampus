@@ -11,21 +11,6 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import defaults from "../../extension/policy-defaults.json" with { type: "json" };
-
-/** Existing-user regression fixture, deliberately using the pre-onboarding marker and dates.
- * Only isolated temp app directories; fresh onboarding tests use the real policy_start instead. */
-export function seedLegacyPolicy(appDir) {
-  const relative = path.relative(os.tmpdir(), appDir);
-  assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
-  mkdirSync(appDir, { recursive: true });
-  for (const [name, value] of [["policy.json", JSON.stringify(defaults)], ["policy.initialized", "Memocampus policy initialization v1\n"], ["policy.lock", ""]]) {
-    writeFileSync(path.join(appDir, name), value, { flag: "wx" });
-  }
-}
 
 export class ProcessFailure extends Error {
   constructor(kind, message, details = {}) {

@@ -31,7 +31,6 @@ function withRule(rule, base = defaults) {
 function fakeHost(overrides = {}) {
   return {
     state: "ready",
-    startedAt: null,
     policy: clone(defaults),
     down: false,
     initialized: false,
@@ -51,13 +50,12 @@ function fakeHost(overrides = {}) {
         const code = { uninitialized: "policy_not_initialized", invalid: "policy_invalid", busy: "policy_busy", unavailable: "policy_unavailable" }[this.state];
         if (this.state !== "ready") return { ...base, ok: false, error: code ?? "invalid_response" };
         const names = { none: "allow", saveButNoMcp: "save_but_no_mcp", neverSave: "never_save" };
-        return { ...base, ok: true, etag: `rev-${this.policy.revision}`, revision: this.policy.revision, items: message.items.map((item) => ({ id: item.id, decision: this.startedAt !== null && message.occurredAt <= this.startedAt ? "never_save" : names[evaluatePolicy(this.policy, item.url)] })) };
+        return { ...base, ok: true, etag: `rev-${this.policy.revision}`, revision: this.policy.revision, items: message.items.map((item) => ({ id: item.id, decision: names[evaluatePolicy(this.policy, item.url)] })) };
       }
       if (message.type === "policy_status") {
         this.statusRequests += 1;
         return { ok: true, type: "policy_result", requestId: message.requestId, state: this.state, ...(this.state === "ready" ? { revision: this.policy.revision, etag: `rev-${this.policy.revision}`, schemaVersion: 1, engineVersion: 1 } : {}) };
       }
-      if (message.type === "host_capabilities") return { ok: true, type: "host_capabilities_result", requestId: message.requestId, capabilities: [] };
       if (message.type === "policy_initialize") {
         this.initializations += 1;
         if (this.state !== "uninitialized") return { ok: false, type: "policy_result", requestId: message.requestId, error: "policy_already_initialized" };
@@ -97,7 +95,7 @@ function startWorker({ host = fakeHost(), tabs = {}, query = [], data = new Map(
   };
   globalThis.chrome = {
     runtime,
-    webNavigation: { onBeforeNavigate: on("before"), onErrorOccurred: on("failed"), onCompleted: on("navigation"), onCommitted: on("committed"), onCreatedNavigationTarget: on("createdTarget"), onHistoryStateUpdated: on("historyState") },
+    webNavigation: { onCompleted: on("navigation"), onCommitted: on("committed"), onCreatedNavigationTarget: on("createdTarget"), onHistoryStateUpdated: on("historyState") },
     contextMenus: { create() {}, onClicked: on("menuClick") },
     notifications: { create: async () => {} },
     action: { setBadgeText: async ({ text }) => void (badge.text = text), setTitle: async ({ title }) => void (badge.title = title) },
@@ -127,13 +125,9 @@ function startWorker({ host = fakeHost(), tabs = {}, query = [], data = new Map(
     stored: () => JSON.stringify([...data.entries()]),
     pending: () => data.get(QUEUE_KEY) ?? [],
     dead: () => data.get(DEAD_LETTER_KEY) ?? [],
-    async navigate(url, id = 1, timeStamp = Date.now(), { lifecycle = false } = {}) {
+    async navigate(url, id = 1) {
       tabs[id] ??= tabOf(id, url);
-      if (lifecycle) {
-        for (const fn of listeners.before ?? []) fn({ frameId: 0, tabId: id, url, timeStamp });
-        for (const fn of listeners.committed ?? []) fn({ frameId: 0, tabId: id, url, timeStamp: Date.now(), documentId: `doc-${id}-${url}` });
-      }
-      await Promise.all(listeners.navigation.map((fn) => fn({ frameId: 0, tabId: id, url, timeStamp, documentId: `doc-${id}-${url}` })));
+      await Promise.all(listeners.navigation.map((fn) => fn({ frameId: 0, tabId: id, url, documentId: `doc-${id}-${url}` })));
       await settle(20);
     },
     message: (message) => new Promise((resolve) => listeners.message.forEach((fn) => fn(message, {}, resolve))),
@@ -441,7 +435,7 @@ test("a policy failure from the host keeps the event queued", async () => {
 
 // --- Initialization ------------------------------------------------------------------------------
 
-test("the retired initialize message cannot bypass onboarding", async () => {
+test("nothing initializes the policy except the explicit request; afterwards recording starts", async () => {
   const host = fakeHost({ state: "uninitialized" });
   const worker = await startWorker({ host, data: seeded([visit("v1", NORMAL_URL, "Kept"), visit("v2", AUTH_URL)]) });
   await worker.navigate(NORMAL_URL);
@@ -451,24 +445,25 @@ test("the retired initialize message cannot bypass onboarding", async () => {
   assert.deepEqual(worker.pending().map((event) => event.id), ["v1", "v2"]);
 
   const result = await worker.message({ type: "policy-initialize" });
-  assert.equal(result.code, "policy_start_required");
-  assert.equal(host.initializations, 0);
-  assert.deepEqual(host.received, []);
+  assert.equal(result.state, "ready");
+  assert.equal(host.initializations, 1);
+  assert.deepEqual(host.received.map((event) => event.id), ["v1"], "queued events are judged and delivered");
+  assert.ok(!worker.stored().includes(AUTH_URL), "and cleaned");
   await worker.navigate(SEARCH_URL, 2);
-  assert.deepEqual(host.received, []);
+  assert.equal(host.received.at(-1).url, SEARCH_URL);
 });
 
 test("initializing over a damaged policy is refused and recording stays stopped", async () => {
   const host = fakeHost({ state: "invalid" });
   const worker = await startWorker({ host });
   const result = await worker.message({ type: "policy-initialize" });
-  assert.equal(result.ok, false);
-  assert.equal(result.code, "policy_start_required");
+  assert.equal(result.state, "invalid");
+  assert.equal(result.code, "policy_invalid");
   await worker.navigate(NORMAL_URL);
   assert.deepEqual(host.received, []);
 });
 
-test("the side panel opens first-run options only on first use", async () => {
+test("the side panel offers initialization only on first use, and only runs it when asked", async () => {
   const panel = (policyStatus) => loadSidePanel({ vaults: {}, active: null, policyStatus });
   const first = await panel({ ok: true, state: "uninitialized", code: "policy_not_initialized", message: "初期化が必要", revision: null });
   await settle(20);
@@ -478,9 +473,8 @@ test("the side panel opens first-run options only on first use", async () => {
   assert.equal(first.host.policyInitializations ?? 0, 0, "opening the panel initializes nothing");
   first.$("#policy-initialize").dispatch("click");
   await settle(20);
-  assert.equal(first.host.policyInitializations ?? 0, 0);
-  assert.equal(first.host.optionsOpened, 1);
-  assert.equal(first.$("#policy-status").hidden, false);
+  assert.equal(first.host.policyInitializations, 1);
+  assert.equal(first.$("#policy-status").hidden, true);
 
   const damaged = await panel({ ok: true, state: "invalid", code: "policy_invalid", message: "破損", revision: null });
   await settle(20);
@@ -493,49 +487,6 @@ test("the side panel opens first-run options only on first use", async () => {
 });
 
 // --- Cache rules ---------------------------------------------------------------------------------
-
-test("an event that races first start is refused before any durable write, including a delayed Chrome event", async () => {
-  for (const delayed of [false, true]) {
-    const host = fakeHost({ state: "uninitialized" });
-    const worker = await startWorker({ host });
-    const normal = host.respond;
-    host.respond = function(message) {
-      if (message.type === "policy_evaluate_batch") {
-        // The asynchronous tab/tracker work finished after another screen committed start.
-        this.state = "ready";
-        this.startedAt = message.occurredAt + (delayed ? 10_000 : 0);
-        assert.ok(Number.isSafeInteger(message.occurredAt));
-      }
-      return normal.call(this, message);
-    };
-    await worker.navigate(NORMAL_URL, 1, Date.now() - (delayed ? 20_000 : 0), { lifecycle: true });
-    assertNoTrace(worker, NORMAL_URL);
-    const restarted = await startWorker({ host, data: worker.data });
-    await restarted.message({ type: "flush-queue" });
-    assertNoTrace(restarted, NORMAL_URL);
-  }
-});
-
-test("first-run events leave no queue/dead letters across worker restarts; later events can record", async () => {
-  const host = fakeHost({ state: "uninitialized" });
-  const first = await startWorker({ host });
-  await first.navigate(NORMAL_URL);
-  assertNoTrace(first, NORMAL_URL);
-  const restarted = await startWorker({ host, data: first.data });
-  host.startedAt = Date.now() - 1;
-  host.state = "ready";
-  await restarted.navigate(SEARCH_URL, 2, Date.now(), { lifecycle: true });
-  assert.equal(host.received.length, 1);
-  assert.equal(host.received[0].url, SEARCH_URL);
-  assert.ok(!restarted.stored().includes(NORMAL_URL));
-});
-
-test("an unprovable Chrome occurrence time is refused for a new start", async () => {
-  const host = fakeHost({ startedAt: Date.now() - 1 });
-  const worker = await startWorker({ host });
-  await worker.navigate(NORMAL_URL, 1, null);
-  assertNoTrace(worker, NORMAL_URL);
-});
 
 function gateWith(host, clock) {
   const send = async (message) => clone(host.respond(message));
@@ -652,9 +603,9 @@ test("the extension never asks for the policy document or a migration", async ()
   const PAGE_ONLY = ["policy_get", "policy_validate", "policy_test_rule", "policy_test_url", "policy_apply"];
   for (const name of readdirSync(extensionDir).filter((file) => file.endsWith(".js"))) {
     const source = readFileSync(path.join(extensionDir, name), "utf8");
-    for (const type of ["policy_migrate", ...(name === "onboarding-state.js" ? [] : ['"policy_start"', '"policy_preset"'])]) assert.ok(!source.includes(type), `${name}: ${type}`);
+    for (const type of ["policy_migrate", "policy_start", "policy_preset"]) assert.ok(!source.includes(type), `${name}: ${type}`);
     if (name !== READS_DOCUMENT) for (const type of PAGE_ONLY) assert.ok(!source.includes(type), `${name}: ${type}`);
-    const importers = ["options-page.js", "onboarding-state.js"].includes(name) ? [] : [READS_DOCUMENT];
+    const importers = name === "options-page.js" ? [] : [READS_DOCUMENT];
     for (const imported of importers) assert.ok(!source.includes(`./${imported}`), `${name} imports ${imported}`);
   }
   const workerGraph = new Set();

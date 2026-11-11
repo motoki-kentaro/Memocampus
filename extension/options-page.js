@@ -1,8 +1,7 @@
 // The Privacy settings page (options.html). It reads the active policy from the host, lets the person
 // edit a draft in memory, has the host check and test the draft, and applies it only when asked,
-// in place of the policy it was made from (its ETag). First use previews a host preset through the
-// same editor and starts only on the person's click. Neither start nor apply is retried automatically.
-// Rule text and URLs are set as text or input values only and
+// in place of the policy it was made from (its ETag). It never initializes, starts or migrates, and
+// never sends an apply twice by itself. Rule text and URLs are set as text or input values only and
 // never logged.
 //
 // A rule enters the draft, or changes in it, only through the URL checker, and only after the host
@@ -10,8 +9,6 @@
 // typed into the tables, and the page never matches a rule itself.
 
 import { describeErrorCode, createLatestGate } from "./search-client.js";
-import { loadPreset, startDraft } from "./onboarding-state.js";
-import { vaultRequest, describeStatus } from "./vault-client.js";
 import {
   CATEGORY_KEYS,
   LAYER_KEYS,
@@ -66,7 +63,7 @@ const NOT_SHOWN = "現在のプライバシー設定を取得できていない�
 const EXPLANATION = {
   loading: "",
   uninitialized:
-    "プライバシー設定はまだ初期化されていません。自動記録は行われません。初回案内と下書きを確認し、「記憶を開始する」を押すと記録を開始します。",
+    "プライバシー設定はまだ初期化されていません。初期化されるまで自動記録は行われません。初期化はサイドパネルから行えます。この画面から初期化することはありません。",
   invalid: `プライバシー設定を読み取れない（欠落・破損）ため、自動記録を停止しています。設定ファイルは変更していません。復旧機能は今後この画面に追加します。\n${NOT_SHOWN}`,
   unsupported: `プライバシー設定に、現在のバージョンでは対応していない内容が含まれているため、自動記録を停止しています。設定ファイルは変更していません。新しいバージョンで作られた設定であれば、Native Hostを更新してください。\n${NOT_SHOWN}`,
   busy: `プライバシー設定が使用中です。しばらくしてから再読み込みしてください。\n${NOT_SHOWN}`,
@@ -144,9 +141,6 @@ export function startOptionsPage({ document, window, send }) {
   const urlGate = createLatestGate();
 
   let view = { state: "loading" };
-  let onboarding = false;
-  let startPending = false;
-  let vaultReady = false;
   let draft = null;
   let loading = false;
   let notice = "";
@@ -169,7 +163,7 @@ export function startOptionsPage({ document, window, send }) {
 
   const locked = () => busy === "applying" || busy === "checking";
   const canEdit = () => Boolean(draft?.editable) && !locked();
-  const canApply = () => !onboarding && Boolean(draft?.editable) && draft.dirty() && busy === null && blocked === null && !loading;
+  const canApply = () => Boolean(draft?.editable) && draft.dirty() && busy === null && blocked === null && !loading;
   const currentValidation = () => (validation && validation.draft === draft && validation.version === draft.version ? validation : null);
 
   function explanation() {
@@ -190,13 +184,6 @@ export function startOptionsPage({ document, window, send }) {
     $("policy-explanation").textContent = explanation();
     $("reload").disabled = loading || locked();
     $("options").setAttribute("aria-busy", String(loading || busy !== null));
-    $("onboarding").hidden = !onboarding;
-    $("start-recording").hidden = !onboarding;
-    $("start-recording").disabled = !onboarding || !draft || !vaultReady || busy !== null || startPending || loading;
-    $("start-recheck").hidden = !onboarding || !startPending;
-    $("start-recheck").disabled = busy !== null;
-    $("vault-recheck").disabled = busy !== null;
-    $("checker-description").textContent = `ルールがURLに一致するかをNative Hostで確認し、一致したルールだけをグループに追加できます。追加は下書きへの追加で、「${onboarding ? "記憶を開始する" : "適用"}」を押すまで反映されません。`;
   }
 
   function renderCategories() {
@@ -354,7 +341,6 @@ export function startOptionsPage({ document, window, send }) {
   }
 
   function applyReason() {
-    if (onboarding) return "この下書きは未適用です。確認後「記憶を開始する」で初めて記録を有効にします。";
     if (!draft) return "設定を読み込めていないため、適用できません。";
     if (!draft.editable) return "旧形式（v1）の設定は、この画面では適用できません。";
     if (busy === "applying" || busy === "checking") return "適用の処理中です。";
@@ -371,7 +357,6 @@ export function startOptionsPage({ document, window, send }) {
     $("discard").disabled = !dirty || locked();
     $("validate").disabled = !draft?.editable || busy !== null;
     $("apply").disabled = !canApply();
-    $("apply").hidden = onboarding;
     $("apply-reason").textContent = applyReason();
     const status = $("apply-status");
     status.textContent = applyNote;
@@ -761,7 +746,7 @@ export function startOptionsPage({ document, window, send }) {
     const index = draft.appendRule(layerKey, match);
     if (index < 0) return renderChecker();
     edited(true, [layerKey]);
-    checkerNote = `「${LAYER_NAME[layerKey]}」の下書きに追加しました（${index + 1}行目）。「${onboarding ? "記憶を開始する" : "適用"}」を押すまで反映されません。`;
+    checkerNote = `「${LAYER_NAME[layerKey]}」の下書きに追加しました（${index + 1}行目）。「適用」を押すまで反映されません。`;
     renderChecker();
     showRow(layerKey, index);
   }
@@ -790,7 +775,7 @@ export function startOptionsPage({ document, window, send }) {
     if (outcome !== "replaced") return renderChecker();
     editing = null;
     edited(true, [layer]);
-    checkerNote = `「${LAYER_NAME[layer]}」の${index + 1}行目のルールを下書きで変更しました。「${onboarding ? "記憶を開始する" : "適用"}」を押すまで反映されません。`;
+    checkerNote = `「${LAYER_NAME[layer]}」の${index + 1}行目のルールを下書きで変更しました。「適用」を押すまで反映されません。`;
     renderChecker();
     showRow(layer, index);
   }
@@ -838,8 +823,6 @@ export function startOptionsPage({ document, window, send }) {
 
   /** Takes the policy just read as the active one, with a new draft of it. */
   function adopt(loaded, note) {
-    onboarding = false;
-    startPending = false;
     view = loaded;
     draft = createDraft(loaded.active, { editable: loaded.editable });
     blocked = null;
@@ -851,64 +834,6 @@ export function startOptionsPage({ document, window, send }) {
     finish(note);
     // What the active policy uses has changed.
     void refreshApprovals();
-  }
-
-  async function refreshVault() {
-    vaultReady = false;
-    try {
-      const reply = await vaultRequest("vault_status", {}, { send });
-      vaultReady = reply.status?.state === "ready";
-      $("onboarding-vault").textContent = vaultReady ? "使用可能なVaultを再利用します。" : `${describeStatus(reply.status)}。Vault設定で作成または選択してください。`;
-    } catch {
-      $("onboarding-vault").textContent = "Vaultの状態を取得できません。Native Hostの接続を確認してください。";
-    }
-    render();
-  }
-
-  async function checkStart(result = null) {
-    busy = "checking";
-    render();
-    const loaded = await loadActivePolicy({ send });
-    if (loaded.state === "ready") {
-      adopt(loaded, "記録開始済みのPolicyを確認しました。現在の設定を表示しています。MCP公開にはVault設定で別途承認が必要です。");
-      return;
-    }
-    if (loaded.state === "uninitialized") {
-      startPending = false;
-      finish(`確認した時点では未開始です。${result && !result.ok ? errorText(result.code) : ""} 自動では開始を再送しません。`);
-      await refreshVault();
-      return;
-    }
-    // A damaged/lost policy must no longer show the first-use explanation or a preset.
-    if (["invalid", "unsupported"].includes(loaded.state)) {
-      onboarding = false;
-      view = loaded;
-      draft = null;
-      for (const key of LAYER_KEYS) buildRules(key);
-    }
-    startPending = true;
-    finish(`開始状態を確認できません。${loadReason(loaded)} 開始リクエストは再送しません。「開始状態を再確認」または「再読み込み」を使ってください。`);
-  }
-
-  async function startRecording() {
-    if (!onboarding || !draft || !vaultReady || busy !== null || startPending || loading) return;
-    // Lock editing and repeated clicks before the first await.
-    busy = "applying";
-    const target = draft;
-    const version = draft.version;
-    const submitted = draft.policy;
-    resetChecker();
-    render();
-    const checked = await validateDraft({ send, policy: submitted });
-    validation = { draft: target, version, ...checked };
-    if (!checked.ok) return finish("下書きを検証できないため、開始していません。検証結果を確認してください。");
-    // Another page may have started while this one was open. Never apply over that policy.
-    const current = await loadActivePolicy({ send });
-    if (current.state === "ready") return adopt(current, "別の画面で記録開始済みです。現在の設定を表示しています。");
-    if (current.state !== "uninitialized") return checkStart();
-    startPending = true;
-    const result = await startDraft({ send, policy: submitted });
-    return checkStart(result);
   }
 
   async function apply() {
@@ -1045,7 +970,6 @@ export function startOptionsPage({ document, window, send }) {
     applied = null;
     pending = null;
     view = { state: "loading" };
-    onboarding = false;
     draft = null;
     notice = "";
     validation = null;
@@ -1066,20 +990,6 @@ export function startOptionsPage({ document, window, send }) {
     loading = false;
     view = result;
     draft = result.state === "ready" ? createDraft(result.active, { editable: result.editable }) : null;
-    if (result.state === "uninitialized") {
-      onboarding = true;
-      try {
-        const preset = await loadPreset({ send });
-        if (!loadGate.isCurrent(token)) return;
-        // Kept only as the editor's comparison baseline; status remains uninitialized.
-        view = { ...result, active: preset };
-        draft = createDraft(preset, { editable: true });
-        startPending = false;
-      } catch {
-        applyNote = "初期候補を取得できません。開始していません。Native Hostを確認して再読み込みしてください。";
-      }
-      await refreshVault();
-    }
     for (const key of LAYER_KEYS) buildRules(key);
     render();
   }
@@ -1146,9 +1056,6 @@ export function startOptionsPage({ document, window, send }) {
     render();
   });
   $("apply").addEventListener("click", requestApply);
-  $("start-recording").addEventListener("click", () => void startRecording());
-  $("start-recheck").addEventListener("click", () => void checkStart());
-  $("vault-recheck").addEventListener("click", () => void refreshVault());
   $("relax-confirm-no").addEventListener("click", () => hideRelaxConfirm(true));
   $("relax-confirm").addEventListener("keydown", (event) => {
     if (event.key === "Escape") hideRelaxConfirm(true);

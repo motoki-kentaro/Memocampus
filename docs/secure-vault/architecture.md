@@ -385,7 +385,7 @@ sections: "policy" (JSON copy of policy + PSL approvals), then "vault-a" (raw SQ
   - The user confirms (records `{state: confirmed, policyRevision}`) or keeps the vault pending.
 - **Policy edits and policy initialization** (Slice B0, review finding F-02; `slice-b0.md` §10).
   - Ordinary edits of the global policy keep a confirmation; every read applies the current policy.
-  - Initializing a policy (`policy_start`; #24 retired `policy_initialize` from the production protocol, possible only when no policy and
+  - Initializing a policy (`policy_initialize`, `policy_start`, possible only when no policy and
     no marker exist, e.g. after a loss) first sets the active vault's publication back to
     `pending`, then writes the policy. A failed withdrawal writes no policy; a failed policy write
     after it leaves `pending`. A later restore (S3) that brings a policy copy must follow the same

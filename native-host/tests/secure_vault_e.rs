@@ -206,10 +206,10 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 fn the_vault_file_and_its_spell_alone_bring_the_memories_back() {
     let tmp = TempDir::new();
     let app = tmp.dir("original-app");
-    memocampus_native_host::policy_store::PolicyStore::new(app.clone())
-        .unwrap()
-        .initialize()
-        .unwrap();
+    assert_eq!(
+        one(&app, json!({ "type": "policy_initialize" }))["ok"],
+        true
+    );
     let vault = tmp.dir("original").join("memocampus.sqlite3");
 
     // 1–2. A new encrypted vault; the 43-character spell is what the user keeps.
@@ -285,10 +285,10 @@ fn the_vault_file_and_its_spell_alone_bring_the_memories_back() {
 fn losing_the_key_store_of_this_windows_user_loses_nothing_but_convenience() {
     let tmp = TempDir::new();
     let app = tmp.dir("app");
-    memocampus_native_host::policy_store::PolicyStore::new(app.clone())
-        .unwrap()
-        .initialize()
-        .unwrap();
+    assert_eq!(
+        one(&app, json!({ "type": "policy_initialize" }))["ok"],
+        true
+    );
     let vault = tmp.0.join("vault.sqlite3");
     let begun = one(
         &app,
@@ -338,10 +338,10 @@ fn a_recovery_that_died_after_storing_the_key_finishes_on_retry_and_never_duplic
     use memocampus_native_host::secure_vault::spell;
     let tmp = TempDir::new();
     let app = tmp.dir("app");
-    memocampus_native_host::policy_store::PolicyStore::new(app.clone())
-        .unwrap()
-        .initialize()
-        .unwrap();
+    assert_eq!(
+        one(&app, json!({ "type": "policy_initialize" }))["ok"],
+        true
+    );
     let vault = tmp.0.join("vault.sqlite3");
     let begun = one(
         &app,

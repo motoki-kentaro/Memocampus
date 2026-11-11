@@ -551,8 +551,7 @@ test("end to end with the real host: a URL hidden, published and deleted, an ima
   const A = "https://forum.test/thread/1?page=2";
   const B = "https://blog.test/post";
   try {
-    const { seedLegacyPolicy } = await import("./real-processes.js");
-    seedLegacyPolicy(appDir);
+    assert.equal((await call({ type: "policy_initialize", requestId: "p" })).ok, true);
     assert.equal((await call({ type: "vault_create", requestId: "c", useDefault: true })).ok, true);
     const db = new DatabaseSync(vault);
     try {

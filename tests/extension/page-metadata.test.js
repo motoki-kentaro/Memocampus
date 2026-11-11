@@ -278,7 +278,7 @@ async function startWorker({ host = fakeHost(), tabs = {}, data = new Map(), pag
         reply(clone(host.respond(clone(message))));
       },
     },
-    webNavigation: { onBeforeNavigate: on("before"), onErrorOccurred: on("failed"), onCompleted: on("navigation"), onCommitted: on("committed"), onCreatedNavigationTarget: on("createdTarget"), onHistoryStateUpdated: on("historyState") },
+    webNavigation: { onCompleted: on("navigation"), onCommitted: on("committed"), onCreatedNavigationTarget: on("createdTarget"), onHistoryStateUpdated: on("historyState") },
     contextMenus: { create() {}, onClicked: on("menuClick") },
     notifications: { create: async () => {} },
     action: { setBadgeText: async () => {}, setTitle: async () => {} },

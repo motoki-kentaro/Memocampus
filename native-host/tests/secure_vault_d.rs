@@ -95,10 +95,10 @@ fn visits_of(db: &rusqlite::Connection) -> Vec<String> {
 fn a_plain_vault_is_encrypted_and_back_across_host_processes() {
     let tmp = TempDir::new();
     let app = tmp.app();
-    memocampus_native_host::policy_store::PolicyStore::new(app.clone())
-        .unwrap()
-        .initialize()
-        .unwrap();
+    assert_eq!(
+        one(&app, json!({ "type": "policy_initialize" }))["ok"],
+        true
+    );
     let plain = tmp.0.join("plain.sqlite3");
     assert_eq!(
         one(&app, json!({ "type": "vault_create", "path": plain }))["ok"],

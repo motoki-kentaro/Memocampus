@@ -5,7 +5,6 @@ import { chromeNativeTransport } from "./search-client.js";
 import { bytesToBase64 } from "./image-format.js";
 import { capturePageMetadata } from "./page-metadata.js";
 import { createNavigationTracker } from "./navigation-tracker.js";
-import { createNavigationStarts } from "./navigation-start.js";
 import { checkHostCapabilities } from "./host-capabilities.js";
 import { SAVE_IMAGE_MENU_ID, describeImageSaveResult, registerImageMenu, saveImageFromClick } from "./image-save.js";
 
@@ -68,7 +67,6 @@ const queue = createEventQueue({
 const tracker = createNavigationTracker({
   isNormalTab: async (tabId) => (await chrome.tabs.get(tabId))?.incognito === false,
 });
-const navigationStarts = createNavigationStarts();
 
 /** A policy failure the host reported while delivering also stops collection at once. */
 async function flushQueue() {
@@ -150,9 +148,6 @@ async function recordAllTabs() {
 
 chrome.webNavigation.onCompleted.addListener(async (details) => {
   if (details.frameId !== 0 || !isRecordableUrl(details.url)) return;
-  // Read before any await, bound to this document. Completion/commit times cannot prove that a
-  // navigation began after first start. Missing evidence (including worker restart) stays unknown.
-  const occurredAt = navigationStarts.completed(details);
   // Taken first, in event order: the commit this document came from, if it was observed.
   const observed = await tracker.completed(details).catch(() => null);
   // webNavigation does not say whether the tab is incognito. A tab that is gone (closed meanwhile)
@@ -165,7 +160,7 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
   }
   if (tab?.incognito !== false) return;
   // Decided before anything is written: a refused or undecidable visit is not kept anywhere.
-  const judged = await policy.evaluate([details.url], { occurredAt });
+  const judged = await policy.evaluate([details.url]);
   if (!judged.ok || judged.decisions.get(details.url) !== "allow") return;
   const event = {
     type: "visit",
@@ -176,8 +171,6 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     title: typeof tab.title === "string" && tab.url === details.url ? tab.title : "",
     incognito: tab.incognito,
     visitedAt: new Date().toISOString(),
-    // Navigation start time is distinct from the visit timestamp; retries keep it unchanged.
-    recordingOccurredAt: occurredAt === null ? null : new Date(occurredAt).toISOString(),
   };
   // Only now, for an allowed URL in a normal tab, is the page read: once, in this very document.
   // Without an answer the visit is recorded as before, and a stored row is left as it is.
@@ -199,22 +192,10 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
   void recordVisit(event, details.tabId, observed?.token);
 });
 
-chrome.webNavigation.onBeforeNavigate.addListener((details) => navigationStarts.before(details));
-chrome.webNavigation.onCommitted.addListener((details) => {
-  navigationStarts.committed(details);
-  void tracker.committed(details).catch(() => {});
-});
-chrome.webNavigation.onErrorOccurred.addListener((details) => navigationStarts.failed(details));
+chrome.webNavigation.onCommitted.addListener((details) => void tracker.committed(details).catch(() => {}));
 chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => void tracker.createdNavigationTarget(details).catch(() => {}));
-chrome.tabs.onRemoved.addListener((tabId) => {
-  navigationStarts.removed(tabId);
-  void tracker.tabRemoved(tabId).catch(() => {});
-});
-chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
-  navigationStarts.removed(addedTabId);
-  navigationStarts.removed(removedTabId);
-  void tracker.tabReplaced(addedTabId, removedTabId).catch(() => {});
-});
+chrome.tabs.onRemoved.addListener((tabId) => void tracker.tabRemoved(tabId).catch(() => {}));
+chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => void tracker.tabReplaced(addedTabId, removedTabId).catch(() => {}));
 
 // A URL change inside a document (pushState / replaceState) is never recorded: the application keeps
 // its own state. It only makes the tracker forget what the tab showed (PO decision after the audit).
@@ -295,12 +276,8 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 void updateBadge();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type === "policy-initialize") {
-    sendResponse({ ok: false, code: "policy_start_required" });
-    return false;
-  }
-  if (message?.type === "policy-status") {
-    const request = policy.current({ maxAgeMs: 0 }).then((verdict) => policy.view(verdict));
+  if (message?.type === "policy-status" || message?.type === "policy-initialize") {
+    const request = message.type === "policy-initialize" ? policy.initialize() : policy.current({ maxAgeMs: 0 }).then((verdict) => policy.view(verdict));
     request.then(
       async (view) => {
         // A policy that became usable releases what was held back while it was not.

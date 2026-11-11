@@ -81,10 +81,13 @@ fn sha(c: char) -> String {
 /// A_OTHER_QUERY is another URL of the same page. Images 1 (two saves, tags) and 2 (shares a tag).
 fn setup() -> TempDir {
     let tmp = TempDir::new();
-    memocampus_native_host::policy_store::PolicyStore::new(tmp.app_dir())
-        .unwrap()
-        .initialize()
-        .unwrap();
+    assert_eq!(
+        call(
+            &tmp,
+            json!({ "type": "policy_initialize", "requestId": "p" })
+        )["ok"],
+        true
+    );
     assert_eq!(
         call(
             &tmp,

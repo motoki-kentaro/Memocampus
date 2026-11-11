@@ -582,8 +582,7 @@ test("end to end with the real host: tag, find by tag, copy, and a vault-switche
     ]);
   const vault = path.join(appDir, "memocampus.sqlite3");
   try {
-    const { seedLegacyPolicy } = await import("./real-processes.js");
-    seedLegacyPolicy(appDir);
+    assert.equal((await call({ type: "policy_initialize", requestId: "p" })).ok, true);
     assert.equal((await call({ type: "vault_create", requestId: "c", useDefault: true })).ok, true);
     const older = png(40, 30, 900);
     const newer = png(40, 30, 1200);

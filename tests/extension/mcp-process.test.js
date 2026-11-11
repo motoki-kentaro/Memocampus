@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { ProcessFailure, confirmPublication, startMcp, seedLegacyPolicy } from "./real-processes.js";
+import { ProcessFailure, confirmPublication, startMcp } from "./real-processes.js";
 
 const NODE = process.execPath;
 const stub = (source) => [NODE, ["-e", source]];
@@ -111,7 +111,7 @@ test("end to end with the real host and MCP: a new vault is refused until confir
     return mcp;
   };
   try {
-    seedLegacyPolicy(appDir);
+    assert.equal((await call({ type: "policy_initialize", requestId: "p" })).ok, true);
     const created = await call({ type: "vault_create", requestId: "c", useDefault: true });
     assert.equal(created.status.publication, "pending");
 
@@ -167,7 +167,7 @@ test("end to end with the real host and MCP: an encrypted vault written by the h
   const vault = path.join(appDir, "encrypted.sqlite3");
   const servers = [];
   try {
-    seedLegacyPolicy(appDir);
+    assert.equal((await call({ type: "policy_initialize" })).ok, true);
     const begun = await call({ type: "vault_create_encrypted", path: vault });
     assert.equal(begun.ok, true, JSON.stringify(begun));
     assert.match(begun.recoverySpell, /^[A-Za-z0-9_-]{43}$/);
@@ -248,7 +248,7 @@ test("end to end with the real host and MCP: a password backup of an encrypted v
   mkdirSync(backups);
   const servers = [];
   try {
-    seedLegacyPolicy(first.env.MEMOCAMPUS_APP_DIR);
+    assert.equal((await first.call({ type: "policy_initialize" })).ok, true);
     const begun = await first.call({ type: "vault_create_encrypted", path: path.join(root, "enc.sqlite3") });
     const spell = begun.recoverySpell;
     assert.equal((await first.call({ type: "vault_create_encrypted_commit", recoverySpell: spell })).ok, true);
@@ -262,7 +262,7 @@ test("end to end with the real host and MCP: a password backup of an encrypted v
     for (const secret of ["restored-row", "e2e password", spell, "SQLite format 3"]) assert.equal(bytes.includes(secret), false, secret);
 
     // The new PC: a policy of its own is ready, which must not publish the restored vault.
-    seedLegacyPolicy(second.env.MEMOCAMPUS_APP_DIR);
+    assert.equal((await second.call({ type: "policy_initialize" })).ok, true);
     const inspected = await second.call({ type: "vault_restore_inspect", path: backedUp.backupPath });
     assert.deepEqual([inspected.format, inspected.needsPassword, inspected.needsSpell], ["D", true, true]);
     const target = path.join(root, "restored.sqlite3");
@@ -321,7 +321,7 @@ test("end to end with the real host and MCP: a plain vault converted to encrypte
   };
   const servers = [];
   try {
-    seedLegacyPolicy(env.MEMOCAMPUS_APP_DIR);
+    assert.equal((await call({ type: "policy_initialize" })).ok, true);
     const plain = path.join(root, "plain.sqlite3");
     assert.equal((await call({ type: "vault_create", path: plain })).ok, true);
     await visit("v1", "https://public.test/converted-row");

@@ -79,7 +79,7 @@ Automatic recording (visits and **全タブを記録**) is judged against `%LOCA
 - **Layer A (`neverSave`)**: not recorded at all. Initially authentication hosts and paths, and URLs carrying credentials (`access_token` and the like). A malformed URL is treated the same way.
 - **Layer B (`saveButNoMcp`)**: recorded locally as usual, and never given to AI: the MCP server (below) leaves these pages out of every result and count.
 
-**First use**: open **初回案内を開く** from the side panel's URL tab (or open Privacy settings). Review the Japanese explanation and the Native Host's preset as an editable draft, explicitly create/select a local Vault if needed, then press **記憶を開始する**. Merely opening or validating the draft starts nothing. Events from before start never enter the durable queue and are never backfilled. Existing valid policies are kept; damaged/lost policies fail closed. Recording and MCP publication require separate approvals. See [Issue #24 implementation and verification](docs/issue-024-first-run-onboarding.md).
+**First use**: nothing is created implicitly. Until you press **プライバシー設定を初期化** at the top of the side panel's URL tab, automatic recording is stopped. The button is offered only if the policy was never initialized.
 
 The check happens three times, with the same rules:
 
@@ -196,7 +196,7 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
    The script fills `native-host/com.memocampus.vault.template.json` with the absolute path of *your* built `memocampus-native-host.exe` and your extension ID, writes `native-host/com.memocampus.vault.json` (git-ignored), and sets `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.memocampus.vault` to that file. It does not touch HKLM or your vault, can be run again safely, and refuses to re-point an existing registration that uses a different manifest unless you pass `-Replace`. Add `-WhatIf` to see what it would do.
 5. **Reload the extension** in `chrome://extensions`.
 6. **Check the connection**: click the Memocampus toolbar button to open the side panel, then open **Vault**. A status such as “Vaultが未設定です” means Chrome reached the native host. “Native Hostに接続できません” means the registration or manifest is wrong; check it with `reg query "HKCU\Software\Google\Chrome\NativeMessagingHosts\com.memocampus.vault"` and re-run step 4.
-7. **Create your vault** in the **Vault** section (default location `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`, or choose another folder), or open an existing one. Open **初回案内を開く**, review/edit the draft in Privacy settings, and press **記憶を開始する**. Before this explicit start, visits are neither queued nor saved. If recording was already started and its Vault later becomes unavailable, the existing delivery/retry behavior is retained.
+7. **Create your vault** in the **Vault** section (default location `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`, or choose another folder), or open an existing one. Visits are queued in the extension until a vault exists. Then press **プライバシー設定を初期化** in the URL tab; automatic recording starts only after that.
 
 ### About the extension ID
 

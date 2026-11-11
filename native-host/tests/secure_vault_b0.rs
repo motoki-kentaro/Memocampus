@@ -233,23 +233,22 @@ fn concurrent_host_processes_switching_vaults_never_leave_a_partial_config() {
 fn one(tmp: &TempDir, message: Value) -> Value {
     host(tmp, &[message]).remove(0)
 }
-fn start_policy(tmp: &TempDir) -> Value {
-    let draft: Value = serde_json::from_str(memocampus_native_host::policy::DEFAULT_JSON).unwrap();
-    one(
-        tmp,
-        json!({ "type": "policy_start", "requestId": "p", "policy": draft }),
-    )
-}
 
 /// The active vault `a`, confirmed for MCP over Native Messaging, with an initialized policy.
 fn published(tmp: &TempDir) -> (PathBuf, String) {
     let a = tmp.vault("a.sqlite3");
+    assert_eq!(
+        one(
+            tmp,
+            json!({ "type": "policy_initialize", "requestId": "p" })
+        )["ok"],
+        true
+    );
     let opened = one(
         tmp,
         json!({ "type": "vault_open", "requestId": "o", "path": a }),
     );
     let token = opened["status"]["vaultToken"].as_str().unwrap().to_owned();
-    assert_eq!(start_policy(tmp)["ok"], true);
     let confirmed = one(
         tmp,
         json!({ "type": "vault_publication_confirm", "requestId": "c", "expectedVaultToken": token }),
@@ -303,43 +302,58 @@ fn ordinary_policy_edits_keep_the_vault_published() {
             &tmp,
             json!({ "type": "policy_initialize", "requestId": "i" })
         )["error"],
-        "policy_start_required"
+        "policy_already_initialized"
     );
     assert_eq!(publication(&tmp), (token, PublicationState::Confirmed));
     assert_eq!(status(&tmp)["publication"], "confirmed");
 }
 
 #[test]
-fn starting_a_policy_again_withdraws_the_publication() {
-    let tmp = TempDir::new();
-    let (_, token) = published(&tmp);
-    lose_policy(&tmp);
-    let reply = start_policy(&tmp);
-    assert_eq!(reply["ok"], true, "{reply}");
-    assert_eq!(reply["revision"], 1);
-    assert_eq!(
-        publication(&tmp),
-        (token.clone(), PublicationState::Pending)
-    );
-    let shown = status(&tmp);
-    assert_eq!(shown["publication"], "pending");
-    assert_eq!(shown["vaultToken"], token.as_str());
-    // A host restart does not bring the approval back.
-    host(
-        &tmp,
-        &[json!({ "type": "host_capabilities", "requestId": "c" })],
-    );
-    assert_eq!(
-        publication(&tmp),
-        (token.clone(), PublicationState::Pending)
-    );
-    // The user confirms again, under the new policy.
-    let again = one(
-        &tmp,
-        json!({ "type": "vault_publication_confirm", "requestId": "c", "expectedVaultToken": token }),
-    );
-    assert_eq!(again["status"]["publication"], "confirmed");
-    assert_eq!(again["status"]["publicationPolicyRevision"], 1);
+fn initializing_or_starting_a_policy_again_withdraws_the_publication() {
+    for start in [false, true] {
+        let tmp = TempDir::new();
+        let (_, token) = published(&tmp);
+        lose_policy(&tmp);
+        let reply = if start {
+            let draft: Value =
+                serde_json::from_str(memocampus_native_host::policy::DEFAULT_JSON).unwrap();
+            one(
+                &tmp,
+                json!({ "type": "policy_start", "requestId": "s", "policy": draft }),
+            )
+        } else {
+            one(
+                &tmp,
+                json!({ "type": "policy_initialize", "requestId": "i" }),
+            )
+        };
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["revision"], 1);
+        assert_eq!(
+            publication(&tmp),
+            (token.clone(), PublicationState::Pending),
+            "start={start}"
+        );
+        let shown = status(&tmp);
+        assert_eq!(shown["publication"], "pending");
+        assert_eq!(shown["vaultToken"], token.as_str());
+        // A host restart does not bring the approval back.
+        host(
+            &tmp,
+            &[json!({ "type": "host_capabilities", "requestId": "c" })],
+        );
+        assert_eq!(
+            publication(&tmp),
+            (token.clone(), PublicationState::Pending)
+        );
+        // The user confirms again, under the new policy.
+        let again = one(
+            &tmp,
+            json!({ "type": "vault_publication_confirm", "requestId": "c", "expectedVaultToken": token }),
+        );
+        assert_eq!(again["status"]["publication"], "confirmed");
+        assert_eq!(again["status"]["publicationPolicyRevision"], 1);
+    }
 }
 
 /// Another process holds the config lock for longer than the host waits: the initialization is
@@ -357,11 +371,20 @@ fn an_initialization_that_cannot_withdraw_writes_no_policy() {
         .share_mode(0)
         .open(tmp.app().join("config.lock"))
         .unwrap();
-    let refused = start_policy(&tmp);
+    let refused = one(
+        &tmp,
+        json!({ "type": "policy_initialize", "requestId": "i" }),
+    );
     drop(held);
     assert_eq!(refused["error"], "policy_busy", "{refused}");
     assert!(!tmp.app().join("policy.json").exists());
     assert!(!tmp.app().join("policy.initialized").exists());
-    assert_eq!(start_policy(&tmp)["ok"], true);
+    assert_eq!(
+        one(
+            &tmp,
+            json!({ "type": "policy_initialize", "requestId": "i" })
+        )["ok"],
+        true
+    );
     assert_eq!(publication(&tmp), (token, PublicationState::Pending));
 }

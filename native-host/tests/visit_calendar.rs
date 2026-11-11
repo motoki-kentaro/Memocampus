@@ -104,10 +104,13 @@ fn fill(path: &Path, visits: &[(&str, &str, &str, &str)]) {
 
 fn setup() -> TempDir {
     let tmp = TempDir::new();
-    memocampus_native_host::policy_store::PolicyStore::new(tmp.app_dir())
-        .unwrap()
-        .initialize()
-        .unwrap();
+    assert_eq!(
+        call(
+            &tmp,
+            json!({ "type": "policy_initialize", "requestId": "p" })
+        )["ok"],
+        true
+    );
     assert_eq!(
         call(
             &tmp,

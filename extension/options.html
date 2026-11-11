@@ -10,20 +10,6 @@
     <main id="options" class="options" aria-labelledby="options-title">
       <h1 id="options-title">Memocampus — Privacy設定</h1>
 
-      <section id="onboarding" class="card" aria-labelledby="onboarding-heading" hidden>
-        <h2 id="onboarding-heading">はじめに — 自動記録はまだOFFです</h2>
-        <p>「記憶を開始する」を押すと、通常ウィンドウのhttp/httpsページについて、閲覧URL・タイトル・訪問日時とページメタデータ（説明・OGP・faviconなど）を自動記録します。シークレットブラウジングの自動履歴は対象外です。</p>
-        <p>保存先は利用者が作成・選択したローカルVaultです。Memocampus自体は閲覧データを外部サービスへ送信しません。後日MCPでAIに公開する場合は別途承認が必要で、接続先AIのデータの扱いも関係します。記録を開始しても、MCPへの公開は承認待ちのままです。</p>
-        <p>Blind Zone（保存しないグループ）は一致するページを記録しません。Private Zone（MCPサーバに見せないグループ）はローカルに記録しますが、MCP/AIへ公開しません。Blind Zoneを設定しても、保存済みの履歴は自動削除されません。</p>
-        <p>以下はNative Hostから取得した初期候補（Draft）です。基本保護は認証関連・認証情報をBlind Zone、行政サイト・Webメール・AIチャットをPrivate Zoneにします。対象例とON/OFFは下の「基本保護」で確認できます。すべての機密サイト・URLを網羅するものではありません。ルール表示・URLチェッカーでの編集・検証を行い、必要な保護を追加してください。</p>
-        <p>画面を開く・候補を表示する・検証するだけでは開始しません。開始前の閲覧イベントは保存せず、開始後にも遡って収集しません。下書きはこの画面のメモリにだけ保持されます。</p>
-        <p id="onboarding-vault" class="status" role="status"></p>
-        <div class="actions">
-          <a href="sidepanel.html#settings" target="_blank" rel="noopener">Vault設定を開く（作成・選択）</a>
-          <button id="vault-recheck" type="button">Vaultを再確認</button>
-        </div>
-      </section>
-
       <section class="card" aria-labelledby="active-heading">
         <h2 id="active-heading" tabindex="-1">適用中のプライバシー設定</h2>
         <dl class="facts">
@@ -235,8 +221,6 @@
         <button id="validate" type="button" disabled>検証</button>
         <button id="discard" type="button" disabled>変更を破棄</button>
         <button id="apply" type="button" class="primary" disabled aria-describedby="apply-reason">適用</button>
-        <button id="start-recording" type="button" class="primary" disabled hidden aria-describedby="onboarding-heading apply-reason">記憶を開始する</button>
-        <button id="start-recheck" type="button" hidden>開始状態を再確認</button>
       </div>
       <p id="apply-reason" class="note"></p>
       <p id="validation-status" class="status" role="status" aria-live="polite" hidden></p>

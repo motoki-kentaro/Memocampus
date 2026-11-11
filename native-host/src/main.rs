@@ -121,18 +121,8 @@ fn record_event(
     // extension would quarantine with its URL. Before any INSERT, in every case.
     if matches!(kind, Some("visit" | "tab_snapshot")) {
         if let Some(url) = value.get("url").and_then(|url| url.as_str()) {
-            if is_recordable_url(url) {
-                let decision = if kind == Some("visit") {
-                    gate.decide_visit(
-                        url,
-                        value.get("recordingOccurredAt").and_then(|at| at.as_str()),
-                    )?
-                } else {
-                    gate.decide(url)?
-                };
-                if decision == Decision::NeverSave {
-                    return Ok(Recorded::DroppedByPolicy);
-                }
+            if is_recordable_url(url) && gate.decide(url)? == Decision::NeverSave {
+                return Ok(Recorded::DroppedByPolicy);
             }
         }
     }

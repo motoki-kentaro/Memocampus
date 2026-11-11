@@ -110,14 +110,13 @@ fn backup_of_shown(tmp: &TempDir, directory: &Path) -> Value {
 
 /// Explicit first-use step; repeating it is harmless because it never replaces the policy.
 fn initialize_policy(tmp: &TempDir) {
-    // Existing installations use the legacy marker and may contain historical test timestamps.
-    let result = store_of(tmp).initialize();
+    let response = &exchange(
+        tmp,
+        &[json!({ "type": "policy_initialize", "requestId": "p" })],
+    )[0];
     assert!(
-        result.is_ok()
-            || matches!(
-                result,
-                Err(memocampus_native_host::policy_store::StoreError::AlreadyInitialized)
-            )
+        response["ok"] == true || response["error"] == "policy_already_initialized",
+        "{response}"
     );
 }
 
@@ -1684,20 +1683,12 @@ fn an_uninitialized_policy_stores_nothing_and_never_answers_success() {
 #[test]
 fn explicit_initialization_starts_recording_and_never_replaces_a_policy() {
     let tmp = TempDir::new();
-    assert_eq!(
-        exchange(
-            &tmp,
-            &[json!({ "type": "vault_create", "requestId": "c", "useDefault": true })]
-        )[0]["ok"],
-        true
-    );
-    let draft: Value = serde_json::from_str(memocampus_native_host::policy::DEFAULT_JSON).unwrap();
     let responses = exchange(
         &tmp,
         &[
-            json!({ "type": "policy_start", "requestId": "i1", "policy": draft }),
+            json!({ "type": "policy_initialize", "requestId": "i1" }),
             json!({ "type": "policy_status", "requestId": "s" }),
-            json!({ "type": "policy_start", "requestId": "i2", "policy": draft }),
+            json!({ "type": "policy_initialize", "requestId": "i2" }),
             json!({ "type": "policy_status" }),
         ],
     );
@@ -1713,7 +1704,7 @@ fn explicit_initialization_starts_recording_and_never_replaces_a_policy() {
     assert!(responses[0].get("policy").is_none() && responses[1].get("policy").is_none());
     assert_eq!(
         responses[2],
-        json!({ "ok": false, "type": "policy_start_result", "requestId": "i2", "error": "policy_already_initialized" })
+        json!({ "ok": false, "type": "policy_result", "requestId": "i2", "error": "policy_already_initialized" })
     );
     assert_eq!(responses[3]["error"], "invalid_request_id");
     assert_eq!(store_of(&tmp).load().unwrap().policy.revision, 1);
@@ -1724,7 +1715,7 @@ fn explicit_initialization_starts_recording_and_never_replaces_a_policy() {
         &tmp,
         &[json!({ "type": "policy_initialize", "requestId": "i3" })],
     );
-    assert_eq!(again[0]["error"], "policy_start_required");
+    assert_eq!(again[0]["error"], "policy_already_initialized");
     assert_eq!(
         std::fs::read(tmp.app_dir().join("policy.json")).unwrap(),
         before
@@ -2490,7 +2481,7 @@ fn a_new_install_writes_version_2_and_an_existing_version_1_is_kept() {
             &[json!({ "type": "policy_initialize", "requestId": "i" })]
         )
         .remove(0)["error"],
-        "policy_start_required"
+        "policy_already_initialized"
     );
     assert_eq!(policy_bytes(&other), before);
     assert_eq!(status(&other)["schemaVersion"], 1);
@@ -3476,16 +3467,13 @@ fn start_initializes_a_new_install_once_with_a_usable_vault_and_a_valid_draft() 
     assert_eq!(written, expected);
     // A new host process finds it started, and records with it.
     assert_eq!(status(&tmp)["state"], "ready");
-    let boundary = store_of(&tmp).load().unwrap().recording_started_at.unwrap();
-    let after_start = memocampus_native_host::domain_approvals::timestamp(
-        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(boundary + 1),
-    );
-    let mut normal_visit = visit("n", "https://normal.example/", &after_start);
-    normal_visit["recordingOccurredAt"] = after_start.into();
     assert_eq!(
         exchange(
             &tmp,
-            &[visit("b", "https://blind.example/", AT), normal_visit]
+            &[
+                visit("b", "https://blind.example/", AT),
+                visit("n", "https://normal.example/", AT)
+            ]
         ),
         [dropped("b"), stored("n")]
     );
@@ -3518,177 +3506,6 @@ fn start_initializes_a_new_install_once_with_a_usable_vault_and_a_valid_draft() 
         ),
         refusal("policy_start_result", "s", "policy_already_initialized")
     );
-}
-
-#[test]
-fn first_start_fences_delayed_events_and_the_fence_survives_policy_edits_and_process_restarts() {
-    use memocampus_native_host::domain_approvals::timestamp;
-    use std::time::{Duration, SystemTime};
-    let tmp = TempDir::new();
-    let draft: Value = serde_json::from_str(memocampus_native_host::policy::DEFAULT_JSON).unwrap();
-    let legacy = call(
-        &tmp,
-        json!({ "type": "policy_initialize", "requestId": "old" }),
-    );
-    assert_eq!(legacy["error"], "policy_start_required");
-    assert!(store_of(&tmp).never_initialized());
-    assert_eq!(
-        call(
-            &tmp,
-            json!({ "type": "vault_create", "requestId": "c", "useDefault": true })
-        )["ok"],
-        true
-    );
-    // Ignore the response, as if the page vanished after the write; only read the current state.
-    let _ = call(
-        &tmp,
-        json!({ "type": "policy_start", "requestId": "s", "policy": draft }),
-    );
-    assert_eq!(status(&tmp)["state"], "ready");
-    let snapshot = store_of(&tmp).load().unwrap();
-    let started = snapshot.recording_started_at.unwrap();
-    let at = |ms| timestamp(SystemTime::UNIX_EPOCH + Duration::from_millis(ms));
-    for ms in [started - 1, started] {
-        let judged = call(
-            &tmp,
-            json!({ "type": "policy_evaluate_batch", "requestId": "b", "occurredAt": ms,
-            "items": [{ "id": "1", "url": "https://delayed.test/" }] }),
-        );
-        assert_eq!(judged["items"][0]["decision"], "never_save");
-        let mut early = visit("early", "https://delayed.test/", &at(ms));
-        early["recordingOccurredAt"] = at(ms).into();
-        let refused = call(&tmp, early);
-        assert_eq!(
-            refused,
-            dropped("early"),
-            "a delayed queued event leaves no dead letter"
-        );
-    }
-    assert!(row_dump(&tmp.default_vault()).is_empty());
-    let mut event = visit("later", "https://later.test/", &at(started + 1));
-    event["recordingOccurredAt"] = at(started + 1).into();
-    let mut delayed = visit("late-processing", "https://delayed.test/", &at(started + 1));
-    delayed["recordingOccurredAt"] = at(started - 1).into();
-    assert_eq!(call(&tmp, delayed), dropped("late-processing"));
-    assert_eq!(call(&tmp, event.clone()), stored("later"));
-    // A lost ACK and a new host process preserve idempotent delivery after start.
-    assert_eq!(call(&tmp, event), stored("later"));
-    assert_eq!(row_dump(&tmp.default_vault()).len(), 1);
-    store_of(&tmp)
-        .update(&snapshot, snapshot.policy.clone())
-        .unwrap();
-    assert_eq!(
-        store_of(&tmp).load().unwrap().recording_started_at,
-        Some(started)
-    );
-    let edited = policy_bytes(&tmp);
-    assert_eq!(
-        call(
-            &tmp,
-            json!({ "type": "policy_start", "requestId": "again", "policy": draft })
-        )["error"],
-        "policy_already_initialized"
-    );
-    assert_eq!(policy_bytes(&tmp), edited);
-    // Losing or corrupting a policy is never interpreted as first use.
-    std::fs::write(store_of(&tmp).policy_path(), b"broken").unwrap();
-    assert_eq!(status(&tmp)["state"], "invalid");
-    assert_eq!(
-        call(
-            &tmp,
-            json!({ "type": "policy_start", "requestId": "again", "policy": draft })
-        )["error"],
-        "policy_already_initialized"
-    );
-    std::fs::remove_file(store_of(&tmp).policy_path()).unwrap();
-    assert_eq!(status(&tmp)["state"], "invalid");
-}
-
-#[test]
-fn simultaneous_first_start_processes_have_one_winner() {
-    let tmp = TempDir::new();
-    assert_eq!(
-        call(
-            &tmp,
-            json!({ "type": "vault_create", "requestId": "c", "useDefault": true })
-        )["ok"],
-        true
-    );
-    let barrier = std::sync::Barrier::new(2);
-    let results = std::thread::scope(|scope| {
-        let run = || {
-            let draft: Value =
-                serde_json::from_str(memocampus_native_host::policy::DEFAULT_JSON).unwrap();
-            barrier.wait();
-            call(
-                &tmp,
-                json!({ "type": "policy_start", "requestId": "s", "policy": draft }),
-            )
-        };
-        let a = scope.spawn(run);
-        let b = scope.spawn(run);
-        [a.join().unwrap(), b.join().unwrap()]
-    });
-    assert_eq!(
-        results.iter().filter(|reply| reply["ok"] == true).count(),
-        1,
-        "{results:?}"
-    );
-    let loser = results.iter().find(|reply| reply["ok"] == false).unwrap();
-    assert!(
-        ["policy_already_initialized", "policy_busy"].contains(&loser["error"].as_str().unwrap())
-    );
-    assert_eq!(store_of(&tmp).load().unwrap().policy.revision, 1);
-}
-
-#[test]
-fn first_start_requires_navigation_start_evidence_but_legacy_delivery_keeps_its_contract() {
-    let tmp = TempDir::new();
-    assert_eq!(
-        call(
-            &tmp,
-            json!({ "type": "vault_create", "requestId": "c", "useDefault": true })
-        )["ok"],
-        true
-    );
-    let draft: Value = serde_json::from_str(memocampus_native_host::policy::DEFAULT_JSON).unwrap();
-    assert_eq!(
-        call(
-            &tmp,
-            json!({ "type": "policy_start", "requestId": "s", "policy": draft })
-        )["ok"],
-        true
-    );
-    let legacy = TempDir::new();
-    create_default_vault(&legacy);
-    for (index, evidence) in [
-        None,
-        Some(Value::Null),
-        Some(json!("invalid")),
-        Some(json!(123)),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        // A later visit/completion timestamp must never stand in for an unknown start.
-        let id = format!("missing-{index}");
-        let mut event = visit(
-            &id,
-            "https://unknown-start.test/",
-            "2099-01-01T00:00:00.000Z",
-        );
-        if let Some(evidence) = evidence {
-            event["recordingOccurredAt"] = evidence;
-        }
-        assert_eq!(call(&tmp, event.clone()), dropped(&id));
-        assert_eq!(
-            call(&legacy, event),
-            stored(&id),
-            "legacy policies do not acquire a new admission requirement"
-        );
-    }
-    assert!(row_dump(&tmp.default_vault()).is_empty());
-    assert_eq!(row_dump(&legacy.default_vault()).len(), 4);
 }
 
 #[test]
