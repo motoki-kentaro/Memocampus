@@ -665,6 +665,8 @@ async function startWorker({ host = swHost(), session = new Map(), local = new M
   globalThis.chrome = {
     runtime,
     webNavigation: {
+      onBeforeNavigate: on("before"),
+      onErrorOccurred: on("failed"),
       onCompleted: on("completed"),
       onCommitted: on("committed"),
       onCreatedNavigationTarget: on("createdTarget"),
@@ -799,7 +801,8 @@ test("end to end with the real host: navigations stored in a fresh schema 7 vaul
       child.stdin.end(Buffer.concat([length, body]));
     });
   try {
-    assert.equal((await call({ type: "policy_initialize", requestId: "p" })).ok, true);
+    const { seedLegacyPolicy } = await import("./real-processes.js");
+    seedLegacyPolicy(appDir);
     assert.equal((await call({ type: "vault_create", requestId: "c", useDefault: true })).ok, true);
     assert.deepEqual((await call({ type: "host_capabilities", requestId: "h" })).capabilities, [CAPABILITY_NAVIGATION, "vault_items_v1", "visit_calendar_v1"]);
     const worker = await startWorker({ transport: call });
@@ -1306,7 +1309,8 @@ test("end to end without SPA visits: no private title or page in the vault or MC
     });
   const vault = path.join(appDir, "memocampus.sqlite3");
   try {
-    assert.equal((await call({ type: "policy_initialize", requestId: "p" })).ok, true);
+    const { seedLegacyPolicy } = await import("./real-processes.js");
+    seedLegacyPolicy(appDir);
     const created = await call({ type: "vault_create", requestId: "c", useDefault: true });
     assert.equal(created.ok, true);
     assert.equal(created.status.publication, "pending", "a new vault starts unpublished");

@@ -1,5 +1,11 @@
 # Issue #11 — Layer A at the recording entrances
 
+**Current first-run behavior (#24):** `policy_initialize` is retired and always refuses with
+`policy_start_required` over Native Messaging. Only the reviewed draft sent to `policy_start`
+can start a new installation. The first-start time also gates automatic event admission and delivery.
+See [the current flow and verification](issue-024-first-run-onboarding.md); initialization references
+below describe the earlier implementation.
+
 Connects the Privacy Policy of `issue-010-privacy-policy.md` to automatic recording. Evaluation
 rules, presets and the JSON schema are unchanged.
 

@@ -116,7 +116,7 @@ export function createPolicyGate({ send, now = () => Date.now(), ttlMs = POLICY_
    * in `urls` to "allow" or "deny", or `{ ok: false, code }`, which holds for all of them. A list of
    * any length is split as needed, and all parts must come from one version of the policy.
    */
-  async function evaluate(urls) {
+  async function evaluate(urls, { occurredAt } = {}) {
     const atGeneration = generation;
     const decisions = new Map();
     const asked = new Set();
@@ -130,7 +130,7 @@ export function createPolicyGate({ send, now = () => Date.now(), ttlMs = POLICY_
       for (const part of splitForHost(asked)) {
         const urlOfId = new Map(part.map((url, index) => [String(index), url]));
         const response = await callHost(
-          { type: "policy_evaluate_batch", items: [...urlOfId].map(([id, url]) => ({ id, url })) },
+          { type: "policy_evaluate_batch", ...(occurredAt === undefined ? {} : { occurredAt }), items: [...urlOfId].map(([id, url]) => ({ id, url })) },
           { send, resultType: "policy_evaluate_batch_result", timeoutMs },
         );
         const judged = readBatchAnswer(response, urlOfId);
@@ -144,23 +144,6 @@ export function createPolicyGate({ send, now = () => Date.now(), ttlMs = POLICY_
     }
     const settled = settle(found, atGeneration, true);
     return settled.ok ? { ...settled, decisions } : settled;
-  }
-
-  /** The explicit first-use step. The host never replaces an existing policy. */
-  async function initialize() {
-    generation += 1;
-    loading = null;
-    const atGeneration = generation;
-    let next;
-    try {
-      next = fromResponse(await callHost({ type: "policy_initialize" }, { send, resultType: "policy_result" }));
-    } catch (error) {
-      if (failureCode(error) === "policy_already_initialized") return view(await current({ maxAgeMs: 0 }));
-      // Whatever happened, the state is unknown until it is read again.
-      const after = await current({ maxAgeMs: 0 });
-      return after.ok ? view(after) : { ...view(after), code: failureCode(error) };
-    }
-    return view(settle(next, atGeneration));
   }
 
   /** Delivery found the policy unusable: stop using the cached one immediately. */
@@ -178,5 +161,5 @@ export function createPolicyGate({ send, now = () => Date.now(), ttlMs = POLICY_
   /** The code of the last known failure, without asking the host. */
   const problem = () => (verdict && !verdict.ok ? verdict.code : null);
 
-  return { current, evaluate, initialize, reportFailure, view, problem };
+  return { current, evaluate, reportFailure, view, problem };
 }

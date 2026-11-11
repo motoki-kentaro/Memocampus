@@ -47,7 +47,8 @@ test("end to end with the real host and MCP: a URL hidden, published, deleted; a
   const vault = path.join(appDir, "memocampus.sqlite3");
   let mcp;
   try {
-    assert.equal((await call({ type: "policy_initialize", requestId: "p" })).ok, true);
+    const { seedLegacyPolicy } = await import("./real-processes.js");
+    seedLegacyPolicy(appDir);
     const created = await call({ type: "vault_create", requestId: "c", useDefault: true });
     assert.equal(created.ok, true);
     assert.equal(created.status.publication, "pending", "a new vault starts unpublished");

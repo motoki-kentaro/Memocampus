@@ -148,7 +148,7 @@ async function requestPolicy(type) {
   }
 }
 
-policyInitialize.addEventListener("click", () => void requestPolicy("policy-initialize"));
+policyInitialize.addEventListener("click", () => void chrome.runtime.openOptionsPage());
 policyRecheck.addEventListener("click", () => void requestPolicy("policy-status"));
 
 const state = {
@@ -645,7 +645,7 @@ recordButton.addEventListener("click", async () => {
   }
 });
 
-tabs.select("url");
+tabs.select(globalThis.location?.hash === "#settings" ? "settings" : "url");
 input.focus();
 void runSearch();
 void checkItems();
