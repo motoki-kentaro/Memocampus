@@ -173,6 +173,10 @@
         </div>
         <p id="never-save-empty" class="empty" hidden></p>
         <p id="never-save-hint" class="note" hidden>新しいルールは、URLチェッカーで一致を確認してから追加します。内容の変更は「チェッカーで編集」から行います。</p>
+        <p id="never-save-export-note" class="note">Blind Zoneの編集中のルール（下書き）だけをkind,pattern形式で出力します。Pattern / Regex / Domain Wildcard / Exact URLの型と、未適用の変更・不正な文字列もそのまま保持します。URLチェッカーの未反映入力・基本保護・有効/無効設定は含みません。Exportは検証・適用ではありません。</p>
+        <p id="csv-safety-note" class="warning">CSVはルール文字列を変更せず出力します。=、+、-、@などで始まる値は、Excel等で開くと数式として実行される危険があります。信頼できないCSVは表計算ソフトで開かず、テキストエディタで確認してください。CSV自体にもプライベートなルールが含まれるため、保存先と共有先に注意してください。</p>
+        <button id="never-save-export" type="button" disabled aria-describedby="never-save-export-note csv-safety-note">Blind ZoneをCSV Export</button>
+        <p id="never-save-export-status" role="status" aria-live="polite" hidden></p>
       </section>
 
       <section class="card" aria-labelledby="save-but-no-mcp-heading" aria-describedby="save-but-no-mcp-description">
@@ -194,6 +198,10 @@
         </div>
         <p id="save-but-no-mcp-empty" class="empty" hidden></p>
         <p id="save-but-no-mcp-hint" class="note" hidden>新しいルールは、URLチェッカーで一致を確認してから追加します。内容の変更は「チェッカーで編集」から行います。</p>
+        <p id="save-but-no-mcp-export-note" class="note">Private Zoneの編集中のルール（下書き）だけをkind,pattern形式で出力します。Pattern / Regex / Domain Wildcard / Exact URLの型と、未適用の変更・不正な文字列もそのまま保持します。URLチェッカーの未反映入力・基本保護・有効/無効設定は含みません。Exportは検証・適用ではありません。</p>
+        <p id="private-csv-safety-note" class="warning">CSVをExcel等で開くと、=、+、-、@などで始まる値が数式として実行される危険があります。信頼できないCSVはテキストエディタで確認してください。プライベートなルールの保存先と共有先にも注意してください。</p>
+        <button id="save-but-no-mcp-export" type="button" disabled aria-describedby="save-but-no-mcp-export-note private-csv-safety-note">Private ZoneをCSV Export</button>
+        <p id="save-but-no-mcp-export-status" role="status" aria-live="polite" hidden></p>
       </section>
 
       <section class="card" aria-labelledby="url-test-heading" aria-describedby="url-test-description">

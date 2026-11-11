@@ -12,6 +12,7 @@
 import { describeErrorCode, createLatestGate } from "./search-client.js";
 import { loadPreset, startDraft } from "./onboarding-state.js";
 import { vaultRequest, describeStatus } from "./vault-client.js";
+import { downloadCsv, draftZoneCsv } from "./policy-csv.js";
 import {
   CATEGORY_KEYS,
   LAYER_KEYS,
@@ -137,7 +138,7 @@ function relaxationText(item) {
   return `「${LAYER_NAME[item.key]}」の既存のルール${item.count}件を削除するか、内容・種類を変更する`;
 }
 
-export function startOptionsPage({ document, window, send }) {
+export function startOptionsPage({ document, window, send, download = downloadCsv }) {
   const $ = (id) => document.querySelector(`#${id}`);
   const loadGate = createLatestGate();
   const validateGate = createLatestGate();
@@ -166,6 +167,7 @@ export function startOptionsPage({ document, window, send }) {
   /** The draft and change the open privacy confirmation is about. */
   let confirming = null;
   const rows = { neverSave: [], saveButNoMcp: [] };
+  const exports = { neverSave: null, saveButNoMcp: null };
 
   const locked = () => busy === "applying" || busy === "checking";
   const canEdit = () => Boolean(draft?.editable) && !locked();
@@ -306,6 +308,11 @@ export function startOptionsPage({ document, window, send }) {
     empty.textContent = layer ? "ルールはありません。" : loading ? "" : NOT_SHOWN;
     empty.hidden = count > 0 || empty.textContent === "";
     $(`${id}-hint`).hidden = !draft?.editable;
+    $(`${id}-export`).disabled = !draft || loading;
+    const exported = $(`${id}-export-status`);
+    exported.textContent = exports[key]?.text ?? "";
+    exported.className = exports[key]?.failed ? "error-text" : "status";
+    exported.hidden = !exports[key];
     rows[key].forEach((controls, index) => {
       if (!controls.edit) return;
       controls.edit.disabled = !canEdit();
@@ -394,6 +401,23 @@ export function startOptionsPage({ document, window, send }) {
     renderTestControls();
     renderChecker();
     renderFooter();
+  }
+
+  function exportLayer(key) {
+    if (!draft || loading) return;
+    try {
+      const snapshot = draftZoneCsv(draft, key, { schemaVersion: view.active.schemaVersion });
+      download({ document, window, ...snapshot });
+      exports[key] = { text: "操作時点の下書きのCSVダウンロードを要求しました。保存完了はブラウザで確認してください。" };
+    } catch (error) {
+      // Never show exception messages: they could contain rule text or browser/private details.
+      exports[key] = { failed: true, text: error?.code === "csv_unsupported_kind"
+        ? "CSV出力できません。未知のルール型が含まれています。一部だけの出力や型の変換は行いません。下書きは変更していません。"
+        : error?.code === "csv_invalid_data"
+          ? "CSV出力できません。ルールの内部データ形式が不正です。kindとpatternは文字列である必要があります。一部だけの出力や値の変換は行いません。下書きは変更していません。"
+          : "CSVのダウンロードを開始できませんでした。下書きは変更していません。ブラウザの設定を確認して再度お試しください。" };
+    }
+    renderLayer(key);
   }
 
   // --- Tests --------------------------------------------------------------------------------------
@@ -1051,6 +1075,7 @@ export function startOptionsPage({ document, window, send }) {
     validation = null;
     validationNote = "";
     applyNote = "";
+    for (const key of LAYER_KEYS) exports[key] = null;
     $("reload-confirm").hidden = true;
     confirming = null;
     $("relax-confirm").hidden = true;
@@ -1098,6 +1123,7 @@ export function startOptionsPage({ document, window, send }) {
     });
   }
   for (const key of LAYER_KEYS) {
+    $(`${LAYER_ID[key]}-export`).addEventListener("click", () => exportLayer(key));
     $(`${LAYER_ID[key]}-enabled`).addEventListener("change", (event) => {
       if (!canEdit()) return render();
       edited(draft.setLayerEnabled(key, event.target.checked));
