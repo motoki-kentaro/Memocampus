@@ -177,6 +177,11 @@
         <p id="csv-safety-note" class="warning">CSVはルール文字列を変更せず出力します。=、+、-、@などで始まる値は、Excel等で開くと数式として実行される危険があります。信頼できないCSVは表計算ソフトで開かず、テキストエディタで確認してください。CSV自体にもプライベートなルールが含まれるため、保存先と共有先に注意してください。</p>
         <button id="never-save-export" type="button" disabled aria-describedby="never-save-export-note csv-safety-note">Blind ZoneをCSV Export</button>
         <p id="never-save-export-status" role="status" aria-live="polite" hidden></p>
+        <p id="never-save-import-note" class="note">CSV ImportはBlind Zoneの現在の下書きの末尾へ追加します。全件をNative Hostで検証し、不正行があれば全件取り消します。重複は自動除去せず、Hostが許容するものは順序どおり保持します。Active Policyは「適用」まで変わらず、既存のローカル履歴も自動削除しません。初期化済みのv2 Policyで利用できます。</p>
+        <button id="never-save-import" type="button" disabled aria-describedby="never-save-import-note csv-import-limits">Blind ZoneにCSV Import</button>
+        <input id="never-save-import-file" type="file" accept=".csv,text/csv" aria-label="Blind Zoneへ追加するCSV" hidden>
+        <p id="never-save-import-status" role="status" aria-live="polite" hidden></p>
+        <p id="csv-import-limits" class="note">kind,pattern形式のUTF-8 CSVを選択してください（BOM可）。上限はファイル1 MiB、CSV1,000件、追加後も各ゾーン1,000件、Regex合計128件、フィールド32,768バイト（Regexは4,096バイト）、Draft JSON 1 MiBです。検証中は編集・適用・再読み込みを停止します。</p>
       </section>
 
       <section class="card" aria-labelledby="save-but-no-mcp-heading" aria-describedby="save-but-no-mcp-description">
@@ -202,6 +207,10 @@
         <p id="private-csv-safety-note" class="warning">CSVをExcel等で開くと、=、+、-、@などで始まる値が数式として実行される危険があります。信頼できないCSVはテキストエディタで確認してください。プライベートなルールの保存先と共有先にも注意してください。</p>
         <button id="save-but-no-mcp-export" type="button" disabled aria-describedby="save-but-no-mcp-export-note private-csv-safety-note">Private ZoneをCSV Export</button>
         <p id="save-but-no-mcp-export-status" role="status" aria-live="polite" hidden></p>
+        <p id="save-but-no-mcp-import-note" class="note">CSV ImportはPrivate Zoneの現在の下書きの末尾へ追加します。全件をNative Hostで検証し、不正行があれば全件取り消します。重複は自動除去せず、Hostが許容するものは順序どおり保持します。Active Policyは「適用」まで変わらず、既存のローカル履歴も自動削除しません。初期化済みのv2 Policyで利用できます。</p>
+        <button id="save-but-no-mcp-import" type="button" disabled aria-describedby="save-but-no-mcp-import-note csv-import-limits">Private ZoneにCSV Import</button>
+        <input id="save-but-no-mcp-import-file" type="file" accept=".csv,text/csv" aria-label="Private Zoneへ追加するCSV" hidden>
+        <p id="save-but-no-mcp-import-status" role="status" aria-live="polite" hidden></p>
       </section>
 
       <section class="card" aria-labelledby="url-test-heading" aria-describedby="url-test-description">

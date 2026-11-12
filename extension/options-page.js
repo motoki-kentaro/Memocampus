@@ -5,14 +5,13 @@
 // Rule text and URLs are set as text or input values only and
 // never logged.
 //
-// A rule enters the draft, or changes in it, only through the URL checker, and only after the host
-// has matched exactly that rule against exactly that URL (see "URL checker" below). Rules are never
-// typed into the tables, and the page never matches a rule itself.
+// Individual edits use the URL checker. CSV batches enter only after whole-candidate Host
+// validation and identity checks. Rules are never matched by this page or typed into the tables.
 
 import { describeErrorCode, createLatestGate } from "./search-client.js";
 import { loadPreset, startDraft } from "./onboarding-state.js";
 import { vaultRequest, describeStatus } from "./vault-client.js";
-import { downloadCsv, draftZoneCsv } from "./policy-csv.js";
+import { CsvImportError, csvImportCandidate, downloadCsv, draftZoneCsv, readPolicyCsvFile } from "./policy-csv.js";
 import {
   CATEGORY_KEYS,
   LAYER_KEYS,
@@ -168,9 +167,13 @@ export function startOptionsPage({ document, window, send, download = downloadCs
   let confirming = null;
   const rows = { neverSave: [], saveButNoMcp: [] };
   const exports = { neverSave: null, saveButNoMcp: null };
+  const imports = { neverSave: null, saveButNoMcp: null };
+  let importing = null;
 
-  const locked = () => busy === "applying" || busy === "checking";
+  const locked = () => busy === "applying" || busy === "checking" || busy === "importing";
   const canEdit = () => Boolean(draft?.editable) && !locked();
+  const canImport = () => view.state === "ready" && !onboarding && Boolean(draft?.editable) &&
+    busy === null && blocked === null && !loading && !confirming;
   const canApply = () => !onboarding && Boolean(draft?.editable) && draft.dirty() && busy === null && blocked === null && !loading;
   const currentValidation = () => (validation && validation.draft === draft && validation.version === draft.version ? validation : null);
 
@@ -313,6 +316,11 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     exported.textContent = exports[key]?.text ?? "";
     exported.className = exports[key]?.failed ? "error-text" : "status";
     exported.hidden = !exports[key];
+    $(`${id}-import`).disabled = !canImport();
+    const imported = $(`${id}-import-status`);
+    imported.textContent = imports[key]?.text ?? "";
+    imported.className = imports[key]?.failed ? "error-text" : "status";
+    imported.hidden = !imports[key];
     rows[key].forEach((controls, index) => {
       if (!controls.edit) return;
       controls.edit.disabled = !canEdit();
@@ -366,6 +374,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     if (!draft.editable) return "旧形式（v1）の設定は、この画面では適用できません。";
     if (busy === "applying" || busy === "checking") return "適用の処理中です。";
     if (busy === "validating") return "検証中です。";
+    if (busy === "importing") return "CSV Import中です。下書きの編集・適用は完了後に行ってください。";
     if (blocked === "conflict" || blocked === "changed") return "最新の設定を再読み込みするまで適用できません。";
     if (blocked) return "適用の結果を確認するまで、もう一度適用することはできません。";
     if (!draft.dirty()) return "未適用の変更はありません。";
@@ -418,6 +427,88 @@ export function startOptionsPage({ document, window, send, download = downloadCs
           : "CSVのダウンロードを開始できませんでした。下書きは変更していません。ブラウザの設定を確認して再度お試しください。" };
     }
     renderLayer(key);
+  }
+
+  const IMPORT_ERRORS = {
+    csv_read: "ファイルを読み取れません。", csv_size: "ファイルが上限1 MiBを超えています。",
+    csv_utf8: "UTF-8として読み取れません。", csv_empty: "空ファイルです。",
+    csv_header: "ヘッダーは正確にkind,patternとしてください。", csv_columns: "列数は2列である必要があります。",
+    csv_quote: "引用符の構文が不正です。", csv_newline: "行区切りはLFまたはCRLFのいずれかに統一してください。",
+    csv_control: "使用できない制御文字があります。", csv_kind: "未知のkindです。",
+    csv_field: "フィールド長の上限（32,768バイト、Regexは4,096バイト）を超えています。",
+    csv_records: "CSV件数または追加後のゾーン件数が上限1,000件を超えています。",
+    csv_regex_count: "追加後のRegex合計が上限128件を超えています。",
+    csv_draft_size: "追加後のDraft JSONが上限1 MiBを超えています。",
+    csv_readonly: "初期化済みの編集可能なv2 Policyが必要です。",
+  };
+
+  function finishImport(operation, text = "", failed = false) {
+    if (importing !== operation) return;
+    importing = null;
+    busy = null;
+    imports[operation.key] = text ? { text, failed } : null;
+    $(`${LAYER_ID[operation.key]}-import-file`).value = "";
+    render();
+  }
+
+  function importStillCurrent(operation) {
+    return importing === operation && busy === "importing" && draft === operation.draft &&
+      draft.version === operation.version && view === operation.view &&
+      view.active.etag === operation.etag && !loading && blocked === null;
+  }
+
+  function chooseImport(key) {
+    if (!canImport()) return;
+    const operation = { key, draft, version: draft.version, view, etag: view.active.etag };
+    importing = operation;
+    busy = "importing";
+    imports[key] = null;
+    render();
+    const input = $(`${LAYER_ID[key]}-import-file`);
+    input.value = "";
+    try { input.click(); }
+    catch { finishImport(operation, "ファイル選択を開始できません。下書きは変更していません。", true); }
+  }
+
+  async function importSelected(operation, file) {
+    if (!file) return finishImport(operation); // Cancel: no error, no Draft change, no Host call.
+    const conflict = () => finishImport(operation, "Import中に下書きまたは画面の状態が変わりました。既存の変更は保持しています。内容を確認して再試行してください。", true);
+    try {
+      const parsed = await readPolicyCsvFile(file);
+      if (!importStillCurrent(operation)) return conflict();
+      if (parsed.rules.length === 0) return finishImport(operation, "CSVに追加するルールはありません。下書きは変更していません。");
+      const snapshot = operation.draft.policy;
+      const count = snapshot.layers[operation.key].rules.length;
+      const candidate = csvImportCandidate(snapshot, operation.key, parsed);
+      const checked = await validateDraft({ send, policy: candidate, requireMatchingVersion: true });
+      if (!importStillCurrent(operation)) return conflict();
+      if (!checked.ok) {
+        const row = checked.problems.find((p) => p.layer === operation.key && Number.isSafeInteger(p.ruleIndex) && p.ruleIndex >= count && p.ruleIndex < count + parsed.rules.length);
+        const at = row ? `CSV ${parsed.lines[row.ruleIndex - count]}行目：` : "";
+        const policyError = DRAFT_CODES.has(checked.code) || checked.problems.length > 0;
+        // Only static codes/messages; never echo Host exceptions or rule text.
+        const reason = policyError ? "候補全体のPolicyルール検証に失敗しました。" : "Native Hostとの通信または検証処理に失敗しました。";
+        return finishImport(operation, `${at}${reason}全件取り消し、下書きは変更していません。${row && Object.hasOwn(PROBLEM_TEXT, row.code) ? PROBLEM_TEXT[row.code] : ""}`, true);
+      }
+      // A second screen/process may have changed Active during file IO/validation. Read, don't adopt.
+      const current = await loadActivePolicy({ send });
+      if (!importStillCurrent(operation)) return conflict();
+      if (current.state !== "ready") return finishImport(operation, "Active Policyを確認できないためImportを中止しました。Native HostとPolicyの状態を確認してください。下書きは変更していません。", true);
+      if (current.active.etag !== operation.etag) {
+        finishImport(operation, "Active PolicyのETagが競合しました。下書きは保持しています。最新のPolicyを再読み込みしてから再試行してください。", true);
+        blocked = "conflict"; render();
+        return;
+      }
+      const appended = candidate.layers[operation.key].rules.slice(count);
+      if (!operation.draft.appendRulesAtomically(operation.key, appended, { expectedVersion: operation.version })) return conflict();
+      resetChecker();
+      finishImport(operation, `${parsed.rules.length}件を下書きに一括追加しました。Active Policyは変更していません。「適用」を押すまで反映されません。`);
+      edited(true, [operation.key]);
+    } catch (error) {
+      const message = error instanceof CsvImportError
+        ? `CSV ${error.line}行目：${IMPORT_ERRORS[error.code] ?? "読み込みに失敗しました。"}` : "CSV Importを完了できません。";
+      finishImport(operation, `${message}全件取り消し、下書きは変更していません。`, true);
+    }
   }
 
   // --- Tests --------------------------------------------------------------------------------------
@@ -1075,7 +1166,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     validation = null;
     validationNote = "";
     applyNote = "";
-    for (const key of LAYER_KEYS) exports[key] = null;
+    for (const key of LAYER_KEYS) { exports[key] = null; imports[key] = null; }
     $("reload-confirm").hidden = true;
     confirming = null;
     $("relax-confirm").hidden = true;
@@ -1123,6 +1214,17 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     });
   }
   for (const key of LAYER_KEYS) {
+    $(`${LAYER_ID[key]}-import`).addEventListener("click", () => chooseImport(key));
+    const input = $(`${LAYER_ID[key]}-import-file`);
+    input.addEventListener("change", () => {
+      if (importing?.key === key && !importing.reading) {
+        importing.reading = true;
+        void importSelected(importing, input.files?.[0] ?? null);
+      }
+    });
+    input.addEventListener("cancel", () => {
+      if (importing?.key === key && !importing.reading) finishImport(importing);
+    });
     $(`${LAYER_ID[key]}-export`).addEventListener("click", () => exportLayer(key));
     $(`${LAYER_ID[key]}-enabled`).addEventListener("change", (event) => {
       if (!canEdit()) return render();

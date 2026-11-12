@@ -203,6 +203,23 @@ export function createDraft(active, { editable }) {
       return rules.length - 1;
     },
     /**
+     * One atomic append of a whole Host-validated batch. Unlike the single-rule checker, this
+     * preserves duplicates (the Host accepts them). Nothing changes for a stale version or bad
+     * structure. Caller must validate the candidate and recheck the page/Active identity first.
+     */
+    appendRulesAtomically(layerKey, rules, { expectedVersion }) {
+      const current = rulesOf(layerKey);
+      if (!editable || !current || version !== expectedVersion || !Array.isArray(rules) ||
+        !Array.from(rules).every((rule) => isRule(rule, 2) && Object.hasOwn(rule, "kind") &&
+          Object.hasOwn(rule, "pattern") && Object.keys(rule).length === 2)) return false;
+      if (rules.length === 0) return true;
+      const next = [...current, ...structuredClone(rules)];
+      draft = { ...draft, layers: { ...draft.layers, [layerKey]: { ...draft.layers[layerKey], rules: next } } };
+      layout[layerKey] += 1;
+      changed();
+      return true;
+    },
+    /**
      * Replaces the rule at `index` with `next`, only if that place still holds `expected` and the
      * layer has not been rearranged since `layoutSeen` (see `layout`). Resolves to "replaced",
      * "unchanged" (`next` is `expected`), "missing" (the place holds another rule now), "duplicate"
@@ -258,10 +275,13 @@ function problemsOf(error) {
 const refused = (error) => ({ ok: false, code: codeOf(error), problems: problemsOf(error) });
 
 /** Whether the host could apply `policy` as it is. Resolves to `{ ok }` or `{ ok: false, code, problems }`. */
-export async function validateDraft({ send, policy }) {
+export async function validateDraft({ send, policy, requireMatchingVersion = false }) {
   try {
     const reply = await callHost({ type: "policy_validate", policy }, { send, resultType: "policy_validate_result" });
     if (!isCount(reply.schemaVersion) || !isCount(reply.engineVersion)) return { ok: false, code: "invalid_response", problems: [] };
+    if (requireMatchingVersion && (reply.schemaVersion !== policy.schemaVersion || reply.engineVersion !== policy.engineVersion)) {
+      return { ok: false, code: "invalid_response", problems: [] };
+    }
     return { ok: true };
   } catch (error) {
     return refused(error);

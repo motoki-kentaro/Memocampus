@@ -71,3 +71,114 @@ export function downloadCsv({ document, window, csv, filename }) {
     anchor?.remove();
   }
 }
+
+// Transport/resource bounds, not a second rule evaluator. The Host remains the validator.
+// Sources: policy_gate.rs MAX_DRAFT_BYTES/MAX_URL_CHARS; policy.rs header/regex limits.
+export const CSV_IMPORT_LIMITS = Object.freeze({
+  fileBytes: 1_048_576,
+  records: 1000,
+  fieldBytes: 32_768, // Conservative byte ceiling; Host's URL ceiling is UTF-16 units.
+  regexBytes: 4096,
+  regexRules: 128,
+  zoneRules: 1000,
+  draftBytes: 1_048_576,
+});
+
+export class CsvImportError extends Error {
+  constructor(code, line = 1) {
+    super("CSV import refused"); // Never carry a filename, cell, Host message, or stack into the UI.
+    this.code = code;
+    this.line = line;
+  }
+}
+const utf8Size = (text) => new TextEncoder().encode(text).length;
+
+/** Bounded single-pass CSV state machine. `lines` are physical starting lines of data records. */
+export function parsePolicyCsv(input) {
+  if (typeof input !== "string") throw new CsvImportError("csv_read");
+  if (utf8Size(input) > CSV_IMPORT_LIMITS.fileBytes) throw new CsvImportError("csv_size");
+  const text = input.startsWith("\uFEFF") ? input.slice(1) : input;
+  if (text === "") throw new CsvImportError("csv_empty");
+  const rules = [], lines = [];
+  let cells = [], value = "", state = "start", line = 1, startLine = 1, startOffset = 0;
+  let header = false, recordEnding = null;
+  const fail = (code, at = line) => { throw new CsvImportError(code, at); };
+  const endField = () => {
+    if (utf8Size(value) > CSV_IMPORT_LIMITS.fieldBytes) fail("csv_field", startLine);
+    cells.push(value); value = ""; state = "start";
+  };
+  const endRecord = (offset) => {
+    endField();
+    if (!header) {
+      if (text.slice(startOffset, offset) !== "kind,pattern") fail("csv_header", startLine);
+      header = true;
+    } else {
+      if (cells.length !== 2) fail("csv_columns", startLine);
+      if (!RULE_KINDS.includes(cells[0])) fail("csv_kind", startLine);
+      if (rules.length >= CSV_IMPORT_LIMITS.records) fail("csv_records", startLine);
+      if (cells[0] === "regex" && utf8Size(cells[1]) > CSV_IMPORT_LIMITS.regexBytes) fail("csv_field", startLine);
+      rules.push({ kind: cells[0], pattern: cells[1] }); lines.push(startLine);
+    }
+    cells = [];
+  };
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i], code = text.charCodeAt(i);
+    if ((code < 32 && ![9, 10, 13].includes(code)) || (code >= 127 && code <= 159)) fail("csv_control");
+    if (state === "quoted") {
+      if (ch === '"') state = "afterQuote";
+      else {
+        value += ch;
+        if (ch === "\r" || (ch === "\n" && text[i - 1] !== "\r")) line += 1;
+      }
+    } else if (state === "afterQuote" && ch === '"') {
+      value += '"'; state = "quoted";
+    } else if (ch === ",") {
+      if (cells.length >= 1) fail("csv_columns", startLine);
+      endField();
+    } else if (ch === "\r" || ch === "\n") {
+      const ending = ch === "\r" ? "crlf" : "lf";
+      if (ch === "\r" && text[i + 1] !== "\n") fail("csv_newline");
+      if (recordEnding && recordEnding !== ending) fail("csv_newline");
+      recordEnding = ending;
+      endRecord(i);
+      if (ch === "\r") i += 1;
+      line += 1; startLine = line; startOffset = i + 1;
+    } else if (state === "afterQuote") fail("csv_quote");
+    else if (ch === '"') {
+      if (state !== "start") fail("csv_quote");
+      state = "quoted";
+    } else { value += ch; state = "unquoted"; }
+    // Limit growth before a field closes, including an unclosed quoted field.
+    if (value.length > CSV_IMPORT_LIMITS.fieldBytes) fail("csv_field", startLine);
+  }
+  if (state === "quoted") fail("csv_quote", startLine);
+  if (startOffset < text.length) endRecord(text.length);
+  return { rules, lines };
+}
+
+/** Fatal UTF-8 decoding, bounded before file contents are read. Selection cancellation is separate. */
+export async function readPolicyCsvFile(file) {
+  if (!file || !Number.isSafeInteger(file.size) || file.size < 0) throw new CsvImportError("csv_read");
+  if (file.size > CSV_IMPORT_LIMITS.fileBytes) throw new CsvImportError("csv_size");
+  let bytes;
+  try { bytes = new Uint8Array(await file.arrayBuffer()); }
+  catch { throw new CsvImportError("csv_read"); }
+  if (bytes.byteLength > CSV_IMPORT_LIMITS.fileBytes) throw new CsvImportError("csv_size");
+  let text;
+  try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
+  catch { throw new CsvImportError("csv_utf8"); }
+  return parsePolicyCsv(text);
+}
+
+/** Candidate-only append. No current Draft is changed here; the Host checks the whole candidate. */
+export function csvImportCandidate(snapshot, layerKey, parsed) {
+  if (!Object.hasOwn(CSV_FILENAMES, layerKey) || snapshot.schemaVersion !== 2) throw new CsvImportError("csv_readonly");
+  const candidate = structuredClone(snapshot);
+  const existing = candidate.layers[layerKey].rules.length;
+  if (existing + parsed.rules.length > CSV_IMPORT_LIMITS.zoneRules) throw new CsvImportError("csv_records", parsed.lines[0]);
+  candidate.layers[layerKey].rules.push(...structuredClone(parsed.rules));
+  const regexCount = candidate.layers.neverSave.rules.concat(candidate.layers.saveButNoMcp.rules).filter((rule) => rule.kind === "regex").length;
+  if (regexCount > CSV_IMPORT_LIMITS.regexRules) throw new CsvImportError("csv_regex_count", parsed.lines[0]);
+  if (utf8Size(JSON.stringify(candidate)) > CSV_IMPORT_LIMITS.draftBytes) throw new CsvImportError("csv_draft_size", parsed.lines[0]);
+  return candidate;
+}
