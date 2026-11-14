@@ -1206,16 +1206,21 @@ pub fn migrate_legacy_config(
 pub struct Counts {
     pub visits: i64,
     pub snapshots: i64,
+    pub pages: i64,
+    #[serde(rename = "pageBlobs")]
+    pub page_blobs: i64,
 }
 
 pub fn counts(db: &Connection) -> rusqlite::Result<Counts> {
     db.query_row(
-        "SELECT (SELECT count(*) FROM visits), (SELECT count(*) FROM tab_snapshots)",
+        "SELECT (SELECT count(*) FROM visits), (SELECT count(*) FROM tab_snapshots), (SELECT count(*) FROM saved_pages), (SELECT count(*) FROM page_blobs)",
         [],
         |row| {
             Ok(Counts {
                 visits: row.get(0)?,
                 snapshots: row.get(1)?,
+                pages: row.get(2)?,
+                page_blobs: row.get(3)?,
             })
         },
     )
@@ -1636,6 +1641,7 @@ pub fn verify_copy(target: &Connection, expected: &ContentCounts) -> Result<(), 
     if integrity != "ok" || content_counts(target).map_err(failed)? != *expected {
         return Err(VaultError::BackupFailed);
     }
+    crate::pages::verify(target).map_err(failed)?;
     Ok(())
 }
 
@@ -2326,7 +2332,9 @@ pub mod tests {
                 counts(&copy).unwrap(),
                 Counts {
                     visits: 20,
-                    snapshots: 0
+                    snapshots: 0,
+                    pages: 0,
+                    page_blobs: 0,
                 }
             );
         }
@@ -2401,7 +2409,9 @@ pub mod tests {
         let mut largest = 0;
         for path in backups {
             let copy = open_vault_checked(&path).unwrap();
-            let Counts { visits, snapshots } = counts(&copy).unwrap();
+            let Counts {
+                visits, snapshots, ..
+            } = counts(&copy).unwrap();
             assert_eq!(visits, snapshots, "backup split a transaction");
             largest = largest.max(visits);
         }

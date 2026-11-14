@@ -68,13 +68,79 @@ fn env_of(tmp: &TempDir, app: &str) -> Environment {
     }
 }
 
-const CANARIES: [&str; 5] = [
+const CANARIES: [&str; 6] = [
     "CANARY-url",
     "CANARY-title",
     "CANARY-image",
     "canary-tag-secret",
     "CANARY-blob",
+    "CANARY-MHTML-original",
 ];
+
+#[test]
+fn page_management_after_plain_and_secure_restore_preserves_other_content() {
+    for encrypted in [false, true] {
+        let tmp = TempDir::new();
+        let mut source = Session::new(tmp.env());
+        let path = tmp.0.join("source.sqlite3");
+        let spell = if encrypted {
+            Some(create_encrypted(&mut source, &path))
+        } else {
+            create_plain(&mut source, &path);
+            None
+        };
+        fill(&mut source);
+        let before = active_dump(&mut source);
+        let dir = tmp.0.join("backup");
+        fs::create_dir(&dir).unwrap();
+        let done = backup_to(&mut source, &dir, json!({}));
+        assert_eq!(done["ok"], true, "{done}");
+        let mut target = Session::new(env_of(&tmp, "other-app"));
+        let extra = spell.map_or(json!({}), |s| json!({"recoverySpell":s}));
+        let restored = restore_to(
+            &mut target,
+            &done["backupPath"],
+            &tmp.0.join("restored.sqlite3"),
+            extra,
+        );
+        assert_eq!(restored["ok"], true, "{restored}");
+        assert_eq!(activate(&mut target, &restored)["ok"], true);
+        assert_eq!(active_dump(&mut target), before);
+        let mut pages = crate::page_manage::Manager::default();
+        let binding = pages.handle(&mut target, &json!({"type":"page_state","requestId":"s"}));
+        let mut call = |kind: &str, extra: Value| {
+            let mut message = json!({"type":kind,"requestId":"p","vaultToken":binding["vaultToken"],"generation":binding["generation"]});
+            message
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            pages.handle(&mut target, &message)
+        };
+        let listed = call("page_list", json!({}));
+        assert_eq!(listed["items"].as_array().unwrap().len(), 1, "{listed}");
+        let preview = call(
+            "page_delete_preview",
+            json!({"target":{"scope":"filter","query":""}}),
+        );
+        assert_eq!(preview["counts"]["events"], 1);
+        assert_eq!(
+            call("page_delete", json!({"reviewId":preview["reviewId"]}))["ok"],
+            true
+        );
+        target
+            .read(|db| {
+                assert_eq!(vault::counts(db).unwrap().pages, 0);
+                assert_eq!(vault::counts(db).unwrap().visits, 1);
+                assert_eq!(crate::images::table_counts(db).unwrap().1, 1);
+            })
+            .unwrap();
+        assert_eq!(
+            active_dump(&mut source),
+            before,
+            "source and backup were not deleted"
+        );
+    }
+}
 
 /// Writes rows with canary strings into the active vault: a visit, an image blob, a saved image
 /// and a tag.
@@ -91,7 +157,11 @@ fn fill(session: &mut Session) {
                  INSERT INTO image_tag_links VALUES (1, 1);",
                 "a".repeat(64)
             ))
-            .map(|()| 0)
+            ?;
+            let bytes = b"MIME-Version: 1.0\r\n\r\nCANARY-MHTML-original\x00\xff";
+            use sha2::Digest;
+            crate::pages::insert(db, "00000000-0000-4000-8000-000000000006", &crate::pages::Metadata { url: "https://synthetic.test/CANARY-page".into(), title: "CANARY-page-title".into(), captured_at: 1, incognito: false }, bytes, &format!("{:x}", sha2::Sha256::digest(bytes)), 2).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            Ok(0)
         })
         .unwrap();
 }
@@ -106,6 +176,8 @@ fn dump(db: &rusqlite::Connection) -> Vec<String> {
         ("image_tags", "id"),
         ("image_tag_links", "blob_id"),
         ("tab_snapshots", "event_id"),
+        ("page_blobs", "id"),
+        ("saved_pages", "id"),
     ] {
         let mut statement = db
             .prepare(&format!("SELECT * FROM {table} ORDER BY {order}"))
@@ -287,6 +359,8 @@ fn a_plain_vault_backs_up_as_plain_sqlite_and_restores_as_a_new_pending_vault() 
     assert_eq!(restored["ok"], true, "{restored}");
     assert_eq!(restored["mode"], "plain");
     assert_eq!(restored["counts"]["visits"], 1);
+    assert_eq!(restored["counts"]["pages"], 1);
+    assert_eq!(restored["counts"]["pageBlobs"], 1);
     assert_eq!(restored["policyCopy"]["state"], "not_supported");
     // Restored, not active: the panel asks the user first.
     assert_eq!(restored["status"]["state"], "not_configured");

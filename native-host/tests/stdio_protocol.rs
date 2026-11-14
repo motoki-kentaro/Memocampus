@@ -240,7 +240,10 @@ fn created_vault_receives_writes_and_survives_host_restarts() {
     let status = &responses[2]["status"];
     assert_eq!(status["state"], "ready");
     assert_eq!(status["vaultPath"], real_path(&tmp.default_vault()));
-    assert_eq!(status["counts"], json!({ "visits": 1, "snapshots": 1 }));
+    assert_eq!(
+        status["counts"],
+        json!({ "visits": 1, "snapshots": 1, "pages": 0, "pageBlobs": 0 })
+    );
 }
 
 #[test]
@@ -570,7 +573,7 @@ fn image_tables(path: &Path) -> i64 {
 fn vaults_created_by_the_host_start_at_schema_4_with_image_tables() {
     let tmp = TempDir::new();
     create_default_vault(&tmp);
-    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 7);
+    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 8);
     assert_eq!(image_tables(&tmp.default_vault()), 3);
     // Existing operations work on it.
     assert_eq!(
@@ -619,7 +622,7 @@ fn backups_of_a_vault_with_images_are_complete_and_verified() {
     };
     assert_eq!(dump(&copy), dump(&tmp.default_vault()));
     assert_eq!(dump(&copy).len(), 4);
-    assert_eq!(pragma(&copy, "user_version"), 7);
+    assert_eq!(pragma(&copy, "user_version"), 8);
 }
 
 const SAVE_ID: &str = "4f1d2c3b-5a6e-4d7f-8091-a2b3c4d5e6f7";
@@ -1168,13 +1171,23 @@ fn without_trigger(sql: &str, name: &str) -> String {
     format!("{}{}", &sql[..start], &sql[end..])
 }
 
+fn schema_7() -> String {
+    let sql = memocampus_native_host::schema::create_sql()
+        .replace(
+            " CREATE INDEX saved_pages_by_url ON saved_pages (url, saved_at DESC, id DESC);",
+            "",
+        )
+        .replace(
+            " CREATE INDEX saved_pages_by_blob ON saved_pages (blob_id);",
+            "",
+        );
+    without_table(&without_table(&sql, "saved_pages"), "page_blobs")
+        .replace("PRAGMA user_version = 8;", "PRAGMA user_version = 7;")
+}
+
 /// Schema 6 as it was created before Issue #44: schema 7 without image tags.
 fn schema_6() -> String {
-    let sql = without_trigger(
-        &memocampus_native_host::schema::create_sql(),
-        "image_tags_drop_unused",
-    )
-    .replace(
+    let sql = without_trigger(&schema_7(), "image_tags_drop_unused").replace(
         " CREATE INDEX image_tag_links_by_tag ON image_tag_links (tag_id, blob_id);",
         "",
     );
@@ -1201,7 +1214,7 @@ fn schema_4() -> String {
 }
 
 #[test]
-fn every_vault_other_than_schema_7_is_refused_for_every_operation_and_left_untouched() {
+fn every_vault_other_than_schema_8_is_refused_for_every_operation_and_left_untouched() {
     use memocampus_native_host::schema::create_sql;
     let v3 = |app_id: i64, version: i64| {
         format!("{SCHEMA_3} PRAGMA application_id = {app_id}; PRAGMA user_version = {version};")
@@ -1220,9 +1233,11 @@ fn every_vault_other_than_schema_7_is_refused_for_every_operation_and_left_untou
         ("schema 6 labelled 5", schema_6().replace("PRAGMA user_version = 6;", "PRAGMA user_version = 5;")),
         ("schema 6 (Issue #44: no image tags)", schema_6()),
         ("schema 6 relabelled 7", schema_6().replace("PRAGMA user_version = 6;", "PRAGMA user_version = 7;")),
-        ("schema 7 labelled 6", create_sql().replace("PRAGMA user_version = 7;", "PRAGMA user_version = 6;")),
-        ("future version", format!("{} PRAGMA user_version = 8;", create_sql())),
-        ("untagged schema 7", format!("{} PRAGMA application_id = 0;", create_sql())),
+        ("schema 7 (no Page tables)", schema_7()),
+        ("schema 7 relabelled 8", schema_7().replace("PRAGMA user_version = 7;", "PRAGMA user_version = 8;")),
+        ("schema 8 labelled 6", create_sql().replace("PRAGMA user_version = 8;", "PRAGMA user_version = 6;")),
+        ("future version", format!("{} PRAGMA user_version = 9;", create_sql())),
+        ("untagged schema 8", format!("{} PRAGMA application_id = 0;", create_sql())),
         ("tags without the trigger that drops unused ones", without_trigger(&create_sql(), "image_tags_drop_unused")),
         ("tags without their search index", create_sql().replace(
             " CREATE INDEX image_tag_links_by_tag ON image_tag_links (tag_id, blob_id);",
@@ -1358,7 +1373,7 @@ fn from_a_refused_vault_the_user_can_still_create_a_new_one_which_inherits_nothi
     assert_eq!(replies[1]["ok"], true, "{}", replies[1]);
     assert_eq!(replies[2]["items"].as_array().unwrap().len(), 1);
     assert!(!replies[2].to_string().contains("CANARY"));
-    assert_eq!(pragma(&new, "user_version"), 7);
+    assert_eq!(pragma(&new, "user_version"), 8);
     assert_eq!(std::fs::read(&old).unwrap(), before);
     // And the old file stays refused if it is opened again.
     let reopened = &exchange(
@@ -5089,7 +5104,7 @@ fn backups_carry_the_navigations_and_count_them() {
     };
     assert_eq!(dump(&copy), ["b|a", "c|NULL"]);
     assert_eq!(dump(&copy), dump(&tmp.default_vault()));
-    assert_eq!(pragma(&copy, "user_version"), 7);
+    assert_eq!(pragma(&copy, "user_version"), 8);
 }
 
 #[test]
@@ -5120,7 +5135,7 @@ fn image_tags_over_the_real_host_are_stored_consistently_and_leave_images_unchan
     let tmp = TempDir::new();
     create_default_vault(&tmp);
     let vault = tmp.default_vault();
-    assert_eq!(pragma(&vault, "user_version"), 7);
+    assert_eq!(pragma(&vault, "user_version"), 8);
     let first = png_of_size(40, 30, 5000);
     let second = png_of_size(40, 30, 6000);
     let saved = exchange(&tmp, &upload_messages(&first, true));

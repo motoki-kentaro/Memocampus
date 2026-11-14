@@ -113,7 +113,7 @@ function* walk(node) {
 test("the options page is the manifest's, with no new permission", () => {
   assert.equal(manifest.options_page, "options.html");
   assert.equal(manifest.options_ui, undefined);
-  assert.deepEqual(manifest.permissions, ["webNavigation", "storage", "nativeMessaging", "tabs", "sidePanel", "contextMenus", "scripting", "notifications"]);
+  assert.deepEqual(manifest.permissions, ["webNavigation", "storage", "nativeMessaging", "tabs", "sidePanel", "contextMenus", "scripting", "notifications", "pageCapture"]);
   assert.deepEqual(manifest.host_permissions, ["<all_urls>"]);
   assert.equal(manifest.content_security_policy, undefined, "the default extension CSP applies");
 });

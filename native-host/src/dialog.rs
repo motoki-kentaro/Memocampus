@@ -10,6 +10,11 @@ pub trait Dialogs {
     /// Where to export an image. Starts in Documents with `file_name`; the dialog itself asks
     /// before an existing file is chosen.
     fn choose_export_file(&self, file_name: &str, extension: &str) -> Option<PathBuf>;
+    /// Issue #6 Slice 3: where one saved Page's MHTML original is written. The Save dialog's own
+    /// overwrite prompt is the only overwrite confirmation. (Defaults to "cancelled".)
+    fn choose_page_export_file(&self, _file_name: &str) -> Option<PathBuf> {
+        None
+    }
     /// Issue #51 Slice C: the backup file to restore from. (Defaults to "cancelled" so that test
     /// doubles that never restore need not implement it.)
     fn choose_backup_file(&self) -> Option<PathBuf> {
@@ -105,6 +110,20 @@ impl Dialogs for NativeDialogs {
             .set_file_name(default_name);
         if default_dir.is_dir() {
             dialog = dialog.set_directory(default_dir);
+        }
+        owner::with_parent(dialog, owner.as_ref()).save_file()
+    }
+
+    fn choose_page_export_file(&self, file_name: &str) -> Option<PathBuf> {
+        let owner = owner::OwnerWindow::create();
+        // One filter, so a name typed without an extension gets `.mhtml`. rfd leaves the Save
+        // dialog's default options alone, which include the overwrite prompt (FOS_OVERWRITEPROMPT).
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("保存済みPageのMHTMLを書き出す")
+            .add_filter("MHTML Web Archive", &["mhtml"])
+            .set_file_name(file_name);
+        if let Some(dir) = documents_dir().filter(|dir| dir.is_dir()) {
+            dialog = dialog.set_directory(dir);
         }
         owner::with_parent(dialog, owner.as_ref()).save_file()
     }

@@ -455,7 +455,7 @@ test("the metadata module is used by the service worker only and logs nothing", 
   assert.deepEqual(users, ["service-worker.js"]);
   const manifest = JSON.parse(readFileSync(path.join(extensionDir, "manifest.json"), "utf8"));
   assert.equal(manifest.content_scripts, undefined, "no content script: one injection per allowed load");
-  assert.deepEqual(manifest.permissions, ["webNavigation", "storage", "nativeMessaging", "tabs", "sidePanel", "contextMenus", "scripting", "notifications"], "no new permission");
+  assert.deepEqual(manifest.permissions, ["webNavigation", "storage", "nativeMessaging", "tabs", "sidePanel", "contextMenus", "scripting", "notifications", "pageCapture"], "only the explicit Page capture permission is added");
 });
 
 test("events in the dead-letter list keep their metadata only as long as their URL is allowed", async () => {

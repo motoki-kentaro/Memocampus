@@ -320,7 +320,7 @@ fn d1_a_plain_vault_becomes_a_new_encrypted_vault_only_through_spell_and_activat
     assert_eq!(started["direction"], "encrypt");
     assert_eq!(
         started["counts"],
-        json!({ "visits": 2, "snapshots": 1, "images": 1 })
+        json!({ "visits": 2, "snapshots": 1, "images": 1, "pages": 0, "pageBlobs": 0 })
     );
     let spell = started["recoverySpell"].as_str().unwrap().to_owned();
     assert_eq!(spell.len(), 43);
@@ -551,7 +551,7 @@ fn d2_an_encrypted_vault_becomes_a_plain_vault_only_with_the_users_acknowledgeme
     );
     assert_eq!(
         started["counts"],
-        json!({ "visits": 2, "snapshots": 1, "images": 1 })
+        json!({ "visits": 2, "snapshots": 1, "images": 1, "pages": 0, "pageBlobs": 0 })
     );
     // A standard SQLite file holding the same rows (in the clear, as acknowledged).
     assert_eq!(

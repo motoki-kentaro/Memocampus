@@ -560,7 +560,7 @@ fn counts_of(path: &Path, mode: VaultMode, key: Option<&VaultKey>) -> Value {
         .ok()
         .and_then(|db| vault::content_counts(&db).ok())
         .map_or(Value::Null, |(counts, images, _)| {
-            json!({ "visits": counts.visits, "snapshots": counts.snapshots, "images": images.1 })
+            json!({ "visits": counts.visits, "snapshots": counts.snapshots, "images": images.1, "pages": counts.pages, "pageBlobs": counts.page_blobs })
         })
 }
 

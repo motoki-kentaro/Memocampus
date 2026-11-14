@@ -617,7 +617,7 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
             " CREATE INDEX navigation_events_by_source ON navigation_events (source_visit_id);",
             "",
         )
-        .replace("PRAGMA user_version = 7;", "PRAGMA user_version = 5;");
+        .replace("PRAGMA user_version = 8;", "PRAGMA user_version = 5;");
     assert!(!schema_5.contains("navigation_events") && schema_5.contains("user_version = 5;"));
     Connection::open(&old)
         .unwrap()
@@ -639,7 +639,7 @@ fn the_server_refuses_to_start_without_a_usable_vault_and_creates_nothing() {
     // Schema 6: the shape before Issue #44 (no image tags, created last), refused the same way.
     let old = env.dir.join("schema6.sqlite3");
     let start = sql.find(" CREATE TABLE image_tags ").unwrap();
-    let schema_6 = sql[..start].replace("PRAGMA user_version = 7;", "PRAGMA user_version = 6;");
+    let schema_6 = sql[..start].replace("PRAGMA user_version = 8;", "PRAGMA user_version = 6;");
     assert!(!schema_6.contains("image_tag") && schema_6.contains("user_version = 6;"));
     Connection::open(&old)
         .unwrap()

@@ -10,6 +10,7 @@
     <div class="tablist" role="tablist" aria-label="Memocampus">
       <button id="tab-url" class="tab" type="button" role="tab" aria-selected="true" aria-controls="panel-url">URL</button>
       <button id="tab-image" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-image" tabindex="-1">Image</button>
+      <button id="tab-page" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-page" tabindex="-1">Page<span id="page-new-dot" class="tab-attention" aria-hidden="true" hidden></span></button>
       <button id="tab-settings" class="tab tab-icon-only" type="button" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1" aria-label="設定" title="設定">
         <span class="tab-icon tab-icon-settings" aria-hidden="true"></span>
         <span id="settings-attention" class="tab-attention" aria-hidden="true" hidden></span>
@@ -129,6 +130,30 @@
         <button id="gallery-menu-copy" type="button" role="menuitem" tabindex="-1">画像をコピー</button>
         <button id="gallery-menu-export" type="button" role="menuitem" tabindex="-1">ファイルとして書き出す</button>
       </div>
+    </section>
+
+    <section id="panel-page" class="tabpanel" role="tabpanel" aria-labelledby="tab-page" hidden>
+      <header class="toolbar">
+        <input id="page-query" type="search" maxlength="200" autocomplete="off" spellcheck="false">
+        <div class="toolbar-row">
+          <span id="page-status" class="summary" role="status" aria-live="polite"></span>
+          <button id="page-refresh" type="button" class="secondary"></button>
+        </div>
+        <button id="page-delete-filter" type="button" class="secondary" disabled aria-haspopup="dialog" aria-controls="page-delete-dialog"></button>
+      </header>
+      <p id="page-note" class="vault-meta"></p>
+      <p id="page-open-note" class="vault-meta"></p>
+      <p id="page-error" class="error" role="alert" hidden></p>
+      <ol id="page-groups" class="page-groups"></ol>
+      <button id="page-more" type="button" class="secondary" hidden></button>
+      <dialog id="page-delete-dialog" class="page-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="page-delete-title" aria-describedby="page-delete-description" hidden>
+        <h2 id="page-delete-title"></h2>
+        <p id="page-delete-description"></p>
+        <div class="toolbar-row">
+          <button id="page-delete-cancel" type="button" class="secondary"></button>
+          <button id="page-delete-confirm" type="button" disabled></button>
+        </div>
+      </dialog>
     </section>
 
     <section id="panel-settings" class="tabpanel" role="tabpanel" aria-labelledby="tab-settings" hidden>

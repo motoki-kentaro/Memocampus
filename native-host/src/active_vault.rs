@@ -81,6 +81,10 @@ pub struct Config {
     /// in encrypted mode, absent in plain mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vault_id: Option<VaultId>,
+    /// New active-selection operation, not a vault identity. Page captures reject A→B→A.
+    /// Older configs remain readable; Page saving requires an explicit new selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_generation: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -110,6 +114,7 @@ impl Config {
             mode,
             publication: None,
             vault_id: None,
+            selection_generation: Some(uuid::Uuid::new_v4().to_string()),
         }
     }
 
@@ -156,6 +161,7 @@ impl Config {
                     mode: VaultMode::Plain,
                     publication: None,
                     vault_id: None,
+                    selection_generation: None,
                 }
             }
             Some(version) if version == u64::from(CONFIG_VERSION) => {
@@ -169,7 +175,10 @@ impl Config {
             .is_none_or(|publication| is_token(&publication.vault_token));
         // An encrypted vault names its key; a plain one has none to name.
         let id_ok = (config.mode == VaultMode::Encrypted) == config.vault_id.is_some();
-        if !Path::new(&config.active_vault).is_absolute() || !token_ok || !id_ok {
+        let generation_ok = config.selection_generation.as_ref().is_none_or(|value| {
+            uuid::Uuid::parse_str(value).is_ok_and(|id| id.to_string() == *value)
+        });
+        if !Path::new(&config.active_vault).is_absolute() || !token_ok || !id_ok || !generation_ok {
             return Err(ConfigError::Invalid);
         }
         Ok(config)

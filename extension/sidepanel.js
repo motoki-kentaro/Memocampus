@@ -4,6 +4,7 @@ import { createVaultPanel } from "./vault-panel.js";
 import { describePolicyStatus, describeQueueStatus, describeRecordResult } from "./queue-text.js";
 import { createTabs } from "./tabs.js";
 import { createImageGallery } from "./image-gallery.js";
+import { createPagePanel } from "./page-panel.js";
 import { vaultNeedsAttention } from "./vault-client.js";
 import { checkHostCapabilities } from "./host-capabilities.js";
 import { ACTION_LABEL, DECISION_LABEL, SAME_STATE, createItemDialog, sameState } from "./item-dialog.js";
@@ -53,6 +54,7 @@ const tabs = createTabs(
   [
     { id: "url", tab: document.querySelector("#tab-url"), panel: document.querySelector("#panel-url"), scroller: urlScroll },
     { id: "image", tab: document.querySelector("#tab-image"), panel: document.querySelector("#panel-image") },
+    { id: "page", tab: document.querySelector("#tab-page"), panel: document.querySelector("#panel-page") },
     { id: "settings", tab: settingsTab, panel: document.querySelector("#panel-settings") },
   ],
   {
@@ -60,6 +62,7 @@ const tabs = createTabs(
       if (id !== "url") calendar.close({ restoreFocus: false });
       if (id === "settings" && previous !== null) void vaultPanel.refresh();
       if (id === "image") gallery.activate();
+      if (id === "page") pagePanel.activate();
     },
   },
 );
@@ -92,14 +95,21 @@ const gallery = createImageGallery({
 });
 
 // Saves finish in the service worker; refresh the Image tab only when that does not disturb the user.
+const pagePanel = createPagePanel({
+  connect: () => chrome.runtime.connectNative("com.memocampus.vault"), runtime: chrome.runtime,
+  isActive: () => tabs.current === "page",
+  openUrl: (url) => { if (isWebUrl(url)) chrome.tabs.create({ url }).catch(() => {}); },
+});
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "image-save-result" && message.ok === true) gallery.imageSaved();
+  if (message?.type === "page-save-result") pagePanel.saved(message);
+  if (message?.type === "page-vault-changed") pagePanel.vaultChanged();
 });
 
 const vaultPanel = createVaultPanel({
   send,
   reveal: () => tabs.select("settings"),
-  onStatus: (status) => showVaultAttention(vaultNeedsAttention(status)),
+  onStatus: (status) => { showVaultAttention(vaultNeedsAttention(status)); pagePanel.vaultStatus(status); },
   onVaultChanged: () => {
     // Drop the previous vault's results at once so they are never shown as the new vault's.
     clearResults();
@@ -107,6 +117,8 @@ const vaultPanel = createVaultPanel({
     dropDate();
     calendar.vaultChanged();
     gallery.vaultChanged();
+    pagePanel.vaultChanged();
+    chrome.runtime.sendMessage({ type: "page-vault-changed" }).catch(() => {});
     void runSearch();
     // Visits queued while no vault was usable can now be delivered.
     chrome.runtime

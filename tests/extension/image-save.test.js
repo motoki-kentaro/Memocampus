@@ -134,7 +134,8 @@ test("the service worker registers the menu and reports a refused save visibly",
   globalThis.chrome = chrome;
   await import(`${pathToFileURL(path.join(extensionDir, "service-worker.js")).href}?sw=${Date.now()}`);
   listeners.installed.forEach((fn) => fn());
-  assert.deepEqual(calls.menus.map((m) => m.contexts), [["image"]]);
+  assert.deepEqual(calls.menus.find((m) => m.id === SAVE_IMAGE_MENU_ID).contexts, ["image"]);
+  assert.equal(calls.menus.length, 2, "Page menu is separate from Image");
   listeners.menuClick.forEach((fn) => fn(click("https://a.test/x.png"), { id: 1 }));
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(calls.notifications.length, 1);
