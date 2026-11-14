@@ -151,6 +151,7 @@ export function describeRestored(restored) {
   lines.push(restored?.mode === "encrypted" ? "暗号化Vault（このWindowsユーザーで鍵を保存しました）" : "平文のVault");
   if (counts && Number.isSafeInteger(counts.visits)) {
     lines.push(`閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件・画像 ${counts.images.toLocaleString("ja-JP")}件`);
+    if (Number.isSafeInteger(counts.pages)) lines.push(`Page保存 ${counts.pages.toLocaleString("ja-JP")}件・MHTML原本 ${counts.pageBlobs.toLocaleString("ja-JP")}件`);
   }
   lines.push("「使い始める」を押すと、このVaultをActive Vaultにします。MCPへの公開は未承認のままです。");
   return lines.join("\n");
@@ -249,6 +250,7 @@ export function describeConverted(converted) {
   const counts = converted?.counts;
   if (counts && Number.isSafeInteger(counts.visits)) {
     lines.push(`検証済み: 閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件・画像 ${counts.images.toLocaleString("ja-JP")}件（変換元と全件一致）`);
+    if (Number.isSafeInteger(counts.pages)) lines.push(`Page保存 ${counts.pages.toLocaleString("ja-JP")}件・MHTML原本 ${counts.pageBlobs.toLocaleString("ja-JP")}件`);
   }
   lines.push(
     "「使い始める」を押すと、その時点までに変換元へ記録された内容も取り込んでから、このVaultをActive Vaultにします。MCPへの公開は未承認から始まります。",
@@ -339,5 +341,6 @@ export function vaultNeedsAttention(status) {
 
 export function formatCounts(counts) {
   if (!counts) return "";
-  return `閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件`;
+  const pages = Number.isSafeInteger(counts.pages) ? `・Page保存 ${counts.pages.toLocaleString("ja-JP")}件・MHTML原本 ${counts.pageBlobs.toLocaleString("ja-JP")}件` : "";
+  return `閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件${pages}`;
 }

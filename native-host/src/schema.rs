@@ -1,9 +1,8 @@
-//! Vault schema 7: the one format this version reads and writes.
+//! Vault schema 8: creation only. Version 7 is refused, never migrated or modified.
 //!
-//! Schema 7 is schema 6 with image tags (`image_tags`, `image_tag_links` and the trigger that
-//! removes a tag no image uses; Issue #44). Schema 6 was schema 5 with `navigation_events` (Issue
-//! #41); schema 5 was schema 4 with `page_metadata` (Issue #22). Like schema 4 it exists only by
-//! creation: a schema 6 vault is refused as any other version, by PO decision, and nothing upgrades it. Nothing upgrades an older vault either, because `visits` has no column
+//! Schema 8 adds isolated `page_blobs` / `saved_pages` (Issue #6). Schema 7 added image tags;
+//! schema 6 navigation events; schema 5 page metadata. All exist only by explicit creation.
+//! Nothing upgrades an older vault, because `visits` has no column
 //! that tells whether a row predates the incognito fix (#9), so an upgraded vault could carry such rows
 //! under a number that later code trusts. `check` compares the stored definition of every object
 //! byte for byte with the ones below, which covers types, NOT NULL, keys, UNIQUE, CHECK, DEFAULT and
@@ -15,7 +14,7 @@ use rusqlite::Connection;
 
 /// `PRAGMA application_id` of vaults created by Memocampus ("MCMP").
 pub const APP_ID: i64 = 0x4D43_4D50;
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 /// Keep each `sql` as SQLite stores it: it keeps the text from `CREATE` on, without the final `;`.
 struct Object {
@@ -26,7 +25,19 @@ struct Object {
     sql: Option<&'static str>,
 }
 
-const OBJECTS: [Object; 22] = [
+const OBJECTS: [Object; 28] = [
+    Object {
+        kind: "table", name: "page_blobs", table: "page_blobs",
+        sql: Some("CREATE TABLE page_blobs (id INTEGER PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'), byte_length INTEGER NOT NULL CHECK (byte_length BETWEEN 1 AND 134217728), format TEXT NOT NULL CHECK (format = 'mhtml'), mime_type TEXT NOT NULL CHECK (mime_type = 'multipart/related'), data BLOB NOT NULL CHECK (typeof(data) = 'blob' AND length(data) = byte_length))"),
+    },
+    Object { kind: "index", name: "sqlite_autoindex_page_blobs_1", table: "page_blobs", sql: None },
+    Object {
+        kind: "table", name: "saved_pages", table: "saved_pages",
+        sql: Some("CREATE TABLE saved_pages (id INTEGER PRIMARY KEY, save_id TEXT NOT NULL UNIQUE, blob_id INTEGER NOT NULL REFERENCES page_blobs (id) ON DELETE RESTRICT, url TEXT NOT NULL CHECK (length(url) BETWEEN 1 AND 32768), title TEXT NOT NULL CHECK (length(title) <= 65536), captured_at INTEGER NOT NULL CHECK (captured_at >= 0), saved_at INTEGER NOT NULL CHECK (saved_at >= 0), incognito INTEGER NOT NULL CHECK (incognito = 0))"),
+    },
+    Object { kind: "index", name: "sqlite_autoindex_saved_pages_1", table: "saved_pages", sql: None },
+    Object { kind: "index", name: "saved_pages_by_url", table: "saved_pages", sql: Some("CREATE INDEX saved_pages_by_url ON saved_pages (url, saved_at DESC, id DESC)") },
+    Object { kind: "index", name: "saved_pages_by_blob", table: "saved_pages", sql: Some("CREATE INDEX saved_pages_by_blob ON saved_pages (blob_id)") },
     Object {
         kind: "table",
         name: "visits",
@@ -262,7 +273,7 @@ END",
     },
 ];
 
-/// Everything that makes an empty database a schema 7 vault, for one transaction. There is no form
+/// Everything that makes an empty database a schema 8 vault, for one transaction. There is no form
 /// of this that can run against an existing vault: `CREATE TABLE` fails if the table exists.
 pub fn create_sql() -> String {
     let mut sql =
@@ -658,8 +669,8 @@ mod tests {
             ("PRAGMA user_version = 4;", 4),
             ("PRAGMA user_version = 5;", 5),
             ("PRAGMA user_version = 6;", 6),
-            ("PRAGMA user_version = 8;", 8),
-            ("PRAGMA application_id = 0;", 7),
+            ("PRAGMA user_version = 7;", 7),
+            ("PRAGMA application_id = 0;", 8),
         ] {
             assert!(
                 matches!(check(&vault(extra)).unwrap_err(), SchemaError::UnsupportedVersion(v) if v == expected),

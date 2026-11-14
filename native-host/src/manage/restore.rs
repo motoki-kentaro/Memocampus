@@ -745,11 +745,14 @@ fn verify_restored(
     }
     schema::check(&db).map_err(schema_failure)?;
     let (counts, images, _) = vault::content_counts(&db).map_err(|_| invalid())?;
+    crate::pages::verify(&db).map_err(|_| invalid())?;
     db.close().map_err(|_| invalid())?;
     Ok(json!({
         "visits": counts.visits,
         "snapshots": counts.snapshots,
         "images": images.1,
+        "pages": counts.pages,
+        "pageBlobs": counts.page_blobs,
     }))
 }
 

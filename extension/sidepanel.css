@@ -31,6 +31,21 @@
 
 * { box-sizing: border-box; }
 
+/* Page metadata is untrusted text: wrap long URLs/titles without interpreting markup. */
+.page-groups, .page-events { list-style: none; padding: 0; }
+.page-group { border-bottom: 1px solid var(--border); padding: 12px 0; }
+.page-group-heading { display: flex; align-items: start; gap: 8px; }
+.page-expand { flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.page-expand::before { content: "▸ "; }
+.page-expand[aria-expanded="true"]::before { content: "▾ "; }
+.page-group-delete { flex: none; }
+.page-url, .page-event-title { overflow-wrap: anywhere; white-space: pre-wrap; }
+.page-history { padding-left: 12px; }
+.page-event { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.page-delete-dialog { position: fixed; inset: 8% 10px; margin: auto; width: calc(100% - 20px); max-height: 84%; overflow: auto; color: var(--fg); background: var(--bg); border: 2px solid var(--accent); border-radius: 8px; padding: 16px; }
+.page-delete-dialog::backdrop { background: #0008; }
+#page-delete-description { white-space: pre-wrap; overflow-wrap: anywhere; }
+
 html, body { height: 100%; }
 
 body {
@@ -43,7 +58,7 @@ body {
   background: var(--bg);
 }
 
-/* Tabs: [URL] [Image] [settings]. Each panel scrolls on its own so switching keeps positions. */
+/* Tabs retain each panel's input, results and scroll position. */
 .tablist {
   display: flex;
   flex: none;

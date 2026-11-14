@@ -550,7 +550,7 @@ mod tests {
         assert_eq!(created["status"]["state"], "ready");
         assert_eq!(
             created["status"]["counts"],
-            json!({ "visits": 0, "snapshots": 0 })
+            json!({ "visits": 0, "snapshots": 0, "pages": 0, "pageBlobs": 0 })
         );
         assert!(dialogs.calls.borrow().is_empty());
 

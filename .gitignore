@@ -48,3 +48,7 @@ node_modules/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Local security research PoCs (not for repository)
+/poc/mcp-prompt-injection/
+/poc/release-projection/

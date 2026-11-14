@@ -155,7 +155,8 @@ export function createDocument() {
   // Initial `hidden` state as written in sidepanel.html.
   for (const id of [
     "url-item-status", "gallery-manage-section", "item-dialog", "item-dialog-urls", "item-dialog-scope", "item-dialog-ack", "item-dialog-error", "item-dialog-repreview", "item-dialog-settings",
-    "panel-image", "panel-settings", "settings-attention", "error", "empty", "load-more", "open-vault-settings", "record-status", "queue-status", "policy-status", "policy-initialize", "vault-approval",
+    "panel-image", "panel-page", "panel-settings", "settings-attention", "error", "empty", "load-more", "open-vault-settings", "record-status", "queue-status", "policy-status", "policy-initialize", "vault-approval",
+    "page-new-dot", "page-error", "page-more", "page-delete-dialog",
     "vault-publication", "vault-publication-confirm", "vault-publication-revoke", "vault-publication-review",
     "gallery-new-dot", "gallery-error", "gallery-open-settings", "gallery-empty", "gallery-more", "gallery-details", "gallery-sources-more", "gallery-menu",
     "gallery-filter", "gallery-tags-empty", "gallery-tag-picker", "gallery-tag-picker-more",

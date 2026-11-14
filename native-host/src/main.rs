@@ -15,6 +15,9 @@ mod images;
 mod launch;
 mod location;
 mod manage;
+mod page_manage;
+mod page_protocol;
+mod pages;
 mod policy_gate;
 #[cfg(test)]
 mod read_token_tests;
@@ -368,14 +371,14 @@ fn is_recordable_url(raw: &str) -> bool {
     }
 }
 
-fn read_message() -> io::Result<Option<Vec<u8>>> {
+fn read_message(max_size: usize) -> io::Result<Option<Vec<u8>>> {
     let mut length = [0u8; 4];
     let mut stdin = io::stdin().lock();
     if stdin.read_exact(&mut length).is_err() {
         return Ok(None);
     }
     let size = u32::from_ne_bytes(length) as usize;
-    if size > 64 * 1024 * 1024 {
+    if size > max_size {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "message too large",
@@ -399,6 +402,27 @@ fn write_message<T: Serialize>(message: &T) -> io::Result<()> {
     stdout.flush()
 }
 
+/// Whether Chrome still holds the other end of stdin. Asked after a file dialog closes: the main
+/// thread reads nothing while a request is handled, so a closed port is otherwise unnoticed.
+#[cfg(windows)]
+fn port_open() -> bool {
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_BROKEN_PIPE};
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE};
+    use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+    let none = std::ptr::null_mut::<u32>();
+    // SAFETY: no buffer is passed; only the pipe's state is queried.
+    unsafe {
+        let stdin = GetStdHandle(STD_INPUT_HANDLE);
+        PeekNamedPipe(stdin, std::ptr::null_mut(), 0, none, none, none) != 0
+            || GetLastError() != ERROR_BROKEN_PIPE
+    }
+}
+
+#[cfg(not(windows))]
+fn port_open() -> bool {
+    true
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Double-clicked in Explorer: explain and exit before touching stdin, stdout or the vault.
     if launch::guide_if_direct() {
@@ -412,17 +436,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Upload state lives only as long as this process, i.e. one connectNative port: when Chrome
     // closes the port, the process exits and any unconfirmed image bytes are gone with it.
     let mut uploads = image_protocol::Uploads::default();
+    let mut page_uploads = page_protocol::Uploads::default();
+    let mut page_manager = page_manage::Manager::default();
+    // One read permit at a time: no speculative allocations while a Page port is waiting. The
+    // main thread expires an abandoned Page operation even if stdin remains open forever.
+    let (permit, permits) = std::sync::mpsc::sync_channel(0);
+    let (reader, messages) = std::sync::mpsc::sync_channel(0);
+    std::thread::spawn(move || {
+        while let Ok(limit) = permits.recv() {
+            let message = read_message(limit);
+            let done = !matches!(&message, Ok(Some(_)));
+            if reader.send(message).is_err() || done {
+                break;
+            }
+        }
+    });
+    let mut page_port = false;
     // The policy is global, independent of the vault, and read again for every decision.
     let gate = policy_gate::PolicyGate::from_process();
-    while let Some(body) = read_message()? {
+    loop {
+        permit.send(if page_port {
+            page_protocol::MAX_MESSAGE_BYTES
+        } else {
+            64 * 1024 * 1024
+        })?;
+        let incoming = if page_uploads.active() {
+            match messages.recv_timeout(page_protocol::IDLE_TIMEOUT) {
+                Ok(value) => value,
+                Err(_) => break,
+            }
+        } else {
+            match messages.recv() {
+                Ok(value) => value,
+                Err(_) => break,
+            }
+        };
+        let Some(body) = incoming? else {
+            break;
+        };
         let value: serde_json::Value = match serde_json::from_slice(&body) {
             Ok(value) => value,
             Err(_) => {
+                if page_port {
+                    break;
+                } // malformed Page input discards the upload, not just a frame
                 write_ack(&Ack::from_result(None, Err(INVALID_MESSAGE)))?;
                 continue;
             }
         };
-        match value.get("type").and_then(|value| value.as_str()) {
+        let message_type = value.get("type").and_then(|value| value.as_str());
+        if message_type.is_some_and(|kind| kind.starts_with("page_save_")) {
+            page_port = true;
+            write_message(&page_uploads.handle(&mut session, &value))?;
+            continue;
+        }
+        if page_port {
+            break;
+        }
+        match message_type {
+            Some(
+                "page_state"
+                | "page_list"
+                | "page_history"
+                | "page_delete_preview"
+                | "page_delete"
+                | "page_delete_status",
+            ) => write_message(&page_manager.handle(&mut session, &value))?,
+            Some("page_export") => write_message(&page_manager.export(
+                &mut session,
+                &dialog::NativeDialogs,
+                &port_open,
+                &value,
+            ))?,
             Some("search_pages") => write_message(&search_response(&mut session, &value))?,
             Some("visit_days") => write_message(&visit_days_response(&mut session, &value))?,
             Some(

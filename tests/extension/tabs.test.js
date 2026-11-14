@@ -78,10 +78,10 @@ test("setScroll on a hidden tab applies when it is shown", () => {
   assert.equal(entries[0].panel.scrollTop, 0);
 });
 
-test("sidepanel.html wires three tabs to their panels", () => {
+test("sidepanel.html wires four tabs to their panels", () => {
   const html = read(extensionDir, "sidepanel.html").toString("utf8");
   const tabs = [...html.matchAll(/<button id="(tab-[a-z]+)"[^>]*role="tab"[^>]*aria-controls="([a-z-]+)"/g)].map((m) => [m[1], m[2]]);
-  assert.deepEqual(tabs, [["tab-url", "panel-url"], ["tab-image", "panel-image"], ["tab-settings", "panel-settings"]]);
+  assert.deepEqual(tabs, [["tab-url", "panel-url"], ["tab-image", "panel-image"], ["tab-page", "panel-page"], ["tab-settings", "panel-settings"]]);
   for (const [tab, panel] of tabs) {
     assert.match(html, new RegExp(`<section id="${panel}"[^>]*role="tabpanel"[^>]*aria-labelledby="${tab}"`), panel);
   }

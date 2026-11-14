@@ -21,6 +21,52 @@ const ALL: SearchVisits = SearchVisits {
     cursor: None,
 };
 
+#[test]
+fn manually_saved_pages_never_join_any_existing_mcp_read_or_statistic() {
+    let f = Fixture::new();
+    f.seed();
+    let before = f.store.search_visits(&ALL).unwrap();
+    let domains = DomainStats::default();
+    let stats_before = f.store.domain_stats(&domains).unwrap();
+    let images_before = f.store.search_images(&SearchImages::default()).unwrap();
+    let db = writer(&f.vault);
+    for (i, url) in [
+        "https://a-layer.test/CANARY-PAGE",
+        "https://b-layer.test/CANARY-PAGE",
+        "https://public.test/CANARY-PAGE",
+    ]
+    .iter()
+    .enumerate()
+    {
+        db.execute("INSERT INTO page_blobs (id,sha256,byte_length,format,mime_type,data) VALUES (?1,?2,11,'mhtml','multipart/related',CAST('CANARY-PAGE' AS BLOB))", params![i as i64 + 1, format!("{i:064x}")]).unwrap();
+        db.execute("INSERT INTO saved_pages (save_id,blob_id,url,title,captured_at,saved_at,incognito) VALUES (?1,?2,?3,'CANARY-PAGE-TITLE',0,0,0)", params![format!("page-{i}"),i as i64 + 1,url]).unwrap();
+    }
+    assert_eq!(f.store.search_visits(&ALL).unwrap(), before);
+    assert_eq!(f.store.domain_stats(&domains).unwrap(), stats_before);
+    assert_eq!(
+        f.store.search_images(&SearchImages::default()).unwrap(),
+        images_before
+    );
+    assert!(f
+        .store
+        .search_visits(&SearchVisits {
+            query: "CANARY-PAGE",
+            ..ALL
+        })
+        .unwrap()
+        .items
+        .is_empty());
+    assert!(f
+        .store
+        .search_images(&SearchImages {
+            query: "CANARY-PAGE",
+            ..SearchImages::default()
+        })
+        .unwrap()
+        .items
+        .is_empty());
+}
+
 struct Fixture {
     dir: PathBuf,
     vault: PathBuf,
@@ -4017,7 +4063,7 @@ fn navigation_events_never_reach_a_reader_and_a_vault_without_them_is_refused() 
     let path = f.dir.join("schema-5-shape.sqlite3");
     Connection::open(&path)
         .unwrap()
-        .execute_batch(&sql.replace("PRAGMA user_version = 7;", "PRAGMA user_version = 5;"))
+        .execute_batch(&sql.replace("PRAGMA user_version = 8;", "PRAGMA user_version = 5;"))
         .unwrap();
     let store = VisibleStore::ungated(path, f.app.clone()).unwrap();
     assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
@@ -4026,7 +4072,7 @@ fn navigation_events_never_reach_a_reader_and_a_vault_without_them_is_refused() 
     // Schema 6 (Issue #44: no image tags; the tag objects are the last ones created) is refused too.
     let sql = schema::create_sql();
     let start = sql.find(" CREATE TABLE image_tags ").unwrap();
-    let schema_6 = sql[..start].replace("PRAGMA user_version = 7;", "PRAGMA user_version = 6;");
+    let schema_6 = sql[..start].replace("PRAGMA user_version = 8;", "PRAGMA user_version = 6;");
     assert!(!schema_6.contains("image_tag") && schema_6.contains("user_version = 6;"));
     let path = f.dir.join("schema-6-shape.sqlite3");
     Connection::open(&path)

@@ -8,6 +8,7 @@ import { createNavigationTracker } from "./navigation-tracker.js";
 import { createNavigationStarts } from "./navigation-start.js";
 import { checkHostCapabilities } from "./host-capabilities.js";
 import { SAVE_IMAGE_MENU_ID, describeImageSaveResult, registerImageMenu, saveImageFromClick } from "./image-save.js";
+import { SAVE_PAGE_MENU_ID, createPageSaver, describePageSaveResult, registerPageMenu } from "./page-save.js";
 
 const HOST_NAME = "com.memocampus.vault";
 const EXCLUDED_SCHEMES = new Set(["chrome:", "edge:", "about:", "chrome-extension:", "file:", "devtools:"]);
@@ -32,6 +33,7 @@ function sendNative(event) {
 
 // Quarantined or dropped events are surfaced on the toolbar icon, never discarded silently.
 const IMAGE_FAILURE_KEY = "imageSaveFailure";
+const PAGE_FAILURE_KEY = "pageSaveFailure";
 
 async function updateBadge() {
   try {
@@ -46,6 +48,8 @@ async function updateBadge() {
     const navigationLost = status.navigationInvalid + status.navigationNotStored;
     if (navigationLost > 0) titles.push(`遷移情報を保存できなかった訪問 ${navigationLost}件`);
     if (imageFailure) titles.push(`画像を保存できませんでした: ${imageFailure}`);
+    const pageFailure = (await chrome.storage.session.get(PAGE_FAILURE_KEY))[PAGE_FAILURE_KEY];
+    if (pageFailure) titles.push(`ページ保存: ${pageFailure}`);
     await chrome.action.setBadgeText({ text: titles.length > 0 ? "!" : "" });
     await chrome.action.setTitle({ title: titles.length > 0 ? `Memocampus — ${titles.join(" / ")}` : "Memocampus" });
   } catch {
@@ -224,6 +228,7 @@ chrome.runtime.onStartup.addListener(() => void flushQueue());
 chrome.runtime.onInstalled.addListener(() => {
   void flushQueue();
   registerImageMenu(chrome.contextMenus, chrome.runtime);
+  registerPageMenu(chrome.contextMenus, chrome.runtime);
 });
 
 // --- Saving images from the context menu --------------------------------------------------------
@@ -290,11 +295,39 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   void saveImageFromClick(info, tab, imageDeps).then(reportImageSave);
 });
 
+// Page captures are deliberately independent of automatic recording/policy and Image uploads.
+const pageSaver = createPageSaver({
+  tabs: chrome.tabs, webNavigation: chrome.webNavigation,
+  capture: (options) => chrome.pageCapture.saveAsMHTML(options),
+  randomUUID: () => crypto.randomUUID(), now: () => Date.now(),
+  connect: () => {
+    const port = chrome.runtime.connectNative(HOST_NAME);
+    port.onDisconnect.addListener(() => { void chrome.runtime.lastError; });
+    return port;
+  },
+});
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== SAVE_PAGE_MENU_ID) return;
+  void pageSaver.save(info, tab).then(async (result) => {
+    const { title, message } = describePageSaveResult(result);
+    try {
+      if (result.ok) await chrome.storage.session.remove(PAGE_FAILURE_KEY);
+      else await chrome.storage.session.set({ [PAGE_FAILURE_KEY]: message });
+      await updateBadge();
+      await chrome.notifications.create(`memocampus-page-${Date.now()}`, { type: "basic", iconUrl: FALLBACK_ICON, title, message, priority: result.ok ? 0 : 1 });
+    } catch { /* A failed notification never turns an unconfirmed save into success. */ }
+    chrome.runtime.sendMessage({ type: "page-save-result", ok: result.ok, code: result.code ?? null, vaultToken: result.saved?.vaultToken ?? null, generation: result.saved?.generation ?? null, saveId: result.saved?.saveId ?? null }).catch(() => {});
+  });
+});
+
 // Clicking the toolbar action opens the search side panel. Re-applied on every worker start.
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 void updateBadge();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "page-vault-changed") {
+    pageSaver.cancel(); sendResponse({ ok: true }); return false;
+  }
   if (message?.type === "policy-initialize") {
     sendResponse({ ok: false, code: "policy_start_required" });
     return false;
