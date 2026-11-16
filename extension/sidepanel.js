@@ -9,6 +9,9 @@ import { vaultNeedsAttention } from "./vault-client.js";
 import { checkHostCapabilities } from "./host-capabilities.js";
 import { ACTION_LABEL, DECISION_LABEL, SAME_STATE, createItemDialog, sameState } from "./item-dialog.js";
 import { evaluateUrls } from "./vault-items-client.js";
+import { createDeleteClient } from "./delete-client.js";
+import { DELETE_TEXT, UNKNOWN_CODE, createDeleteDialog, createStatusNotice, deleteErrorText, setDangerLabel } from "./delete-ui.js";
+import { createUrlHistory } from "./url-history.js";
 import { createVisitCalendar, formatDate, localDayBounds } from "./visit-calendar.js";
 
 const DEBOUNCE_MS = 200;
@@ -37,6 +40,7 @@ const calendarButton = document.querySelector("#visit-calendar-open");
 const dateChip = document.querySelector("#visit-date-chip");
 const dateChipText = document.querySelector("#visit-date-chip-text");
 const dateClear = document.querySelector("#visit-date-clear");
+const urlDeleteAll = document.querySelector("#url-delete-all");
 
 const send = chromeNativeTransport(chrome.runtime);
 const gate = createLatestGate();
@@ -49,7 +53,24 @@ let itemsSupported = null;
 // The calendar (Issue #5) only with a host that names `visit_calendar_v1`: an older host would ignore a
 // date range and answer the unfiltered list. null until known.
 let calendarSupported = null;
+// Reviewed deletion (Issue #7) needs a lasting port and a host that names `item_delete_v1`: null until known.
+let deleteSupported = null;
 const itemDialog = createItemDialog({ send, openPrivacySettings, onVaultUnavailable: () => void vaultPanel.refresh() });
+const deleteClient = createDeleteClient({
+  connect: () => chrome.runtime.connectNative("com.memocampus.vault"),
+  runtime: chrome.runtime,
+  // The port ended or the Vault selection changed: everything shown from the old one is withdrawn.
+  onInvalidated: (code) => {
+    urlHistory.invalidate();
+    gallery.deleteInvalidated();
+    // A DELETE that was on its way has its own, lasting notice (the tab that asked says so): this line must not
+    // claim anything about it.
+    if (code === UNKNOWN_CODE) return;
+    showItemStatus(code === "vault_switched" ? "Vaultが変更されたため、削除の確認を取り消しました。" : deleteErrorText(code));
+  },
+});
+const deleteDialog = createDeleteDialog({ client: deleteClient });
+deleteDialog.onStatus((text) => showItemStatus(text));
 const tabs = createTabs(
   [
     { id: "url", tab: document.querySelector("#tab-url"), panel: document.querySelector("#panel-url"), scroller: urlScroll },
@@ -92,6 +113,8 @@ const gallery = createImageGallery({
   itemDialog,
   itemsSupported: () => itemsSupported,
   onPolicyChanged: () => void evaluateRows(rows()),
+  deleteDialog,
+  deleteSupported: () => deleteSupported,
 });
 
 // Saves finish in the service worker; refresh the Image tab only when that does not disturb the user.
@@ -112,6 +135,7 @@ const vaultPanel = createVaultPanel({
   onStatus: (status) => { showVaultAttention(vaultNeedsAttention(status)); pagePanel.vaultStatus(status); },
   onVaultChanged: () => {
     // Drop the previous vault's results at once so they are never shown as the new vault's.
+    deleteClient.close();
     clearResults();
     // The chosen day, the open calendar and its counts were the old vault's (PO decision: cleared).
     dropDate();
@@ -282,7 +306,7 @@ function timeLabel(prefix, iso) {
 
 // --- Item actions on a result (Issue #43) -----------------------------------------------------------
 
-const ROW_ACTIONS = ["never_save", "save_but_no_mcp", "delete", "publish"];
+const ROW_ACTIONS = ["never_save", "save_but_no_mcp", "publish"];
 let rowCounter = 0;
 let decisionStamp = 0;
 
@@ -348,21 +372,93 @@ function renderActions(item) {
   return box;
 }
 
+// The URL tab's status line; an unknown deletion (Issue #7) stays above every later message.
+const itemNotice = createStatusNotice({
+  paint: (text) => {
+    itemStatus.textContent = text;
+    itemStatus.hidden = text === "";
+  },
+  vault: () => state.vaultToken,
+});
 function showItemStatus(text) {
-  itemStatus.textContent = text;
-  itemStatus.hidden = text === "";
+  itemNotice.show(text);
 }
+
+// --- Deleting visits (Issue #7) ---------------------------------------------------------------------------------
+// A row is a URL group. Its history lists the visits of that URL; the delete buttons name what they delete.
+
+let reopenUrl = null;
+const urlHistory = createUrlHistory({
+  client: deleteClient,
+  dialog: deleteDialog,
+  context: () => ({ query: state.query, visited: state.visited, vaultToken: state.vaultToken }),
+  onVisitDeleted: (url, deleted) => {
+    showItemStatus(`閲覧履歴${deleted.visits}件を削除しました。同じURLのスナップショットと他の閲覧履歴は残っています。`);
+    // The group's latest visit, title and presence in the list may have changed: list again, history reopened.
+    reopenUrl = url;
+    void runSearch();
+  },
+  onUrlDeleted: removeRow,
+  onVaultMismatch: () => {
+    showItemStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しています。");
+    void runSearch();
+  },
+  onFailure: (code) => showItemStatus(deleteErrorText(code)),
+  onUnknown: (code, info) => itemNotice.unknown(info.vaultToken),
+});
+
+/** The range button names what it deletes: the visits matching the list's filter, or every visit. */
+function updateDeleteAll() {
+  const filtered = state.query !== "" || state.visited !== null;
+  setDangerLabel(urlDeleteAll, filtered ? DELETE_TEXT.visitsFiltered : DELETE_TEXT.visitsAll);
+  urlDeleteAll.hidden = deleteSupported !== true;
+  urlDeleteAll.disabled = state.vaultToken === null;
+  const label = filtered ? `${DELETE_TEXT.visitsFiltered}（現在の検索・日付の条件に一致する閲覧履歴。スナップショットは対象外）` : `${DELETE_TEXT.visitsAll}（スナップショットは対象外）`;
+  urlDeleteAll.title = label;
+  urlDeleteAll.setAttribute("aria-label", label);
+}
+
+function filterText() {
+  const parts = [];
+  if (state.query) parts.push(`検索「${state.query}」`);
+  if (state.visited && state.date) parts.push(`閲覧日 ${state.date.label}`);
+  return parts.join(" かつ ");
+}
+
+urlDeleteAll.addEventListener("click", () => {
+  if (deleteSupported !== true || state.vaultToken === null) return;
+  const visited = state.visited;
+  void deleteDialog.open({
+    target: { scope: "visits", query: state.query, visitedFrom: visited?.visitedFrom ?? null, visitedTo: visited?.visitedTo ?? null },
+    vaultToken: state.vaultToken,
+    condition: filterText(),
+    opener: urlDeleteAll,
+    onDeleted: (deleted) => {
+      showItemStatus(`閲覧履歴${deleted.visits}件を削除しました（スナップショットは削除していません）。`);
+      void runSearch();
+    },
+    onVaultMismatch: () => {
+      showItemStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しています。");
+      void runSearch();
+    },
+    onStale: () => void runSearch(),
+    onError: (code) => showItemStatus(deleteErrorText(code)),
+    onUnknown: (code, info) => itemNotice.unknown(info.vaultToken),
+  });
+});
 
 /** The host deleted `url`: its row goes, and the next page starts one row earlier. */
 function removeRow(li, deleted) {
   const index = rows().indexOf(li);
+  for (const row of urlHistory.rows) if (row.li === li) urlHistory.rows.delete(row);
   li.remove();
   state.seenUrls.delete(li.dataset.url);
   state.count = Math.max(0, state.count - 1);
   state.offset = Math.max(0, state.offset - 1);
   renderEmpty();
   updateSummary(false);
-  showItemStatus(`Vaultから削除しました（閲覧記録${deleted.visits}件・スナップショット${deleted.tabSnapshots}件）。`);
+  showItemStatus(`URL全件を削除しました（閲覧履歴${deleted.visits}件・スナップショット${deleted.tabSnapshots}件）。`);
+  updateDeleteAll();
   const next = rows()[index] ?? rows()[index - 1];
   (next?.querySelector("a.hit") ?? input).focus();
 }
@@ -380,22 +476,6 @@ function chooseAction(select) {
   const onClose = () => {
     select.value = "";
   };
-  if (action === "delete") {
-    itemDialog.openUrlDelete({
-      owner: "url",
-      url,
-      label,
-      vaultToken: state.vaultToken,
-      opener: select,
-      onClose,
-      onDeleted: (deleted) => removeRow(li, deleted),
-      onVaultMismatch: () => {
-        void runSearch();
-        showItemStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しています。");
-      },
-    });
-    return;
-  }
   itemDialog.openPolicy({
     owner: "url",
     action,
@@ -418,6 +498,9 @@ async function checkItems() {
   if (!answer.ok || itemsSupported !== null) return;
   itemsSupported = answer.vaultItems;
   calendarSupported = answer.visitCalendar;
+  deleteSupported = answer.itemDelete;
+  urlHistory.setSupported(deleteSupported);
+  updateDeleteAll();
   updateCalendarAvailability();
   for (const li of rows()) actionsOf(li).box.hidden = !itemsSupported;
   gallery.itemsChanged();
@@ -449,6 +532,7 @@ function renderItem(item) {
   li.dataset.url = item.url;
   li.dataset.title = item.title;
   li.append(link, renderActions(item));
+  urlHistory.decorate(li, item);
   return li;
 }
 
@@ -471,9 +555,11 @@ function appendItems(items) {
 function clearResults() {
   gate.next(); // responses still in flight belong to the previous vault
   itemDialog.cancel("url");
+  urlHistory.invalidate();
   state.vaultToken = null;
   state.visited = null;
   updateCalendarAvailability();
+  updateDeleteAll();
   results.replaceChildren();
   state.seenUrls = new Set();
   state.count = 0;
@@ -489,6 +575,7 @@ function clearResults() {
 
 function renderEmpty() {
   empty.hidden = state.count !== 0;
+  updateDeleteAll();
   const day = state.visited && state.date ? state.date.label : null;
   if (day) empty.textContent = state.query ? `「${state.query}」に一致する、${day}に閲覧したページはありません。` : `${day}に閲覧したページはありません。`;
   else empty.textContent = state.query ? `「${state.query}」に一致するページはありません。` : "まだ記録されたページがありません。";
@@ -520,6 +607,7 @@ async function runSearch() {
     }
     // The rows are replaced: a dialog about one of them would name a row that is gone.
     itemDialog.cancel("url");
+    urlHistory.invalidate();
     state.vaultToken = page.vaultToken;
     updateCalendarAvailability();
     void checkItems();
@@ -531,6 +619,11 @@ async function runSearch() {
     appendItems(page.items);
     renderEmpty();
     tabs.setScroll("url", 0);
+    if (reopenUrl !== null) {
+      const url = reopenUrl;
+      reopenUrl = null;
+      urlHistory.reopen(url);
+    }
   } catch (error) {
     if (!gate.isCurrent(token)) return;
     results.replaceChildren();

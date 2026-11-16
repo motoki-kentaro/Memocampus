@@ -24,7 +24,7 @@ fn visit(db: &Connection, id: &str, url: &str) {
 
 fn navigation(db: &Connection, target: &str, source: Option<&str>) {
     db.execute(
-        "INSERT INTO navigation_events VALUES (?1, ?2, 'document', 'link', 0, 0, 0, 0, 0, ?3)",
+        "INSERT INTO navigation_events (target_visit_id, source_visit_id, kind, transition_type, client_redirect, server_redirect, forward_back, from_address_bar, new_tab, occurred_at) VALUES (?1, ?2, 'document', 'link', 0, 0, 0, 0, 0, ?3)",
         params![target, source, T],
     )
     .unwrap();
@@ -63,7 +63,7 @@ fn dump(db: &Connection) -> Vec<String> {
             "SELECT 'v ' || event_id || ' ' || url FROM visits
              UNION ALL SELECT 's ' || event_id || ' ' || url FROM tab_snapshots
              UNION ALL SELECT 'p ' || url || ' ' || event_id FROM page_metadata
-             UNION ALL SELECT 'n ' || target_visit_id || ' <- ' || coalesce(source_visit_id, 'NULL') FROM navigation_events
+             UNION ALL SELECT 'n ' || target_visit_id || ' <- ' || coalesce(source_visit_id, 'NULL') || CASE WHEN source_censored = 1 THEN ' CENSORED' ELSE '' END FROM navigation_events
              ORDER BY 1",
         )
         .unwrap();
@@ -115,7 +115,7 @@ fn deleting_a_url_removes_all_of_it_and_nothing_else() {
     assert_eq!(
         dump(&db),
         [
-            "n b1 <- NULL".to_owned(),
+            "n b1 <- NULL CENSORED".to_owned(),
             "n c2 <- c1".to_owned(),
             format!("p {B} b1"),
             format!("s s2 {C}"),
@@ -352,79 +352,4 @@ fn an_image_deletion_that_fails_part_way_leaves_everything() {
     drop(tx);
     assert_eq!(image_dump(&db), before, "the saves deleted first are back");
     integrity(&db);
-}
-
-#[test]
-fn requests_are_checked_before_any_vault_is_opened() {
-    use crate::vault::{tests::TempDir, Environment, Session};
-    let tmp = TempDir::new();
-    // No vault is configured: a request that is malformed says so, never "vault_not_configured".
-    let mut session = Session::new(Environment {
-        app_dir: Some(tmp.0.join("app")),
-        db_override: None,
-        exe_dir: None,
-    });
-    let token = "0".repeat(64);
-    let sha = "a".repeat(64);
-    let cases = [
-        (json!({ "type": "url_delete" }), "invalid_request_id"),
-        (
-            json!({ "type": "url_delete", "requestId": "r", "vaultToken": token }),
-            "invalid_url",
-        ),
-        (
-            json!({ "type": "url_delete", "requestId": "r", "url": "", "vaultToken": token }),
-            "invalid_url",
-        ),
-        (
-            json!({ "type": "url_delete", "requestId": "r", "url": 1, "vaultToken": token }),
-            "invalid_url",
-        ),
-        (
-            json!({ "type": "url_delete", "requestId": "r", "url": "x".repeat(MAX_URL_CHARS + 1), "vaultToken": token }),
-            "invalid_url",
-        ),
-        (
-            json!({ "type": "url_delete", "requestId": "r", "url": A }),
-            "invalid_vault_token",
-        ),
-        (
-            json!({ "type": "url_delete", "requestId": "r", "url": A, "vaultToken": "x" }),
-            "invalid_vault_token",
-        ),
-        (
-            json!({ "type": "url_delete_preview", "requestId": "r" }),
-            "invalid_url",
-        ),
-        (
-            json!({ "type": "image_delete", "requestId": "r", "sha256": sha, "vaultToken": token }),
-            "invalid_blob_id",
-        ),
-        (
-            json!({ "type": "image_delete", "requestId": "r", "blobId": 0, "sha256": sha, "vaultToken": token }),
-            "invalid_blob_id",
-        ),
-        (
-            json!({ "type": "image_delete", "requestId": "r", "blobId": 1, "sha256": "A".repeat(64), "vaultToken": token }),
-            "invalid_hash",
-        ),
-        (
-            json!({ "type": "image_delete", "requestId": "r", "blobId": 1, "sha256": sha }),
-            "invalid_vault_token",
-        ),
-        (
-            json!({ "type": "image_delete_preview", "requestId": "r", "blobId": 1 }),
-            "invalid_hash",
-        ),
-        (
-            json!({ "type": "url_delete", "requestId": "r", "url": A, "vaultToken": token }),
-            "vault_not_configured",
-        ),
-    ];
-    for (message, code) in cases {
-        let reply = handle(&mut session, &message);
-        assert_eq!(reply["ok"], false, "{message}");
-        assert_eq!(reply["error"], code, "{message}");
-        assert!(reply.get("irreversible").is_none());
-    }
 }

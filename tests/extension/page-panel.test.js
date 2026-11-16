@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { panelFixture,pageRow,flatten } from "./page-fixtures.js";
 import { settle,loadSidePanel } from "./fake-dom.js";
+const allText = (el) => [el.textContent, ...el.children.map(allText)].join(" ").replace(/\s+/g, " ").trim();
 const loaded=async(rows=[])=>{const f=panelFixture(rows);f.panel.activate();await settle(10);return f;};
 const groups=(f)=>f.$("page-groups").children;
 const expand=(group)=>group.children[0].children[0];
@@ -36,7 +37,7 @@ test("literal filter keeps text untrimmed, clears selection, and changes bulk la
   const f=await loaded([pageRow(1,"https://synthetic.test/","prefix %_\\ 日本語 suffix"),pageRow(2)]);
   groupDelete(groups(f)[0]).dispatch("click");await settle(5);assert.equal(f.$("page-delete-dialog").hidden,false);
   f.$("page-query").value=" %_\\ 日本語 ";f.$("page-query").dispatch("input");assert.equal(f.$("page-delete-dialog").hidden,true);assert.equal(groups(f).length,0);
-  f.tick(200);await settle(5);assert.equal(requests(f,"page_list").at(-1).query," %_\\ 日本語 ");assert.equal(groups(f).length,1);assert.match(f.$("page-delete-filter").textContent,/条件一致/);f.panel.dispose();
+  f.tick(200);await settle(5);assert.equal(requests(f,"page_list").at(-1).query," %_\\ 日本語 ");assert.equal(groups(f).length,1);assert.match(flatten(f.$("page-delete-filter")),/検索結果をすべて削除/);f.panel.dispose();
 });
 test("empty and locked states are distinct and cannot delete",async()=>{
   const f=await loaded();assert.match(f.$("page-status").textContent,/ありません/);assert.equal(f.$("page-delete-filter").disabled,true);
@@ -45,23 +46,23 @@ test("empty and locked states are distinct and cannot delete",async()=>{
 test("individual confirmation shows event date/title/URL, cancellation and keyboard restore focus",async()=>{
   const f=await loaded([pageRow(1)]);const group=groups(f)[0];expand(group).dispatch("click");await settle(5);
   const remove=history(group).children[0].children.at(-1);remove.dispatch("click");await settle(5);
-  assert.match(f.$("page-delete-description").textContent,/個別履歴/);assert.match(f.$("page-delete-description").textContent,/Page 1/);assert.match(f.$("page-delete-description").textContent,/元に戻せません/);
+  assert.match(allText(f.$("page-delete-description")),/個別履歴/);assert.match(allText(f.$("page-delete-description")),/Page 1/);assert.match(allText(f.$("page-delete-description")),/元に戻せません/);
   assert.equal(f.doc.activeElement,f.$("page-delete-cancel"));f.$("page-delete-dialog").dispatch("keydown",{key:"Tab"});assert.equal(f.doc.activeElement,f.$("page-delete-confirm"));
   f.$("page-delete-dialog").dispatch("keydown",{key:"Escape"});assert.equal(f.$("page-delete-dialog").hidden,true);assert.equal(f.doc.activeElement,remove);assert.equal(requests(f,"page_delete").length,0);f.panel.dispose();
 });
 test("URL confirmation removes all history, not just a loaded snapshot",async()=>{
   const url="https://synthetic.test/same";const f=await loaded([pageRow(1,url),pageRow(2,url),pageRow(3,url)]);
-  groupDelete(groups(f)[0]).dispatch("click");await settle(5);assert.match(f.$("page-delete-description").textContent,/URL全体/);assert.match(f.$("page-delete-description").textContent,/保存イベント 3件/);
+  groupDelete(groups(f)[0]).dispatch("click");await settle(5);assert.match(allText(f.$("page-delete-description")),/URL全体/);assert.match(allText(f.$("page-delete-description")),/保存イベント 3件/);
   f.$("page-delete-confirm").dispatch("click");await settle(10);assert.equal(f.host.rows.length,0);assert.equal(groups(f).length,0);assert.match(f.$("page-status").textContent,/削除しました/);f.panel.dispose();
 });
 test("unfiltered bulk explicitly confirms ALL database events beyond loaded groups",async()=>{
   const f=await loaded(Array.from({length:6},(_,i)=>pageRow(i+1)));assert.equal(groups(f).length,2);
-  f.$("page-delete-filter").dispatch("click");await settle(5);assert.match(f.$("page-delete-description").textContent,/全Page/);assert.match(f.$("page-delete-description").textContent,/保存イベント 6件/);
+  f.$("page-delete-filter").dispatch("click");await settle(5);assert.match(allText(f.$("page-delete-description")),/全Page/);assert.match(allText(f.$("page-delete-description")),/保存イベント 6件/);
   f.$("page-delete-confirm").dispatch("click");await settle(10);assert.equal(f.host.rows.length,0);f.panel.dispose();
 });
 test("filtered bulk confirms exact filter and all matches; keeps nonmatching rows",async()=>{
   const f=await loaded([pageRow(1,undefined,"needle"),pageRow(2),pageRow(3,undefined,"needle")]);f.$("page-query").value="needle";f.$("page-query").dispatch("input");f.tick(200);await settle(5);
-  f.$("page-delete-filter").dispatch("click");await settle(5);assert.match(f.$("page-delete-description").textContent,/検索条件: needle/);assert.match(f.$("page-delete-description").textContent,/DB上の一致全件/);
+  f.$("page-delete-filter").dispatch("click");await settle(5);assert.match(allText(f.$("page-delete-description")),/検索条件 needle/);assert.match(allText(f.$("page-delete-description")),/DB上の一致全件/);
   f.$("page-delete-confirm").dispatch("click");await settle(10);assert.deepEqual(f.host.rows.map((r)=>r.id),[2]);f.panel.dispose();
 });
 test("changed target rejects without optimistic deletion",async()=>{
@@ -118,7 +119,7 @@ test("each history row exports exactly its own save event; everything waits whil
   const url="https://synthetic.test/same";const f=await loaded([pageRow(1,url,"old"),pageRow(2,url,"new"),pageRow(3,"https://other.test/")]);
   const rows=await eventsOf(f,1);assert.equal(rows.length,2);
   const older=rows[1],button=exportButton(older);assert.equal(button.textContent,"MHTMLを書き出す");assert.notEqual(button,groups(f)[1].children[3]);assert.match(button.title,/保存ダイアログ/);
-  assert.equal(older.children.at(-1).textContent,"この保存履歴を削除");
+  assert.match(older.children.at(-1).getAttribute("aria-label"),/この保存履歴を削除/);
   const release=dialogGate(f,{fileName:"<img src=x onerror=1>.mhtml"});const before=f.host.requests.length;
   button.focus();button.dispatch("click");button.dispatch("click");exportButton(rows[0]).dispatch("click");await settle(5);
   const sent=requests(f,"page_export");assert.equal(sent.length,1);assert.deepEqual([sent[0].id,sent[0].saveId,sent[0].sha256],[1,"synthetic-save-1","1".padStart(64,"0")]);
@@ -166,4 +167,20 @@ test("a selection change noticed by the Host after the dialog invalidates the vi
   f.host.dialog=async()=>{f.host.generation="generation-A-after-B";return{fileName:"x.mhtml"};};
   exportButton(rows[0]).dispatch("click");await settle(10);
   assert.match(f.$("page-error").textContent,/Vaultが変更/);assert.equal(groups(f).length,0);assert.doesNotMatch(f.$("page-status").textContent,/書き出しました/);assert.equal(f.host.exports.length,0);f.panel.dispose();
+});
+const trashIcon=(el)=>el.children.some((c)=>c.className==="danger-icon"&&c.getAttribute("aria-hidden")==="true");
+test("Page deletion is one red trash design: icon only per history, icon and range label for URL and filter (Issue #7)",async()=>{
+  const url="https://synthetic.test/same";const f=await loaded([pageRow(1,url,"A"),pageRow(2,url,"B")]);
+  const group=groups(f)[0];const remove=groupDelete(group);
+  assert.ok(remove.className.split(" ").includes("danger-button"));assert.ok(trashIcon(remove));assert.equal(flatten(remove).trim(),"URL全件削除");assert.match(remove.getAttribute("aria-label"),/URL全件削除/);
+  const bulk=f.$("page-delete-filter");assert.ok(trashIcon(bulk));assert.equal(flatten(bulk).trim(),"全Pageを削除");
+  f.$("page-query").value="A";f.$("page-query").dispatch("input");f.tick(200);await settle(5);assert.equal(flatten(f.$("page-delete-filter")).trim(),"検索結果をすべて削除");
+  f.$("page-query").value="";f.$("page-query").dispatch("input");f.tick(200);await settle(5);
+  const rows=await eventsOf(f);for(const li of rows){const trash=li.children.at(-1);assert.ok(trash.className.split(" ").includes("danger-button")&&trash.className.split(" ").includes("icon-only"),"icon only");assert.ok(trashIcon(trash));assert.equal(flatten(trash).trim(),"");assert.match(trash.getAttribute("aria-label"),/この保存履歴を削除/);assert.match(trash.title,/この保存履歴を削除/);}
+  f.panel.dispose();
+});
+test("the Page delete confirmation names its range and keeps the review contract with the new buttons",async()=>{
+  const f=await loaded([pageRow(1),pageRow(2)]);f.$("page-delete-filter").dispatch("click");await settle(5);
+  assert.match(allText(f.$("page-delete-description")),/保存イベント 2件/);assert.equal(f.doc.activeElement,f.$("page-delete-cancel"),"nothing destructive is focused");
+  assert.ok(requests(f,"page_delete_preview").length===1&&requests(f,"page_delete").length===0);f.panel.dispose();
 });

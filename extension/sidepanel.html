@@ -37,6 +37,9 @@
         </div>
         <div id="record-status" class="record-status" role="status" hidden></div>
         <div id="queue-status" class="record-status" role="status" hidden></div>
+        <div class="toolbar-row toolbar-delete">
+          <button id="url-delete-all" type="button" class="danger-button" aria-haspopup="dialog" aria-controls="item-delete-dialog" hidden><span class="danger-icon" aria-hidden="true"></span><span class="danger-label"></span></button>
+        </div>
         <div id="url-item-status" class="record-status" role="status" aria-live="polite" hidden></div>
         <div id="policy-status" class="policy-status" role="alert" hidden>
           <p id="policy-message"></p>
@@ -72,6 +75,9 @@
           <span id="gallery-new-dot" class="new-dot" aria-hidden="true" hidden></span>
         </button>
       </div>
+      <div class="gallery-bulk">
+        <button id="gallery-delete-all" type="button" class="danger-button" aria-haspopup="dialog" aria-controls="item-delete-dialog" hidden><span class="danger-icon" aria-hidden="true"></span><span class="danger-label"></span></button>
+      </div>
       <p id="gallery-status" class="gallery-status" role="status" aria-live="polite"></p>
       <div id="gallery-error" class="error" role="alert" hidden>
         <p id="gallery-error-message"></p>
@@ -104,7 +110,6 @@
             <option value="" selected>操作を選択…</option>
             <option value="never_save">保存しないグループへ追加</option>
             <option value="save_but_no_mcp">MCPサーバに見せないグループへ追加</option>
-            <option value="delete">Vaultから削除</option>
             <option value="publish">公開</option>
           </select>
           <p id="gallery-manage-note" class="vault-meta" role="status" aria-live="polite"></p>
@@ -139,7 +144,7 @@
           <span id="page-status" class="summary" role="status" aria-live="polite"></span>
           <button id="page-refresh" type="button" class="secondary"></button>
         </div>
-        <button id="page-delete-filter" type="button" class="secondary" disabled aria-haspopup="dialog" aria-controls="page-delete-dialog"></button>
+        <button id="page-delete-filter" type="button" class="danger-button" disabled aria-haspopup="dialog" aria-controls="page-delete-dialog"><span class="danger-icon" aria-hidden="true"></span><span class="danger-label"></span></button>
       </header>
       <p id="page-note" class="vault-meta"></p>
       <p id="page-open-note" class="vault-meta"></p>
@@ -148,13 +153,23 @@
       <button id="page-more" type="button" class="secondary" hidden></button>
       <dialog id="page-delete-dialog" class="page-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="page-delete-title" aria-describedby="page-delete-description" hidden>
         <h2 id="page-delete-title"></h2>
-        <p id="page-delete-description"></p>
+        <div id="page-delete-description"></div>
         <div class="toolbar-row">
           <button id="page-delete-cancel" type="button" class="secondary"></button>
-          <button id="page-delete-confirm" type="button" disabled></button>
+          <button id="page-delete-confirm" type="button" class="danger-button" disabled><span class="danger-icon" aria-hidden="true"></span><span class="danger-label"></span></button>
         </div>
       </dialog>
     </section>
+
+    <dialog id="item-delete-dialog" class="page-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="item-delete-title" aria-describedby="item-delete-description" hidden>
+      <h2 id="item-delete-title"></h2>
+      <div id="item-delete-description"></div>
+      <p id="item-delete-error" class="item-dialog-error" role="alert" hidden></p>
+      <div class="toolbar-row">
+        <button id="item-delete-cancel" type="button" class="secondary"></button>
+        <button id="item-delete-confirm" type="button" class="danger-button" disabled><span class="danger-icon" aria-hidden="true"></span><span class="danger-label"></span></button>
+      </div>
+    </dialog>
 
     <section id="panel-settings" class="tabpanel" role="tabpanel" aria-labelledby="tab-settings" hidden>
       <section id="vault-panel" class="vault-panel" aria-labelledby="vault-heading">

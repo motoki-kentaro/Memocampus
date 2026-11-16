@@ -2,6 +2,7 @@
 // Only what the side panel uses is implemented; this is not a general DOM.
 
 import { pathToFileURL } from "node:url";
+import { createDeletePort } from "./delete-fixtures.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -156,7 +157,7 @@ export function createDocument() {
   for (const id of [
     "url-item-status", "gallery-manage-section", "item-dialog", "item-dialog-urls", "item-dialog-scope", "item-dialog-ack", "item-dialog-error", "item-dialog-repreview", "item-dialog-settings",
     "panel-image", "panel-page", "panel-settings", "settings-attention", "error", "empty", "load-more", "open-vault-settings", "record-status", "queue-status", "policy-status", "policy-initialize", "vault-approval",
-    "page-new-dot", "page-error", "page-more", "page-delete-dialog",
+    "page-new-dot", "page-error", "page-more", "page-delete-dialog", "item-delete-dialog", "item-delete-error", "url-delete-all", "gallery-delete-all",
     "vault-publication", "vault-publication-confirm", "vault-publication-revoke", "vault-publication-review",
     "gallery-new-dot", "gallery-error", "gallery-open-settings", "gallery-empty", "gallery-more", "gallery-details", "gallery-sources-more", "gallery-menu",
     "gallery-filter", "gallery-tags-empty", "gallery-tag-picker", "gallery-tag-picker-more",
@@ -168,12 +169,12 @@ export function createDocument() {
     document.querySelector(`#${id}`).hidden = true;
   }
   // Initial `disabled` state as written in sidepanel.html.
-  for (const id of ["visit-calendar-open", "gallery-tag-filter", "gallery-tag-input", "gallery-tag-add", "gallery-tag-choose", "gallery-manage", "item-dialog-confirm"]) {
+  for (const id of ["item-delete-confirm", "visit-calendar-open", "gallery-tag-filter", "gallery-tag-input", "gallery-tag-add", "gallery-tag-choose", "gallery-manage", "item-dialog-confirm"]) {
     document.querySelector(`#${id}`).disabled = true;
   }
   // The options of the image's drop-down, and the checked scope, as written in sidepanel.html.
   const manage = document.querySelector("#gallery-manage");
-  for (const [value, text] of [["", "操作を選択…"], ["never_save", "保存しないグループへ追加"], ["save_but_no_mcp", "MCPサーバに見せないグループへ追加"], ["delete", "Vaultから削除"], ["publish", "公開"]]) {
+  for (const [value, text] of [["", "操作を選択…"], ["never_save", "保存しないグループへ追加"], ["save_but_no_mcp", "MCPサーバに見せないグループへ追加"], ["publish", "公開"]]) {
     const option = new FakeElement(document, "option");
     option.value = value;
     option.textContent = text;
@@ -304,37 +305,10 @@ function handleItems(host, message) {
     host.policyWrites += plan.changes.length > 0 ? 1 : 0;
     return reply({ etag: `etag-${host.itemPolicy.revision}`, revision: host.itemPolicy.revision, ...echo, previous: plan.current, decision: itemDecision(host.itemPolicy, message.url), changed: plan.changes.length > 0, changes: plan.changes });
   }
-  if (!host.active) return fail("vault_not_configured");
-  const vault = host.active;
-  const vaultToken = tokenOf(vault);
-  if (message.type === "url_delete_preview" || message.type === "url_delete") {
-    const stored = host.vaults[vault].filter((page) => page.url === message.url).length;
-    const counts = { visits: stored, tabSnapshots: 0, pageMetadata: stored, navigations: 0, navigationSourcesCleared: host.navigationSources ?? 0, imageSavesKept: host.imageSavesKept ?? 0 };
-    if (message.type === "url_delete_preview") return reply({ vaultToken, url: message.url, counts, irreversible: true });
-    if (message.vaultToken !== vaultToken) return fail("vault_switched");
-    host.vaults[vault] = host.vaults[vault].filter((page) => page.url !== message.url);
-    host.deletedUrls.push(message.url);
-    return reply({ vaultToken, url: message.url, deleted: counts, irreversible: true });
-  }
-  if (message.type === "image_delete_preview" || message.type === "image_delete") {
-    const all = host.images[vault] ?? [];
-    const item = all.find((candidate) => candidate.blobId === message.blobId && candidate.sha256 === message.sha256);
-    if (message.type === "image_delete" && message.vaultToken !== vaultToken) return fail("vault_switched");
-    if (!item) return fail("blob_missing");
-    const tags = host.tags[vault]?.[item.blobId] ?? [];
-    const others = Object.entries(host.tags[vault] ?? {}).filter(([id]) => Number(id) !== item.blobId).flatMap(([, names]) => names);
-    const counts = { saves: item.sources?.length ?? item.saveCount, thumbnails: item.hasThumbnail ? 1 : 0, tagLinks: tags.length, tagsRemoved: tags.filter((name) => !others.includes(name)).length };
-    const fields = { vaultToken, blobId: item.blobId, sha256: item.sha256, irreversible: true };
-    if (message.type === "image_delete_preview") return reply({ ...fields, byteLength: item.byteLength, counts });
-    host.images[vault] = all.filter((candidate) => candidate !== item);
-    if (host.tags[vault]) delete host.tags[vault][item.blobId];
-    host.deletedImages.push(item.blobId);
-    return reply({ ...fields, deleted: counts });
-  }
   return fail("unknown_type");
 }
 
-const ITEM_TYPES = new Set(["host_capabilities", "policy_evaluate_batch", "policy_item_preview", "policy_item_apply", "url_delete_preview", "url_delete", "image_delete_preview", "image_delete"]);
+const ITEM_TYPES = new Set(["host_capabilities", "policy_evaluate_batch", "policy_item_preview", "policy_item_apply"]);
 
 const PNG_THUMBNAIL = Buffer.from("89504e470d0a1a0a0000000d4948445200000004000000020806000000000000000000000049454e44ae426082", "hex").toString("base64");
 
@@ -790,6 +764,8 @@ function createChrome(host) {
       host.optionsOpened = (host.optionsOpened ?? 0) + 1;
     },
     onMessage: { addListener: (listener) => host.runtimeListeners.push(listener) },
+    // The lasting port of reviewed deletion (and Page management, which tests replace with their own).
+    connectNative: () => createDeletePort(host),
     sendNativeMessage(_name, message, callback) {
       if (host.disconnected) {
         host.requests.push(structuredClone(message));

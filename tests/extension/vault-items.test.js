@@ -1,4 +1,4 @@
-// Issue #43, Slice 1: policy changes for one URL and deletions, as MCP sees them next (opt-in).
+// Issue #43, Slice 1 and Issue #7: policy changes for one URL and reviewed deletions, as MCP sees them next (opt-in).
 //
 // MEMOCAMPUS_TEST_HOST=<built memocampus-native-host> and MEMOCAMPUS_TEST_MCP=<built memocampus-mcp>
 // run the real host and the real MCP server in a temporary MEMOCAMPUS_APP_DIR with a fresh vault and
@@ -44,8 +44,36 @@ test("end to end with the real host and MCP: a URL hidden, published, deleted; a
       length.writeUInt32LE(body.length);
       child.stdin.end(Buffer.concat([length, body]));
     });
+  // One lasting port, as connectNative gives: one host process, answers read one by one.
+  const openPort = () => {
+    const child = spawn(HOST_BIN, [], { env, cwd: appDir, stdio: ["pipe", "pipe", "pipe"] });
+    child.stderr.resume();
+    child.stdin.on("error", () => {});
+    let buffer = Buffer.alloc(0);
+    const waiting = [];
+    child.stdout.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (buffer.length >= 4 && buffer.length >= 4 + buffer.readUInt32LE(0)) {
+        const length = buffer.readUInt32LE(0);
+        const value = JSON.parse(buffer.subarray(4, 4 + length).toString("utf8"));
+        buffer = buffer.subarray(4 + length);
+        waiting.shift()?.(value);
+      }
+    });
+    return {
+      send: (message) => new Promise((resolve) => {
+        waiting.push(resolve);
+        const body = Buffer.from(JSON.stringify(message), "utf8");
+        const length = Buffer.alloc(4);
+        length.writeUInt32LE(body.length);
+        child.stdin.write(Buffer.concat([length, body]));
+      }),
+      close: () => child.kill(),
+    };
+  };
   const vault = path.join(appDir, "memocampus.sqlite3");
   let mcp;
+  let port;
   try {
     const { seedLegacyPolicy } = await import("./real-processes.js");
     seedLegacyPolicy(appDir);
@@ -106,13 +134,31 @@ test("end to end with the real host and MCP: a URL hidden, published, deleted; a
     await change(PAGE, "publish");
     assert.equal(await images(), true);
 
-    // Deletions: gone from MCP too.
-    const preview = await call({ type: "url_delete_preview", requestId: "d", url: B });
-    assert.equal(preview.counts.visits, 1);
-    assert.equal((await call({ type: "url_delete", requestId: "d", url: B, vaultToken: preview.vaultToken })).ok, true);
+    // Deletions (Issue #7), each reviewed on one port: gone from MCP at once, nothing else touched.
+    port = openPort();
+    const state = await port.send({ type: "item_state", requestId: "s" });
+    const reviewed = async (target) => {
+      const bind = (fields) => ({ requestId: "r", vaultToken: state.vaultToken, generation: state.generation, ...fields });
+      const preview = await port.send(bind({ type: "item_delete_preview", target }));
+      assert.equal(preview.ok, true, JSON.stringify(preview));
+      const done = await port.send(bind({ type: "item_delete", reviewId: preview.reviewId }));
+      assert.equal(done.ok, true, JSON.stringify(done));
+      return { preview, done };
+    };
+    // The old one-shot messages are gone.
+    assert.equal((await call({ type: "url_delete", requestId: "d", url: B, vaultToken: state.vaultToken })).ok, false);
+    // One visit of A (hidden from MCP by the host rule): only that event goes.
+    await reviewed({ scope: "visit", id: "a1" });
+    const afterEvent = new DatabaseSync(vault, { readOnly: true });
+    assert.deepEqual(afterEvent.prepare("SELECT event_id FROM visits ORDER BY event_id").all().map((row) => row.event_id), ["a2", "b1", "q1"]);
+    afterEvent.close();
+    assert.deepEqual(await visible(), [B]);
+    // The visits a search for "title b1" finds: B's visit is gone from MCP at once; the others stay.
+    const range = await reviewed({ scope: "visits", query: "title b1" });
+    assert.equal(range.preview.counts.visits, 1);
     assert.deepEqual(await visible(), []);
-    const deleted = await call({ type: "image_delete", requestId: "i", blobId: 1, sha256: "a".repeat(64), vaultToken: preview.vaultToken });
-    assert.equal(deleted.ok, true, JSON.stringify(deleted));
+    // The image, by the unit the tile shows.
+    await reviewed({ scope: "image", blobId: 1, sha256: "a".repeat(64) });
     assert.equal(await images(), false);
 
     const check = new DatabaseSync(vault, { readOnly: true });
@@ -120,11 +166,12 @@ test("end to end with the real host and MCP: a URL hidden, published, deleted; a
       assert.equal(check.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
       assert.deepEqual(check.prepare("PRAGMA foreign_key_check").all(), []);
       assert.equal(check.prepare("SELECT count(*) AS n FROM image_blobs").get().n, 0);
-      assert.deepEqual(check.prepare("SELECT url FROM visits ORDER BY url").all().map((row) => row.url), [A, A, A_OTHER_QUERY]);
+      assert.deepEqual(check.prepare("SELECT event_id FROM visits ORDER BY event_id").all().map((row) => row.event_id), ["a2", "q1"]);
     } finally {
       check.close();
     }
   } finally {
+    port?.close();
     await mcp?.close();
     rmSync(appDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

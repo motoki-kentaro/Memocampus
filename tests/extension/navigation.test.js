@@ -361,12 +361,13 @@ test("events of one tab keep their order while another tab is waiting", async ()
 test("the host's capabilities: navigation_v1 only when named; an old host is told apart from a stopped one", async () => {
   const id = () => "r1";
   const answer = (response) => checkHostCapabilities({ send: async () => response, createId: id });
-  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION] }), { ok: true, navigation: true, vaultItems: false, visitCalendar: false });
-  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION, "vault_items_v1"] }), { ok: true, navigation: true, vaultItems: true, visitCalendar: false });
-  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION, "vault_items_v1", "visit_calendar_v1"] }), { ok: true, navigation: true, vaultItems: true, visitCalendar: true });
-  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: ["visit_calendar_v1"] }), { ok: true, navigation: false, vaultItems: false, visitCalendar: true });
-  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: ["something_else"] }), { ok: true, navigation: false, vaultItems: false, visitCalendar: false });
-  assert.deepEqual(await answer({ ok: false, eventId: null, error: "unknown_type" }), { ok: true, navigation: false, vaultItems: false, visitCalendar: false }, "a host from before #41");
+  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION] }), { ok: true, navigation: true, vaultItems: false, visitCalendar: false, itemDelete: false });
+  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION, "vault_items_v1"] }), { ok: true, navigation: true, vaultItems: true, visitCalendar: false, itemDelete: false });
+  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION, "vault_items_v1", "visit_calendar_v1"] }), { ok: true, navigation: true, vaultItems: true, visitCalendar: true, itemDelete: false });
+  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: ["item_delete_v1"] }), { ok: true, navigation: false, vaultItems: false, visitCalendar: false, itemDelete: true });
+  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: ["visit_calendar_v1"] }), { ok: true, navigation: false, vaultItems: false, visitCalendar: true, itemDelete: false });
+  assert.deepEqual(await answer({ ok: true, type: "host_capabilities_result", requestId: "r1", capabilities: ["something_else"] }), { ok: true, navigation: false, vaultItems: false, visitCalendar: false, itemDelete: false });
+  assert.deepEqual(await answer({ ok: false, eventId: null, error: "unknown_type" }), { ok: true, navigation: false, vaultItems: false, visitCalendar: false, itemDelete: false }, "a host from before #41");
   for (const response of [
     { ok: true, type: "host_capabilities_result", requestId: "other", capabilities: [CAPABILITY_NAVIGATION] },
     { ok: true, type: "policy_result", requestId: "r1", capabilities: [CAPABILITY_NAVIGATION] },
@@ -776,7 +777,7 @@ test("a host that stops before the capability answer keeps the visit queued with
 
 const HOST_BIN = process.env.MEMOCAMPUS_TEST_HOST;
 
-test("end to end with the real host: navigations stored in a fresh schema 8 vault, privacy kept", { skip: HOST_BIN ? false : "set MEMOCAMPUS_TEST_HOST to run" }, async () => {
+test("end to end with the real host: navigations stored in a fresh schema 9 vault, privacy kept", { skip: HOST_BIN ? false : "set MEMOCAMPUS_TEST_HOST to run" }, async () => {
   const { spawn } = await import("node:child_process");
   const { mkdtempSync, rmSync } = await import("node:fs");
   const os = await import("node:os");
@@ -804,7 +805,7 @@ test("end to end with the real host: navigations stored in a fresh schema 8 vaul
     const { seedLegacyPolicy } = await import("./real-processes.js");
     seedLegacyPolicy(appDir);
     assert.equal((await call({ type: "vault_create", requestId: "c", useDefault: true })).ok, true);
-    assert.deepEqual((await call({ type: "host_capabilities", requestId: "h" })).capabilities, [CAPABILITY_NAVIGATION, "vault_items_v1", "visit_calendar_v1"]);
+    assert.deepEqual((await call({ type: "host_capabilities", requestId: "h" })).capabilities, [CAPABILITY_NAVIGATION, "vault_items_v1", "visit_calendar_v1", "item_delete_v1"]);
     const worker = await startWorker({ transport: call });
     await worker.document(1, "d1", A, { transitionType: "typed", qualifiers: ["from_address_bar"] });
     await worker.document(1, "d2", B, { seconds: 1 });
@@ -821,7 +822,7 @@ test("end to end with the real host: navigations stored in a fresh schema 8 vaul
     assert.deepEqual([status.navigationInvalid, status.navigationNotStored, status.deadLetters], [0, 0, 0]);
     const db = new DatabaseSync(path.join(appDir, "memocampus.sqlite3"), { readOnly: true });
     try {
-      assert.equal(db.prepare("PRAGMA user_version").get().user_version, 8);
+      assert.equal(db.prepare("PRAGMA user_version").get().user_version, 9);
       const rows = db
         .prepare(
           `SELECT t.url AS target, s.url AS source, n.kind, n.transition_type, n.from_address_bar, n.new_tab, n.forward_back, n.occurred_at

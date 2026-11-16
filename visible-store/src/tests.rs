@@ -4038,7 +4038,7 @@ fn navigation_events_never_reach_a_reader_and_a_vault_without_them_is_refused() 
         ("priv-b", None),
     ] {
         db.execute(
-            "INSERT INTO navigation_events VALUES (?1, ?2, 'document', 'link', 0, 0, 0, 0, 1, '2026-11-06T12:00:00.000Z')",
+            "INSERT INTO navigation_events (target_visit_id, source_visit_id, kind, transition_type, client_redirect, server_redirect, forward_back, from_address_bar, new_tab, occurred_at) VALUES (?1, ?2, 'document', 'link', 0, 0, 0, 0, 1, '2026-11-06T12:00:00.000Z')",
             params![target, source],
         )
         .unwrap();
@@ -4063,7 +4063,7 @@ fn navigation_events_never_reach_a_reader_and_a_vault_without_them_is_refused() 
     let path = f.dir.join("schema-5-shape.sqlite3");
     Connection::open(&path)
         .unwrap()
-        .execute_batch(&sql.replace("PRAGMA user_version = 8;", "PRAGMA user_version = 5;"))
+        .execute_batch(&sql.replace("PRAGMA user_version = 9;", "PRAGMA user_version = 5;"))
         .unwrap();
     let store = VisibleStore::ungated(path, f.app.clone()).unwrap();
     assert_failed(store.search_visits(&ALL), VisibleError::VaultSchemaMismatch);
@@ -4072,7 +4072,7 @@ fn navigation_events_never_reach_a_reader_and_a_vault_without_them_is_refused() 
     // Schema 6 (Issue #44: no image tags; the tag objects are the last ones created) is refused too.
     let sql = schema::create_sql();
     let start = sql.find(" CREATE TABLE image_tags ").unwrap();
-    let schema_6 = sql[..start].replace("PRAGMA user_version = 8;", "PRAGMA user_version = 6;");
+    let schema_6 = sql[..start].replace("PRAGMA user_version = 9;", "PRAGMA user_version = 6;");
     assert!(!schema_6.contains("image_tag") && schema_6.contains("user_version = 6;"));
     let path = f.dir.join("schema-6-shape.sqlite3");
     Connection::open(&path)

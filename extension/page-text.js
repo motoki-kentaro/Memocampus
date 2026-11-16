@@ -2,15 +2,14 @@
 import { formatFullDate } from "./format.js";
 export const PAGE_TEXT = Object.freeze({
   tab: "Page", search: "保存したPageのURL・タイトルで検索", refresh: "更新", more: "さらに表示",
-  bulk: "条件一致を一括削除", all: "すべてのPageを削除", open: "元のWebページを開く", openNote: "現在のWebページへ再訪問します。保存済みMHTMLの表示ではありません。",
-  groupDelete: "URL全体を削除", eventDelete: "この保存履歴を削除", untitled: "（タイトルなし）",
+  bulk: "検索結果をすべて削除", all: "全Pageを削除", open: "元のWebページを開く", openNote: "現在のWebページへ再訪問します。保存済みMHTMLの表示ではありません。",
+  groupDelete: "URL全件削除", eventDelete: "この保存履歴を削除", untitled: "（タイトルなし）",
   eventExport: "MHTMLを書き出す", exportNote: "この保存履歴のMHTML原本を、Windowsの保存ダイアログで選んだ場所へそのまま書き出します。",
   exporting: "保存ダイアログで保存先を選んでください。完了するまでPageの操作は待機します…", exportCancelled: "書き出しをキャンセルしました。ファイルは変更していません。",
   loading: "Pageを読み込んでいます…", empty: "一致する保存済みPageはありません。", initial: "Pageタブを開くと保存履歴を読み込みます。",
   scopeNote: "URLは完全一致でまとめます。検索はURL・タイトルの部分一致（英字は大文字小文字を区別せず、その他のUnicodeは区別）。検索中の履歴と一括削除は一致する保存イベントのみが対象です。保存履歴ごとにMHTML原本をファイルへ書き出せます。本文検索・MHTML表示は未対応です。",
-  newItems: "新しい保存があります。更新してください。", confirmTitle: "Pageの削除確認", cancel: "キャンセル", confirm: "確認した対象を削除",
-  irreversible: "削除すると元に戻せません。共有されるMHTML原本は他の履歴が参照している限り残ります。バックアップには残る場合があります。",
-  deleting: "削除を確定しています…", deleted: "確認した保存履歴を削除しました。", retry: "再読込", close: "閉じる",
+  newItems: "新しい保存があります。更新してください。", confirmTitle: "Pageの削除確認", cancel: "キャンセル", confirm: "削除する",
+  deleting: "削除中…", deleted: "確認した保存履歴を削除しました。", retry: "再読込", close: "閉じる",
 });
 const ERRORS = Object.freeze({
   vault_locked: "Vaultがロックされています。設定画面で状態を確認してください。",
@@ -44,9 +43,17 @@ export const summaryText = (n) => `読み込み済み ${n.toLocaleString("ja-JP"
 export const exportedText = (result) => result.previousFileLeft
   ? `「${result.fileName}」にMHTML原本を書き出しました。置き換え前のファイルは削除できず、同じフォルダーに「.memocampus-old」で終わる名前で残っています。`
   : `「${result.fileName}」にMHTML原本を書き出しました。`;
-export function deletionText(preview) {
+/** The Page confirmation as the sections of delete-ui.js's renderDeletion (name next to value; the web's text only as text). */
+export function deletionModel(preview) {
   const { target, counts, event } = preview;
-  const scope = target.scope === "event" ? `個別履歴: ${pageDate(event.savedAt)}\n${event.title}\n${event.url}`
-    : target.scope === "url" ? `URL全体: ${target.url}` : target.query === "" ? "全Pageの保存イベントが対象です（フィルターなし）。" : `検索条件: ${target.query}\n画面の読み込み範囲ではなく、DB上の一致全件が対象です。`;
-  return `${scope}\n保存イベント ${counts.events.toLocaleString("ja-JP")}件・URL ${counts.urls.toLocaleString("ja-JP")}件\n原本削除 ${counts.blobsRemoved.toLocaleString("ja-JP")}件・共有原本保持 ${counts.blobsKept.toLocaleString("ja-JP")}件\n削除原本 ${pageBytes(counts.bytesRemoved)}\n${PAGE_TEXT.irreversible}`;
+  const num = (v) => `${Number(v).toLocaleString("ja-JP")}件`;
+  const targetRows = target.scope === "event" ? [{ label: "対象", value: "個別履歴" }, { label: "日時", value: pageDate(event.savedAt) }, { label: "タイトル", value: event.title, long: true }, { label: "URL", value: event.url, long: true }]
+    : target.scope === "url" ? [{ label: "対象", value: "URL全体" }, { label: "URL", value: target.url, long: true }]
+    : target.query === "" ? [{ label: "対象", value: "全Pageの保存イベント（フィルターなし）" }]
+    : [{ label: "対象", value: "検索に一致するPage" }, { label: "検索条件", value: target.query, long: true }];
+  return {
+    target: targetRows,
+    effects: [{ label: "保存イベント", value: num(counts.events) }, { label: "URL", value: num(counts.urls) }, { label: "原本削除", value: num(counts.blobsRemoved) }, { label: "共有原本保持", value: num(counts.blobsKept) }, { label: "削除原本", value: pageBytes(counts.bytesRemoved) }],
+    notes: [...(target.scope === "event" || target.scope === "url" || target.query === "" ? [] : ["画面の読み込み範囲ではなく、DB上の一致全件が対象です。"]), "共有されるMHTML原本は他の履歴が参照している限り残ります。"],
+  };
 }

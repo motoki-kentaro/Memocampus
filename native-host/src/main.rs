@@ -12,6 +12,7 @@ mod image_publication;
 mod image_query;
 mod image_tags;
 mod images;
+mod item_delete;
 mod launch;
 mod location;
 mod manage;
@@ -337,17 +338,19 @@ fn visit_days_response(
 
 /// Visits may carry `navigation` (`navigation.rs`) and are acknowledged with `navigation`.
 const CAPABILITY_NAVIGATION: &str = "navigation_v1";
-/// `policy_item_*`, `url_delete*` and `image_delete*` (Issue #43; `vault_items.rs`,
+/// `policy_item_*` (Issue #43; `vault_items.rs`,
 /// `policy_gate/items.rs`).
 const CAPABILITY_VAULT_ITEMS: &str = "vault_items_v1";
 /// `visit_days`, and the date range of `search_pages` (Issue #5; `visit_days.rs`, `search.rs`).
 const CAPABILITY_VISIT_CALENDAR: &str = "visit_calendar_v1";
+/// `item_*` and `visit_history` (Issue #7): reviewed deletion of visits, URLs and images on a lasting port.
+const CAPABILITY_ITEM_DELETE: &str = "item_delete_v1";
 
 /// What this host can store, for an extension to ask before it sends anything new:
 ///
 /// ```text
 /// → { type: "host_capabilities", requestId }
-/// ← { ok: true, type: "host_capabilities_result", requestId, capabilities: ["navigation_v1", "vault_items_v1", "visit_calendar_v1"] }
+/// ← { ok: true, type: "host_capabilities_result", requestId, capabilities: ["navigation_v1", "vault_items_v1", "visit_calendar_v1", "item_delete_v1"] }
 /// ```
 ///
 /// A host from before Issue #41 answers this as an unknown event: `{ ok: false, eventId: null,
@@ -356,7 +359,7 @@ fn capabilities(message: &serde_json::Value) -> serde_json::Value {
     const RESULT: &str = "host_capabilities_result";
     match search::request_id(message) {
         Some(id) => serde_json::json!({
-            "ok": true, "type": RESULT, "requestId": id, "capabilities": [CAPABILITY_NAVIGATION, CAPABILITY_VAULT_ITEMS, CAPABILITY_VISIT_CALENDAR],
+            "ok": true, "type": RESULT, "requestId": id, "capabilities": [CAPABILITY_NAVIGATION, CAPABILITY_VAULT_ITEMS, CAPABILITY_VISIT_CALENDAR, CAPABILITY_ITEM_DELETE],
         }),
         None => serde_json::json!({
             "ok": false, "type": RESULT, "requestId": null, "error": "invalid_request_id",
@@ -438,6 +441,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut uploads = image_protocol::Uploads::default();
     let mut page_uploads = page_protocol::Uploads::default();
     let mut page_manager = page_manage::Manager::default();
+    let mut item_deleter = item_delete::Manager::default();
     // One read permit at a time: no speculative allocations while a Page port is waiting. The
     // main thread expires an abandoned Page operation even if stdin remains open forever.
     let (permit, permits) = std::sync::mpsc::sync_channel(0);
@@ -502,6 +506,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 | "page_delete"
                 | "page_delete_status",
             ) => write_message(&page_manager.handle(&mut session, &value))?,
+            Some(
+                "item_state"
+                | "visit_history"
+                | "item_delete_preview"
+                | "item_delete"
+                | "item_delete_status",
+            ) => write_message(&item_deleter.handle(&mut session, &value))?,
             Some("page_export") => write_message(&page_manager.export(
                 &mut session,
                 &dialog::NativeDialogs,
@@ -585,9 +596,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some("policy_apply") => write_message(&gate.apply(&value))?,
             Some("policy_item_preview") => write_message(&gate.item_preview(&value))?,
             Some("policy_item_apply") => write_message(&gate.item_apply(&value))?,
-            Some("url_delete_preview" | "url_delete" | "image_delete_preview" | "image_delete") => {
-                write_message(&vault_items::handle(&mut session, &value))?;
-            }
             Some("policy_start") => {
                 // Opening the active vault creates nothing; without one, recording cannot start.
                 let vault = session.read(|_| ()).map_err(vault::VaultError::code);

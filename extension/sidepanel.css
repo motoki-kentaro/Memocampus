@@ -44,8 +44,76 @@
 .page-event { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .page-delete-dialog { position: fixed; inset: 8% 10px; margin: auto; width: calc(100% - 20px); max-height: 84%; overflow: auto; color: var(--fg); background: var(--bg); border: 2px solid var(--accent); border-radius: 8px; padding: 16px; }
 .page-delete-dialog::backdrop { background: #0008; }
-#page-delete-description { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The deletion confirmation (URL, Image and Page): sections, name/value rows, one separate warning. */
+.page-delete-dialog h2 { margin: 0 0 10px; font-size: 16px; }
+.delete-review { display: grid; gap: 10px; min-width: 0; }
+.delete-section { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; min-width: 0; }
+.delete-section h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.delete-facts { display: grid; gap: 6px; margin: 0; }
+.delete-fact { display: grid; grid-template-columns: minmax(5.5em, 38%) minmax(0, 1fr); gap: 2px 10px; }
+.delete-fact dt { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.delete-fact dd { margin: 0; overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
+.delete-fact dd.delete-long { white-space: pre-wrap; word-break: break-all; }
+.delete-notes { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.delete-warning { margin: 0; padding: 8px 10px; border: 1px solid var(--danger); border-left-width: 4px; border-radius: 6px; background: var(--error-bg); color: var(--error-fg); overflow-wrap: anywhere; }
+.delete-warning strong { display: block; }
+.page-delete-dialog .toolbar-row { flex-wrap: wrap; margin-top: 12px; }
+@media (max-width: 300px) { .delete-fact { grid-template-columns: 1fr; } }
+@media (forced-colors: active) { .delete-warning, .delete-section { border-color: CanvasText; background: Canvas; color: CanvasText; } }
 
+/* Deletion (Issue #7): one red button with assets/delete.svg (a mask, so it takes the button's text colour)
+   for URL, Image and Page. Icon only for one item, icon and label for a range. */
+:root { --danger: #b3261e; --on-danger: #ffffff; }
+@media (prefers-color-scheme: dark) { :root { --danger: #f2b8b5; --on-danger: #601410; } }
+button.danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  color: var(--on-danger);
+  background: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+button.danger-button.icon-only { padding: 4px; flex: none; }
+button.danger-button:hover:not(:disabled) { background: var(--danger); filter: brightness(1.12); }
+button.danger-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.danger-button:disabled { opacity: 0.45; cursor: default; }
+button.danger-button[hidden] { display: none; }
+button.danger-button .danger-label { overflow-wrap: anywhere; }
+.danger-icon {
+  flex: none;
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  background-color: currentColor;
+  -webkit-mask: url("assets/delete.svg") center / contain no-repeat;
+  mask: url("assets/delete.svg") center / contain no-repeat;
+}
+@media (forced-colors: active) {
+  button.danger-button { forced-color-adjust: none; color: ButtonText; background: ButtonFace; border-color: ButtonText; }
+  .danger-icon { forced-color-adjust: none; background-color: ButtonText; }
+  button.danger-button:disabled .danger-icon { background-color: GrayText; }
+}
+.toolbar-delete, .gallery-bulk { display: flex; padding: 0 10px 6px; }
+.toolbar-delete:has(button[hidden]), .gallery-bulk:has(button[hidden]) { display: none; }
+.visit-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 10px 6px; }
+.visit-tools[hidden], .visit-history[hidden] { display: none; }
+.visit-history { padding: 0 10px 8px 22px; }
+.visit-events { list-style: none; margin: 0; padding: 0; }
+.visit-event { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid var(--border); }
+.results > li .visit-event { border-bottom: 0; }
+.visit-event-text { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+.visit-event-title { color: var(--muted); font-size: 12px; }
+.visit-history-note { margin: 2px 0 6px; color: var(--muted); font-size: 12px; }
+.gallery-item { position: relative; }
+.tile-trash { position: absolute; top: 3px; right: 3px; }
 html, body { height: 100%; }
 
 body {

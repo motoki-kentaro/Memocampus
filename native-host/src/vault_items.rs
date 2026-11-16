@@ -1,21 +1,7 @@
-//! Removing one stored URL, or one stored image, from the active vault (Issue #43, Slice 1).
-//!
-//! ```text
-//! → url_delete_preview   { url }
-//! ← url_delete_preview_result   { vaultToken, url, counts, irreversible: true }
-//! → url_delete           { url, vaultToken }
-//! ← url_delete_result           { vaultToken, url, deleted: counts, irreversible: true }
-//! → image_delete_preview { blobId, sha256 }
-//! ← image_delete_preview_result { vaultToken, blobId, sha256, byteLength, counts, irreversible: true }
-//! → image_delete         { blobId, sha256, vaultToken }
-//! ← image_delete_result         { vaultToken, blobId, sha256, deleted: counts, irreversible: true }
-//! ```
-//!
-//! Every message also carries `requestId`, and every reply `ok`, `type` and `requestId`; a failure
-//! is `{ ok: false, error }` and has changed nothing. The two deletions are one transaction each,
-//! committed before the reply is written: there is no success without the commit, and any error
-//! rolls the whole of it back. Nothing goes to a trash: the rows are gone (`irreversible`). Backups
-//! are separate files and are not touched. The file does not shrink (no VACUUM).
+//! The deletion cores of one stored URL and one stored image (Issue #43), used by `item_delete`
+//! (Issue #7), which is the only message path to them: a preview fixes the exact set, a review id
+//! confirms it once, on one lasting port. The one-shot `url_delete*` / `image_delete*` messages of
+//! Issue #43 no longer exist.
 //!
 //! **A URL** is a row of `search_pages`: exactly that `url` text, in `visits` and `tab_snapshots`.
 //! Deleting it removes every visit and tab snapshot of it, its page metadata, and the navigation of
@@ -24,28 +10,18 @@
 //! other URL and no image is deleted: images saved from the page stay (`imageSavesKept`). The policy
 //! is not read or changed, so the URL is recorded again on the next visit if the policy allows it.
 //!
-//! `counts` (preview) and `deleted` are `{ visits, tabSnapshots, pageMetadata, navigations,
-//! navigationSourcesCleared, imageSavesKept }`. The preview and the deletion name the same thing
-//! (the URL text and the vault); a deletion of a URL with nothing stored is a no-op of zero counts.
-//!
 //! **An image** is an item of `image_list`: the distinct bytes (`blobId`, `sha256`). Deleting it
 //! removes every save of it (`saved_images`: its save history), its bytes (`image_blobs`), its
 //! thumbnail and its tag links (`ON DELETE CASCADE`), and each of its tags no other image has (the
 //! vault's trigger `image_tags_drop_unused`). No visit, URL or other image is touched.
-//! `counts` and `deleted` are `{ saves, thumbnails, tagLinks, tagsRemoved }`.
 //!
-//! Writes name the vault (`vaultToken`, as given by the preview or `image_list`): a request for
-//! another vault fails with `vault_switched`, checked again under the write lock. An image whose id
-//! is unknown or now names other bytes fails with `blob_missing`, as for tags.
+//! Nothing goes to a trash: the rows are gone. Backups are separate files and are not touched. The
+//! file does not shrink (no VACUUM).
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
-use serde_json::{json, Map, Value};
 
-use crate::image_original::{target, ticket_for};
 use crate::images::ImageError;
-use crate::search::request_id;
-use crate::vault::Session;
 
 /// As the policy engine's limit on URLs; a stored URL is never longer.
 pub const MAX_URL_CHARS: usize = 32_768;
@@ -103,6 +79,15 @@ pub fn url_counts(db: &Connection, url: &str) -> rusqlite::Result<UrlCounts> {
 /// result is checked: if anything of the URL is left, the whole deletion fails (and rolls back).
 pub fn delete_url(db: &Connection, url: &str) -> Result<UrlCounts, ImageError> {
     let counts = url_counts(db, url)?;
+    // A navigation of another URL that came from one of these visits stays, and says its source was
+    // deleted on purpose (`source_censored`, Issue #7) instead of looking like one that was never known.
+    // The source is cleared here, in the same statement, so the table's CHECK holds (SET NULL would too).
+    let censored = db.execute(
+        "UPDATE navigation_events SET source_visit_id = NULL, source_censored = 1
+          WHERE source_visit_id IN (SELECT event_id FROM visits WHERE url = ?1)
+            AND target_visit_id NOT IN (SELECT event_id FROM visits WHERE url = ?1)",
+        [url],
+    )? as i64;
     // The metadata row goes with its visit (CASCADE); a row of this URL is removed in any case.
     db.execute("DELETE FROM page_metadata WHERE url = ?1", [url])?;
     let visits = db.execute("DELETE FROM visits WHERE url = ?1", [url])?;
@@ -113,6 +98,7 @@ pub fn delete_url(db: &Connection, url: &str) -> Result<UrlCounts, ImageError> {
         ..UrlCounts::default()
     };
     if visits as i64 != counts.visits
+        || censored != counts.navigation_sources_cleared
         || snapshots as i64 != counts.tab_snapshots
         || left != expected_left
     {
@@ -182,101 +168,6 @@ pub fn delete_image(
         return Err(ImageError::Db);
     }
     Ok(counts)
-}
-
-fn url_of(message: &Value) -> Result<&str, &'static str> {
-    message
-        .get("url")
-        .and_then(Value::as_str)
-        .filter(|url| !url.is_empty() && url.encode_utf16().count() <= MAX_URL_CHARS)
-        .ok_or("invalid_url")
-}
-
-fn result_type(kind: &str) -> &'static str {
-    match kind {
-        "url_delete_preview" => "url_delete_preview_result",
-        "url_delete" => "url_delete_result",
-        "image_delete_preview" => "image_delete_preview_result",
-        _ => "image_delete_result",
-    }
-}
-
-pub fn handle(session: &mut Session, message: &Value) -> Value {
-    let kind = message.get("type").and_then(Value::as_str).unwrap_or("");
-    let id = request_id(message);
-    let mut reply = match id {
-        None => Err("invalid_request_id"),
-        Some(_) => answer(session, kind, message),
-    }
-    .unwrap_or_else(|code| {
-        let mut fields = Map::new();
-        fields.insert("error".into(), code.into());
-        fields
-    });
-    let ok = !reply.contains_key("error");
-    reply.insert("ok".into(), ok.into());
-    reply.insert("type".into(), result_type(kind).into());
-    reply.insert("requestId".into(), id.into());
-    Value::Object(reply)
-}
-
-fn answer(
-    session: &mut Session,
-    kind: &str,
-    message: &Value,
-) -> Result<Map<String, Value>, &'static str> {
-    let mut fields = Map::new();
-    match kind {
-        "url_delete_preview" => {
-            let url = url_of(message)?;
-            // The counts and the token that a delete must name come from one vault (one resolution).
-            let (token, counts) = session
-                .read_with_token(|db| url_counts(db, url))
-                .map_err(|error| error.code())?;
-            let counts = counts.map_err(|_| "db_error")?;
-            fields.insert("vaultToken".into(), token.into());
-            fields.insert("url".into(), url.into());
-            fields.insert("counts".into(), json!(counts));
-        }
-        "url_delete" => {
-            let url = url_of(message)?;
-            let ticket = ticket_for(session, message)?;
-            let deleted = session
-                .write_for(&ticket, |db| delete_url(db, url))
-                .map_err(ImageError::code)?;
-            fields.insert("vaultToken".into(), ticket.token.into());
-            fields.insert("url".into(), url.into());
-            fields.insert("deleted".into(), json!(deleted));
-        }
-        "image_delete_preview" => {
-            let target = target(message)?;
-            let (token, preview) = session
-                .read_with_token(|db| image_counts(db, target.blob_id, &target.sha256))
-                .map_err(|error| error.code())?;
-            let (byte_length, counts) = preview.map_err(ImageError::code)?;
-            fields.insert("vaultToken".into(), token.into());
-            fields.insert("blobId".into(), target.blob_id.into());
-            fields.insert("sha256".into(), target.sha256.into());
-            fields.insert("byteLength".into(), byte_length.into());
-            fields.insert("counts".into(), json!(counts));
-        }
-        "image_delete" => {
-            let target = target(message)?;
-            let ticket = ticket_for(session, message)?;
-            let deleted = session
-                .write_for(&ticket, |db| {
-                    delete_image(db, target.blob_id, &target.sha256)
-                })
-                .map_err(ImageError::code)?;
-            fields.insert("vaultToken".into(), ticket.token.into());
-            fields.insert("blobId".into(), target.blob_id.into());
-            fields.insert("sha256".into(), target.sha256.into());
-            fields.insert("deleted".into(), json!(deleted));
-        }
-        _ => return Err("unknown_type"),
-    }
-    fields.insert("irreversible".into(), true.into());
-    Ok(fields)
 }
 
 #[cfg(test)]

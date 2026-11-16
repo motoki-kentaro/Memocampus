@@ -311,7 +311,7 @@ presets, editable rules, URL normalization, fail-closed recovery, concurrency, a
 
 The Memocampus source code is released under the MIT License (see `LICENSE`). Third-party material is not covered by it:
 
-- `assets/settings.svg` and `assets/cached.svg` (and their copies in `extension/assets/`) are the Google Material Symbols “settings” and “cached” icons, licensed under the Apache License 2.0. The full license text is in `LICENSES/Apache-2.0.txt`; source and provenance are recorded in `THIRD_PARTY_NOTICES.md`.
+- `assets/settings.svg`, `assets/cached.svg` and `assets/delete.svg` (and their copies in `extension/assets/`) are Google Material Symbols “settings”, “cached” and “delete” icons, licensed under the Apache License 2.0. The full license text is in `LICENSES/Apache-2.0.txt`; source and provenance are recorded in `THIRD_PARTY_NOTICES.md`.
 - The `extension/` folder carries its own `LICENSE`, `LICENSES/Apache-2.0.txt` and `THIRD_PARTY_NOTICES.md` (identical copies), so it can be distributed on its own.
 
 - Third-party Rust crates keep their own licenses (MIT, Apache-2.0, Unicode-3.0 and similar permissive licenses; SQLite, bundled through `libsqlite3-sys`, is in the public domain). Only `Cargo.lock` is committed here; anyone distributing built binaries must include the corresponding notices.

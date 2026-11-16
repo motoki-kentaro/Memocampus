@@ -1,14 +1,15 @@
 import { createPageClient } from "./page-client.js";
-import { PAGE_TEXT as T, pageErrorText, pageDate, pageBytes, historyLabel, summaryText, deletionText, exportedText } from "./page-text.js";
+import { PAGE_TEXT as T, pageErrorText, pageDate, pageBytes, historyLabel, summaryText, deletionModel, exportedText } from "./page-text.js";
 import { isWebUrl } from "./search-client.js";
+import { createTrashButton, renderDeletion, setDangerLabel } from "./delete-ui.js";
 
 export function createPagePanel({ connect, runtime, isActive, openUrl, document: doc = document, setTimer = setTimeout, clearTimer = clearTimeout }) {
   const $ = (id) => doc.querySelector(`#${id}`);
   const panel=$("panel-page"), input=$("page-query"), list=$("page-groups"), status=$("page-status"), error=$("page-error"), more=$("page-more"), refresh=$("page-refresh"), bulk=$("page-delete-filter"), dot=$("page-new-dot"), dialog=$("page-delete-dialog"), confirm=$("page-delete-confirm"), cancel=$("page-delete-cancel");
   input.placeholder=T.search; input.setAttribute("aria-label",T.search);
   $("page-note").textContent=T.scopeNote; $("page-open-note").textContent=T.openNote;
-  $("page-delete-title").textContent=T.confirmTitle; confirm.textContent=T.confirm; cancel.textContent=T.cancel;
-  refresh.textContent=T.refresh; more.textContent=T.more; bulk.textContent=T.all; status.textContent=T.initial;
+  $("page-delete-title").textContent=T.confirmTitle; setDangerLabel(confirm,T.confirm); cancel.textContent=T.cancel;
+  refresh.textContent=T.refresh; more.textContent=T.more; setDangerLabel(bulk,T.all); status.textContent=T.initial;
   let epoch=0, query="", cursor=null, loaded=false, loading=false, deleting=false, reviewing=false, review=null, timer=null, searchTimer=null, trigger=null;
   let polling=false, disposed=false, exporting=false;
   const groups=new Map();
@@ -16,11 +17,11 @@ export function createPagePanel({ connect, runtime, isActive, openUrl, document:
   function buttons() {
     // While the Host shows its Save dialog it answers nothing else: every Page request waits.
     input.disabled=deleting||exporting;
-    bulk.textContent=query===""?T.all:T.bulk;
+    setDangerLabel(bulk,query===""?T.all:T.bulk);
     refresh.disabled=loading||deleting||exporting; more.disabled=loading||deleting||exporting;
     bulk.disabled=loading||deleting||reviewing||exporting||!loaded||groups.size===0;
     confirm.disabled=!review||deleting; cancel.disabled=deleting;
-    confirm.textContent=deleting?T.deleting:T.confirm;
+    setDangerLabel(confirm,deleting?T.deleting:T.confirm);
     dialog.setAttribute("aria-busy",String(deleting));
     for (const group of groups.values()) {
       for (const button of [...group.deletions,...group.exports]) button.disabled=loading||deleting||reviewing||exporting;
@@ -53,7 +54,7 @@ export function createPagePanel({ connect, runtime, isActive, openUrl, document:
     try {
       const response=await client.preview(target);
       if (version!==epoch||query!==filter) return;
-      review=response;$("page-delete-description").textContent=deletionText(response);dialog.hidden=false;dialog.showModal?.();buttons();cancel.focus();
+      review=response;renderDeletion($("page-delete-description"),deletionModel(response));dialog.hidden=false;dialog.showModal?.();buttons();cancel.focus();
     } catch(err) { if(version===epoch){reviewing=false;fail(err);buttons();} }
   }
   // One explicit click, one request for exactly this save event (id + save id + SHA-256). The
@@ -81,7 +82,7 @@ export function createPagePanel({ connect, runtime, isActive, openUrl, document:
       const li=node("li","","page-event");
       li.append(node("time",pageDate(item.savedAt)),node("span",item.title||T.untitled,"page-event-title"),node("small",pageBytes(item.byteLength)));
       const save=button(T.eventExport,()=>void exportEvent(item,save)); save.className="secondary page-event-export"; save.title=T.exportNote;
-      const remove=button(T.eventDelete,()=>void ask({scope:"event",id:item.id},remove));
+      const remove=createTrashButton({document:doc,label:`${T.eventDelete}（${pageDate(item.savedAt)}）`,onClick:()=>void ask({scope:"event",id:item.id},remove)}); remove.title=T.eventDelete;
       li.append(save,remove); group.exports.push(save); group.deletions.push(remove); group.history.append(li);
     }
   }
@@ -101,7 +102,7 @@ export function createPagePanel({ connect, runtime, isActive, openUrl, document:
     const expand=button(item.title||T.untitled,()=>{const open=expand.getAttribute("aria-expanded")!=="true";expand.setAttribute("aria-expanded",String(open));body.hidden=!open;if(open&&!group.loaded)void history(group);});
     expand.className="page-expand";expand.setAttribute("aria-expanded","false");
     const body=node("div","","page-history");body.id=`page-history-${item.id}`;body.hidden=true;expand.setAttribute("aria-controls",body.id);
-    const remove=button(T.groupDelete,()=>void ask({scope:"url",url:item.url},remove)); remove.className="secondary page-group-delete";
+    const remove=createTrashButton({document:doc,label:`${T.groupDelete}（${item.title||item.url}）`,text:T.groupDelete,onClick:()=>void ask({scope:"url",url:item.url},remove)}); remove.className+=" page-group-delete"; remove.title=`${T.groupDelete}: このURLの保存履歴をすべて削除します`;
     const visit=button(T.open,()=>{if(isWebUrl(item.url))openUrl(item.url);});visit.disabled=!isWebUrl(item.url);visit.title=T.openNote;
     const historyList=node("ol","","page-events"), next=button(T.more,()=>void history(group,true));next.hidden=true;
     const group={url:item.url,history:historyList,more:next,cursor:null,loaded:false,busy:false,deletions:[remove],exports:[],body};

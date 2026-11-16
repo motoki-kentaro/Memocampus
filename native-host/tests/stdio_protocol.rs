@@ -573,7 +573,7 @@ fn image_tables(path: &Path) -> i64 {
 fn vaults_created_by_the_host_start_at_schema_4_with_image_tables() {
     let tmp = TempDir::new();
     create_default_vault(&tmp);
-    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 8);
+    assert_eq!(pragma(&tmp.default_vault(), "user_version"), 9);
     assert_eq!(image_tables(&tmp.default_vault()), 3);
     // Existing operations work on it.
     assert_eq!(
@@ -622,7 +622,7 @@ fn backups_of_a_vault_with_images_are_complete_and_verified() {
     };
     assert_eq!(dump(&copy), dump(&tmp.default_vault()));
     assert_eq!(dump(&copy).len(), 4);
-    assert_eq!(pragma(&copy, "user_version"), 8);
+    assert_eq!(pragma(&copy, "user_version"), 9);
 }
 
 const SAVE_ID: &str = "4f1d2c3b-5a6e-4d7f-8091-a2b3c4d5e6f7";
@@ -1182,7 +1182,7 @@ fn schema_7() -> String {
             "",
         );
     without_table(&without_table(&sql, "saved_pages"), "page_blobs")
-        .replace("PRAGMA user_version = 8;", "PRAGMA user_version = 7;")
+        .replace("PRAGMA user_version = 9;", "PRAGMA user_version = 7;")
 }
 
 /// Schema 6 as it was created before Issue #44: schema 7 without image tags.
@@ -1235,8 +1235,9 @@ fn every_vault_other_than_schema_8_is_refused_for_every_operation_and_left_untou
         ("schema 6 relabelled 7", schema_6().replace("PRAGMA user_version = 6;", "PRAGMA user_version = 7;")),
         ("schema 7 (no Page tables)", schema_7()),
         ("schema 7 relabelled 8", schema_7().replace("PRAGMA user_version = 7;", "PRAGMA user_version = 8;")),
-        ("schema 8 labelled 6", create_sql().replace("PRAGMA user_version = 8;", "PRAGMA user_version = 6;")),
-        ("future version", format!("{} PRAGMA user_version = 9;", create_sql())),
+        ("schema 9 labelled 6", create_sql().replace("PRAGMA user_version = 9;", "PRAGMA user_version = 6;")),
+        ("schema 9 relabelled 8", create_sql().replace("PRAGMA user_version = 9;", "PRAGMA user_version = 8;")),
+        ("future version", format!("{} PRAGMA user_version = 10;", create_sql())),
         ("untagged schema 8", format!("{} PRAGMA application_id = 0;", create_sql())),
         ("tags without the trigger that drops unused ones", without_trigger(&create_sql(), "image_tags_drop_unused")),
         ("tags without their search index", create_sql().replace(
@@ -1373,7 +1374,7 @@ fn from_a_refused_vault_the_user_can_still_create_a_new_one_which_inherits_nothi
     assert_eq!(replies[1]["ok"], true, "{}", replies[1]);
     assert_eq!(replies[2]["items"].as_array().unwrap().len(), 1);
     assert!(!replies[2].to_string().contains("CANARY"));
-    assert_eq!(pragma(&new, "user_version"), 8);
+    assert_eq!(pragma(&new, "user_version"), 9);
     assert_eq!(std::fs::read(&old).unwrap(), before);
     // And the old file stays refused if it is opened again.
     let reopened = &exchange(
@@ -5104,7 +5105,7 @@ fn backups_carry_the_navigations_and_count_them() {
     };
     assert_eq!(dump(&copy), ["b|a", "c|NULL"]);
     assert_eq!(dump(&copy), dump(&tmp.default_vault()));
-    assert_eq!(pragma(&copy, "user_version"), 8);
+    assert_eq!(pragma(&copy, "user_version"), 9);
 }
 
 #[test]
@@ -5120,7 +5121,7 @@ fn the_host_names_its_capabilities_without_a_vault_or_a_policy() {
     assert_eq!(
         replies,
         [
-            json!({ "ok": true, "type": "host_capabilities_result", "requestId": "h", "capabilities": ["navigation_v1", "vault_items_v1", "visit_calendar_v1"] }),
+            json!({ "ok": true, "type": "host_capabilities_result", "requestId": "h", "capabilities": ["navigation_v1", "vault_items_v1", "visit_calendar_v1", "item_delete_v1"] }),
             json!({ "ok": false, "type": "host_capabilities_result", "requestId": null, "error": "invalid_request_id" }),
         ]
     );
@@ -5135,7 +5136,7 @@ fn image_tags_over_the_real_host_are_stored_consistently_and_leave_images_unchan
     let tmp = TempDir::new();
     create_default_vault(&tmp);
     let vault = tmp.default_vault();
-    assert_eq!(pragma(&vault, "user_version"), 8);
+    assert_eq!(pragma(&vault, "user_version"), 9);
     let first = png_of_size(40, 30, 5000);
     let second = png_of_size(40, 30, 6000);
     let saved = exchange(&tmp, &upload_messages(&first, true));

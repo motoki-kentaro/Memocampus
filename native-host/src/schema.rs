@@ -1,6 +1,7 @@
-//! Vault schema 8: creation only. Version 7 is refused, never migrated or modified.
+//! Vault schema 9: creation only. Version 8 and older are refused, never migrated or modified.
 //!
-//! Schema 8 adds isolated `page_blobs` / `saved_pages` (Issue #6). Schema 7 added image tags;
+//! Schema 9 adds `navigation_events.source_censored` (Issue #7): the source of a navigation was a visit the
+//! person deleted on purpose, which a bare NULL source cannot say. Schema 8 added isolated `page_blobs` / `saved_pages` (Issue #6). Schema 7 added image tags;
 //! schema 6 navigation events; schema 5 page metadata. All exist only by explicit creation.
 //! Nothing upgrades an older vault, because `visits` has no column
 //! that tells whether a row predates the incognito fix (#9), so an upgraded vault could carry such rows
@@ -14,7 +15,7 @@ use rusqlite::Connection;
 
 /// `PRAGMA application_id` of vaults created by Memocampus ("MCMP").
 pub const APP_ID: i64 = 0x4D43_4D50;
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 
 /// Keep each `sql` as SQLite stores it: it keeps the text from `CREATE` on, without the final `;`.
 struct Object {
@@ -178,7 +179,9 @@ const OBJECTS: [Object; 28] = [
     // written in the target visit's transaction, so it cannot exist without that visit. The source
     // is the document shown before in the same tab, or in the tab that opened this one; it is not
     // proof of a click or a hyperlink. It is NULL when it was not known, not stored, or not allowed
-    // by the policy. No URL is kept here: both ends are visits, judged again by any future reader.
+    // by the policy, or when the source visit was deleted by the person: `source_censored = 1` says that
+    // last case and only that (set by the explicit deletion, never inferred from NULL, and impossible
+    // while a source is set). No URL is kept here: both ends are visits, judged again by any future reader.
     Object {
         kind: "table",
         name: "navigation_events",
@@ -195,7 +198,9 @@ const OBJECTS: [Object; 28] = [
   from_address_bar INTEGER NOT NULL CHECK (from_address_bar IN (0, 1)),
   new_tab          INTEGER NOT NULL CHECK (new_tab IN (0, 1)),
   occurred_at      TEXT    NOT NULL CHECK (length(occurred_at) = 24),
-  CHECK (source_visit_id IS NULL OR source_visit_id <> target_visit_id)
+  source_censored  INTEGER NOT NULL DEFAULT 0 CHECK (source_censored IN (0, 1)),
+  CHECK (source_visit_id IS NULL OR source_visit_id <> target_visit_id),
+  CHECK (source_censored = 0 OR source_visit_id IS NULL)
 )",
         ),
     },
@@ -457,7 +462,7 @@ mod tests {
         .unwrap();
         let insert = |values: &str| {
             db.execute(
-                &format!("INSERT INTO navigation_events VALUES ({values})"),
+                &format!("INSERT INTO navigation_events (target_visit_id, source_visit_id, kind, transition_type, client_redirect, server_redirect, forward_back, from_address_bar, new_tab, occurred_at) VALUES ({values})"),
                 [],
             )
         };
@@ -487,6 +492,46 @@ mod tests {
         db.execute("DELETE FROM visits WHERE event_id = 'a'", [])
             .unwrap();
         assert_eq!(source(&db), None, "a removed source becomes NULL");
+        let censored = |db: &Connection| -> i64 {
+            db.query_row("SELECT source_censored FROM navigation_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            censored(&db),
+            0,
+            "SET NULL alone is not a censoring: only an explicit deletion marks it"
+        );
+        // The marker: 0 or 1, and only without a source.
+        db.execute("UPDATE navigation_events SET source_censored = 1", [])
+            .unwrap();
+        assert_eq!(censored(&db), 1);
+        assert!(db
+            .execute("UPDATE navigation_events SET source_censored = 2", [])
+            .is_err());
+        assert!(db
+            .execute("UPDATE navigation_events SET source_censored = -1", [])
+            .is_err());
+        db.execute_batch(
+            "INSERT INTO visits VALUES ('c', 'https://c.test/', '', '2026-11-06T12:00:00.000Z')",
+        )
+        .unwrap();
+        assert!(
+            db.execute("UPDATE navigation_events SET source_visit_id = 'c'", [])
+                .is_err(),
+            "a censored source cannot name a visit"
+        );
+        db.execute(
+            "UPDATE navigation_events SET source_censored = 0, source_visit_id = 'c'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            db.execute("UPDATE navigation_events SET source_censored = 1", [])
+                .is_err(),
+            "a set source cannot be censored"
+        );
         db.execute("DELETE FROM visits WHERE event_id = 'b'", [])
             .unwrap();
         let rows: i64 = db
@@ -670,7 +715,8 @@ mod tests {
             ("PRAGMA user_version = 5;", 5),
             ("PRAGMA user_version = 6;", 6),
             ("PRAGMA user_version = 7;", 7),
-            ("PRAGMA application_id = 0;", 8),
+            ("PRAGMA user_version = 8;", 8),
+            ("PRAGMA application_id = 0;", 9),
         ] {
             assert!(
                 matches!(check(&vault(extra)).unwrap_err(), SchemaError::UnsupportedVersion(v) if v == expected),
