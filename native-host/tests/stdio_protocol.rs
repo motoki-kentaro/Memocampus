@@ -5121,7 +5121,7 @@ fn the_host_names_its_capabilities_without_a_vault_or_a_policy() {
     assert_eq!(
         replies,
         [
-            json!({ "ok": true, "type": "host_capabilities_result", "requestId": "h", "capabilities": ["navigation_v1", "vault_items_v1", "visit_calendar_v1", "item_delete_v1"] }),
+            json!({ "ok": true, "type": "host_capabilities_result", "requestId": "h", "capabilities": ["navigation_v1", "vault_items_v1", "visit_calendar_v1", "item_delete_v1", "history_v1"] }),
             json!({ "ok": false, "type": "host_capabilities_result", "requestId": null, "error": "invalid_request_id" }),
         ]
     );

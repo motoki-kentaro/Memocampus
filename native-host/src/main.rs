@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
 mod dialog;
+mod history;
 mod image_original;
 mod image_protocol;
 mod image_publication;
@@ -345,12 +346,14 @@ const CAPABILITY_VAULT_ITEMS: &str = "vault_items_v1";
 const CAPABILITY_VISIT_CALENDAR: &str = "visit_calendar_v1";
 /// `item_*` and `visit_history` (Issue #7): reviewed deletion of visits, URLs and images on a lasting port.
 const CAPABILITY_ITEM_DELETE: &str = "item_delete_v1";
+/// `history_list`, `history_days`, `history_visit` (full-page History; `history.rs`).
+const CAPABILITY_HISTORY: &str = "history_v1";
 
 /// What this host can store, for an extension to ask before it sends anything new:
 ///
 /// ```text
 /// → { type: "host_capabilities", requestId }
-/// ← { ok: true, type: "host_capabilities_result", requestId, capabilities: ["navigation_v1", "vault_items_v1", "visit_calendar_v1", "item_delete_v1"] }
+/// ← { ok: true, type: "host_capabilities_result", requestId, capabilities: ["navigation_v1", "vault_items_v1", "visit_calendar_v1", "item_delete_v1", "history_v1"] }
 /// ```
 ///
 /// A host from before Issue #41 answers this as an unknown event: `{ ok: false, eventId: null,
@@ -359,7 +362,7 @@ fn capabilities(message: &serde_json::Value) -> serde_json::Value {
     const RESULT: &str = "host_capabilities_result";
     match search::request_id(message) {
         Some(id) => serde_json::json!({
-            "ok": true, "type": RESULT, "requestId": id, "capabilities": [CAPABILITY_NAVIGATION, CAPABILITY_VAULT_ITEMS, CAPABILITY_VISIT_CALENDAR, CAPABILITY_ITEM_DELETE],
+            "ok": true, "type": RESULT, "requestId": id, "capabilities": [CAPABILITY_NAVIGATION, CAPABILITY_VAULT_ITEMS, CAPABILITY_VISIT_CALENDAR, CAPABILITY_ITEM_DELETE, CAPABILITY_HISTORY],
         }),
         None => serde_json::json!({
             "ok": false, "type": RESULT, "requestId": null, "error": "invalid_request_id",
@@ -519,6 +522,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &port_open,
                 &value,
             ))?,
+            Some("history_list" | "history_days" | "history_visit") => {
+                write_message(&history::handle(&mut session, &value))?
+            }
             Some("search_pages") => write_message(&search_response(&mut session, &value))?,
             Some("visit_days") => write_message(&visit_days_response(&mut session, &value))?,
             Some(
