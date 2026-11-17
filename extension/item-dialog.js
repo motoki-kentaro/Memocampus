@@ -1,5 +1,5 @@
-// The confirmation of one item action (Issue #43): a policy change for one URL, or deleting one URL or
-// one image. Nothing is done when an action is chosen: the host previews it first, the dialog shows
+// The confirmation of one policy action on a URL (Issue #43). Deleting has its own dialog (delete-ui.js, Issue #7).
+// Nothing is done when an action is chosen: the host previews it first, the dialog shows
 // what the host said, and only an explicit confirmation sends the change, bound to what was previewed
 // (the policy's ETag, the vault's token). Nothing is shown as done before the host confirmed it.
 //
@@ -8,7 +8,7 @@
 // late answer can never fill the dialog of another item, another vault or another choice.
 
 import { SearchError, VAULT_UNAVAILABLE_CODES } from "./search-client.js";
-import { applyPolicyItem, deleteImage, deleteUrl, previewImageDelete, previewPolicyItem, previewUrlDelete } from "./vault-items-client.js";
+import { applyPolicyItem, previewPolicyItem } from "./vault-items-client.js";
 
 export const DECISION_LABEL = { allow: "公開", save_but_no_mcp: "MCPサーバに見せない", never_save: "保存しない" };
 const DECISION_TEXT = {
@@ -19,7 +19,6 @@ const DECISION_TEXT = {
 export const ACTION_LABEL = {
   never_save: "保存しないグループへ追加",
   save_but_no_mcp: "MCPサーバに見せないグループへ追加",
-  delete: "Vaultから削除",
   publish: "公開",
 };
 const CONFIRM_LABEL = {
@@ -313,102 +312,12 @@ export function createItemDialog({ send, openPrivacySettings, onVaultUnavailable
     }
   }
 
-  // --- Deletions --------------------------------------------------------------------------------
-
-  /** Deletes one URL of the URL tab's results; `vaultToken`: the vault the results came from. */
-  function openUrlDelete({ owner, url, label, vaultToken, opener, onDeleted, onVaultMismatch, onClose }) {
-    const s = open({ kind: "url_delete", owner, title: "Vaultから削除", targetText: `対象: ${label}\n${url}`, confirmLabel: "削除する（取り消せません）", destructive: true, opener, onDeleted, onVaultMismatch, onClose, url, vaultToken });
-    void previewUrl(s);
-  }
-
-  async function previewUrl(s) {
-    const current = step(s);
-    s.ready = false;
-    repreviewButton.hidden = true;
-    setError("");
-    body.replaceChildren(paragraph("削除される記録を数えています…"));
-    update();
-    try {
-      const preview = await previewUrlDelete(s.url, { send });
-      if (!current()) return;
-      if (s.vaultToken && preview.vaultToken !== s.vaultToken) return vaultMoved(s);
-      s.preview = preview;
-      const c = preview.counts;
-      const parts = [paragraph("このURLの記録をVaultから完全に削除します。取り消せません。", "item-dialog-warning")];
-      parts.push(
-        list([
-          `閲覧記録: ${c.visits}件`,
-          `タブのスナップショット: ${c.tabSnapshots}件`,
-          `ページ情報（タイトル・説明など）: ${c.pageMetadata}件`,
-          `このURLへの移動の記録: ${c.navigations}件`,
-          ...(c.navigationSourcesCleared > 0 ? [`このURLから別のページへ移動した記録 ${c.navigationSourcesCleared}件は残り、移動元が「不明」になります`] : []),
-        ]),
-      );
-      parts.push(paragraph(c.imageSavesKept > 0 ? `このURLから保存した画像の保存履歴 ${c.imageSavesKept}件は削除されません（Imageタブに残ります）。` : "保存済みの画像は削除されません。"));
-      parts.push(paragraph("作成済みのバックアップファイルには、この記録が残ります。プライバシー設定は変わらないため、このURLを再び開くと記録されることがあります（記録しないようにするには「保存しないグループへ追加」）。", "item-dialog-note"));
-      const nothing = c.visits + c.tabSnapshots + c.pageMetadata === 0;
-      if (nothing) parts.push(paragraph("このURLの記録は既にありません。"));
-      s.ready = !nothing;
-      body.replaceChildren(...parts);
-    } catch (error) {
-      if (!current()) return;
-      failPreview(s, error, "削除内容を確認できませんでした。");
-    }
-    update();
-  }
-
-  /** Deletes the image `item` of the gallery; `vaultToken`: the vault the gallery shows. */
-  function openImageDelete({ owner, item, label, vaultToken, opener, onDeleted, onVaultMismatch, onClose }) {
-    const s = open({ kind: "image_delete", owner, title: "Vaultから削除", targetText: `対象: ${label}`, confirmLabel: "削除する（取り消せません）", destructive: true, opener, onDeleted, onVaultMismatch, onClose, item, vaultToken });
-    void previewImage(s);
-  }
-
-  async function previewImage(s) {
-    const current = step(s);
-    s.ready = false;
-    repreviewButton.hidden = true;
-    setError("");
-    body.replaceChildren(paragraph("削除される記録を数えています…"));
-    update();
-    try {
-      const preview = await previewImageDelete(s.item, { send });
-      if (!current()) return;
-      if (preview.vaultToken !== s.vaultToken) return vaultMoved(s);
-      s.preview = preview;
-      const c = preview.counts;
-      const kb = Math.max(1, Math.round(preview.byteLength / 1024));
-      body.replaceChildren(
-        paragraph("この画像をVaultから完全に削除します。取り消せません。", "item-dialog-warning"),
-        list([
-          `画像データ（元のファイル、${kb} KB）`,
-          `保存履歴: ${c.saves}件（すべて）`,
-          `サムネイル: ${c.thumbnails}件`,
-          `タグの付与: ${c.tagLinks}件${c.tagsRemoved > 0 ? `（ほかの画像に付いていないタグ ${c.tagsRemoved}件はタグ一覧からも消えます）` : ""}`,
-        ]),
-        paragraph("ほかの画像、閲覧記録（URL）は削除されません。作成済みのバックアップファイルには、この画像が残ります。", "item-dialog-note"),
-      );
-      s.ready = true;
-    } catch (error) {
-      if (!current()) return;
-      failPreview(s, error, "削除内容を確認できませんでした。");
-    }
-    update();
-  }
-
   function failPreview(s, error, fallback) {
     if (isVaultSwitched(error)) return vaultMoved(s);
     body.replaceChildren();
-    if (imageGone(s, error)) return;
     setError(errorText(error, fallback));
     repreviewButton.hidden = false;
     if (error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code)) onVaultUnavailable();
-  }
-
-  /** An image the vault no longer has (deleted, or another vault is active): nothing to retry here. */
-  function imageGone(s, error) {
-    if (s.kind !== "image_delete" || !(error instanceof SearchError) || error.code !== "blob_missing") return false;
-    setError("この画像がVaultに見つかりません（既に削除されたか、Vaultが切り替えられた可能性があります）。画像一覧を更新してください。");
-    return true;
   }
 
   /** The vault is no longer the one the list came from: nothing is deleted, the list starts again. */
@@ -417,45 +326,17 @@ export function createItemDialog({ send, openPrivacySettings, onVaultUnavailable
     s.onVaultMismatch?.();
   }
 
-  async function runDelete(s) {
-    if (!s.preview || !s.ready || s.busy) return;
-    const current = step(s);
-    s.busy = true;
-    setError("");
-    update();
-    try {
-      const deleted = s.kind === "url_delete" ? await deleteUrl(s.url, s.preview.vaultToken, { send }) : await deleteImage(s.item, s.preview.vaultToken, { send });
-      if (!current()) return;
-      s.busy = false;
-      close({ restoreFocus: false });
-      s.onDeleted?.(deleted);
-    } catch (error) {
-      if (!current()) return;
-      s.busy = false;
-      if (isVaultSwitched(error)) return vaultMoved(s);
-      // Not deleted, or not known to be: kept as it is, and only a new preview can confirm again.
-      s.ready = false;
-      if (imageGone(s, error)) return update();
-      setError(errorText(error, "削除できませんでした。"));
-      repreviewButton.hidden = false;
-      update();
-    }
-  }
-
   // --- Events -----------------------------------------------------------------------------------
 
   confirmButton.addEventListener("click", () => {
     const s = session;
     if (!s) return;
     if (s.kind === "policy") void applyPolicy(s);
-    else void runDelete(s);
   });
   repreviewButton.addEventListener("click", () => {
     const s = session;
     if (!s || s.busy) return;
     if (s.kind === "policy") void previewPolicy(s);
-    else if (s.kind === "url_delete") void previewUrl(s);
-    else void previewImage(s);
   });
   cancelButton.addEventListener("click", () => {
     if (session && !session.busy) close();
@@ -488,8 +369,6 @@ export function createItemDialog({ send, openPrivacySettings, onVaultUnavailable
 
   return {
     openPolicy,
-    openUrlDelete,
-    openImageDelete,
     /** Closes the dialog if it belongs to `owner` (a list or a selection that is gone). */
     cancel(owner) {
       if (session && (owner === undefined || session.owner === owner)) close({ restoreFocus: false });

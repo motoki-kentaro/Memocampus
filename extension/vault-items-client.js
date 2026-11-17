@@ -101,39 +101,3 @@ export async function evaluateUrls(urls, { send }) {
   }
   return decisions;
 }
-
-const URL_COUNTS = ["visits", "tabSnapshots", "pageMetadata", "navigations", "navigationSourcesCleared", "imageSavesKept"];
-const IMAGE_COUNTS = ["saves", "thumbnails", "tagLinks", "tagsRemoved"];
-
-function counts(value, keys) {
-  if (!keys.every((key) => count(value?.[key]))) throw invalid();
-  return Object.fromEntries(keys.map((key) => [key, value[key]]));
-}
-
-/** What deleting `url` would delete, in the active vault, and which vault that is. Changes nothing. */
-export async function previewUrlDelete(url, { send }) {
-  const response = await callHost({ type: "url_delete_preview", url }, { send, resultType: "url_delete_preview_result" });
-  if (response.url !== url || response.irreversible !== true) throw invalid();
-  return { vaultToken: token(response.vaultToken), counts: counts(response.counts, URL_COUNTS) };
-}
-
-/** Deletes everything stored of `url`, only in the vault named by `vaultToken`. */
-export async function deleteUrl(url, vaultToken, { send }) {
-  const response = await callHost({ type: "url_delete", url, vaultToken }, { send, resultType: "url_delete_result" });
-  if (response.url !== url || response.vaultToken !== vaultToken || response.irreversible !== true) throw invalid();
-  return counts(response.deleted, URL_COUNTS);
-}
-
-/** What deleting the image `item` (its id and bytes) would delete, and in which vault. */
-export async function previewImageDelete(item, { send }) {
-  const response = await callHost({ type: "image_delete_preview", blobId: item.blobId, sha256: item.sha256 }, { send, resultType: "image_delete_preview_result" });
-  if (response.blobId !== item.blobId || response.sha256 !== item.sha256 || response.irreversible !== true || !count(response.byteLength)) throw invalid();
-  return { vaultToken: token(response.vaultToken), byteLength: response.byteLength, counts: counts(response.counts, IMAGE_COUNTS) };
-}
-
-/** Deletes the image `item`, only if it still has its bytes, only in the vault of `vaultToken`. */
-export async function deleteImage(item, vaultToken, { send }) {
-  const response = await callHost({ type: "image_delete", blobId: item.blobId, sha256: item.sha256, vaultToken }, { send, resultType: "image_delete_result" });
-  if (response.blobId !== item.blobId || response.sha256 !== item.sha256 || response.vaultToken !== vaultToken || response.irreversible !== true) throw invalid();
-  return counts(response.deleted, IMAGE_COUNTS);
-}

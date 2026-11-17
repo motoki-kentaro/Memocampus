@@ -82,6 +82,12 @@ refused (`publish_blocked`) and nothing is removed, so one rule is never removed
 rule that also covers other URLs is touched. Those are changed on the settings page. A URL the policy allows is a
 no-op.
 
+> **Superseded by Issue #7 ([issue-007-vault-deletion.md](issue-007-vault-deletion.md)).** The one-shot messages
+> `url_delete(_preview)` and `image_delete(_preview)` below no longer exist in the host. URL and image deletion go through
+> `item_delete_preview` / `item_delete` on a lasting port, with a review id, a fingerprint of the exact set and the vault
+> selection generation. What a deletion removes (the counts, the kept data, `delete_url` / `delete_image`) is unchanged.
+> The side panel's "Vaultから削除" drop-down item is gone; red trash buttons replaced it.
+
 ### URL deletion: `url_delete_preview`, `url_delete`
 
 ```text

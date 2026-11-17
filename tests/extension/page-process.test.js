@@ -12,6 +12,7 @@ import { createPagePanel } from "../../extension/page-panel.js";
 import { captureAndUploadPage } from "../../extension/page-upload.js";
 import { createDocument,settle } from "./fake-dom.js";
 import { seedLegacyPolicy,startMcp,confirmPublication } from "./real-processes.js";
+const allText = (el) => [el.textContent, ...el.children.map(allText)].join(" ").replace(/\s+/g, " ").trim();
 
 const hostBin=process.env.MEMOCAMPUS_TEST_HOST,mcpBin=process.env.MEMOCAMPUS_TEST_MCP;
 test("Page UI with real Host: grouped metadata, confirmed shared-blob deletion, no Page in approved MCP",{skip:hostBin&&mcpBin?false:"set MEMOCAMPUS_TEST_HOST and MEMOCAMPUS_TEST_MCP to run"},async()=>{
@@ -49,7 +50,7 @@ test("Page UI with real Host: grouped metadata, confirmed shared-blob deletion, 
     const groups=()=>doc.querySelector("#page-groups").children;
     await wait(()=>groups().length===2);
     groups().find((g)=>g.children[1].textContent===url).children[0].children[1].dispatch("click");
-    await wait(()=>doc.querySelector("#page-delete-dialog").hidden===false);assert.match(doc.querySelector("#page-delete-description").textContent,/保存イベント 2件/);assert.match(doc.querySelector("#page-delete-description").textContent,/共有原本保持 1件/);
+    await wait(()=>doc.querySelector("#page-delete-dialog").hidden===false);assert.match(allText(doc.querySelector("#page-delete-description")),/保存イベント 2件/);assert.match(allText(doc.querySelector("#page-delete-description")),/共有原本保持 1件/);
     doc.querySelector("#page-delete-confirm").dispatch("click");await wait(()=>groups().length===1&&doc.querySelector("#page-status").textContent.includes("削除しました"));
     doc.querySelector("#page-delete-filter").dispatch("click");await wait(()=>doc.querySelector("#page-delete-dialog").hidden===false);doc.querySelector("#page-delete-confirm").dispatch("click");await wait(()=>groups().length===0&&doc.querySelector("#page-status").textContent.includes("削除しました"));
     const status=await call({type:"vault_status",requestId:"s"});assert.equal(status.status.counts.pages,0);assert.equal(status.status.counts.pageBlobs,0);assert.equal(status.status.counts.visits,0);

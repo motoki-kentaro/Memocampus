@@ -5,6 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { imageSummary, loadSidePanel, pages, settle, tokenOf } from "./fake-dom.js";
+const allText = (el) => [el.textContent, ...el.children.map(allText)].join(" ").replace(/\s+/g, " ").trim();
 
 const ITEMS = ["navigation_v1", "vault_items_v1"];
 const requests = (host, type) => host.requests.filter((m) => m.type === type);
@@ -206,87 +207,10 @@ test("Escape and cancel close without changing anything; one confirmation sends 
 
 // --- Deleting a URL -----------------------------------------------------------------------------------
 
-test("deleting a URL shows the host's counts, says it cannot be undone, and removes the row after the host did", async () => {
-  const { $, host } = await openUrlTab();
-  host.navigationSources = 2;
-  host.imageSavesKept = 1;
-  const url = urlOf(rows($)[1]);
-  await choose($, 1, "delete");
-  assert.deepEqual(requests(host, "url_delete_preview").map((m) => m.url), [url]);
-  const said = dialogText($);
-  for (const words of [/完全に削除します。取り消せません/, /閲覧記録: 1件/, /タブのスナップショット: 0件/, /ページ情報（タイトル・説明など）: 1件/, /移動の記録: 0件/, /2件は残り、移動元が「不明」になります/, /保存履歴 1件は削除されません/, /バックアップファイルには、この記録が残ります/]) {
-    assert.match(said, words);
-  }
-  assert.equal($("#item-dialog-confirm").textContent, "削除する（取り消せません）");
-  assert.equal(rows($).length, 3, "nothing is removed by the preview");
-  host.itemDelay = 30;
-  $("#item-dialog-confirm").dispatch("click");
-  await settle(5);
-  assert.equal(rows($).length, 3, "not before the host's answer");
-  await settle(50);
-  assert.deepEqual(requests(host, "url_delete").map((m) => [m.url, m.vaultToken]), [[url, tokenOf("A")]]);
-  assert.deepEqual(rows($).map(urlOf), pages("A", 3).map((page) => page.url).filter((u) => u !== url));
-  assert.equal($("#summary").textContent, "2件（最近の順）");
-  assert.match($("#url-item-status").textContent, /Vaultから削除しました/);
-});
-
-test("after a deletion the next page starts one row earlier: no URL is skipped or shown twice", async () => {
-  const all = pages("P", 120);
-  const { $, host } = await openUrlTab({ vaults: { A: all } });
-  assert.equal(rows($).length, 50);
-  await choose($, 10, "delete");
-  await confirm($);
-  assert.equal(rows($).length, 49);
-  $("#load-more").dispatch("click");
-  await settle(30);
-  assert.deepEqual(requests(host, "search_pages").at(-1).offset, 49);
-  $("#load-more").dispatch("click");
-  await settle(30);
-  const shown = rows($).map(urlOf);
-  assert.equal(shown.length, 119);
-  assert.equal(new Set(shown).size, 119);
-  assert.deepEqual(shown, all.map((page) => page.url).filter((u) => u !== all[10].url));
-});
-
-test("a deletion previewed in another vault than the list's deletes nothing and reloads the list", async () => {
-  const { $, host } = await openUrlTab({ vaults: { A: pages("A", 3), B: pages("A", 3) } });
-  host.active = "B"; // another window switched the vault; this panel has not heard of it
-  await choose($, 0, "delete");
-  assert.equal($("#item-dialog").hidden, true);
-  assert.deepEqual(requests(host, "url_delete"), []);
-  assert.match($("#url-item-status").textContent, /Vaultが切り替えられたため、削除しませんでした/);
-  await settle(30);
-  assert.equal(requests(host, "search_pages").length, 2, "the list starts again in the active vault");
-  assert.equal(host.vaults.B.length, 3);
-});
-
-test("a deletion refused after its preview keeps the row and asks for a new preview", async () => {
-  const { $, host } = await openUrlTab({ vaults: { A: pages("A", 3), B: pages("A", 3) } });
-  await choose($, 0, "delete");
-  host.active = "B"; // switched between preview and confirmation
-  await confirm($);
-  assert.deepEqual(requests(host, "url_delete").map((m) => m.vaultToken), [tokenOf("A")]);
-  assert.equal(host.vaults.B.length, 3, "nothing deleted in the other vault");
-  assert.equal($("#item-dialog").hidden, true);
-  await settle(30);
-  assert.equal(requests(host, "search_pages").length, 2, "the list starts again, in the active vault");
-});
-
-test("a deletion that fails keeps the row and asks for a new preview", async () => {
-  const { $, host } = await openUrlTab();
-  await choose($, 0, "delete");
-  host.itemErrors.url_delete = "db_error";
-  await confirm($);
-  assert.equal(rows($).length, 3);
-  assert.match($("#item-dialog-error").textContent, /データベース/);
-  assert.equal($("#item-dialog-confirm").disabled, true);
-  assert.equal($("#item-dialog-repreview").hidden, false);
-});
-
 test("a new search or a vault switch closes the dialog, and its late answer fills nothing", async () => {
   const { $, host, document } = await openUrlTab({ vaults: { A: pages("A", 3), B: pages("B", 2) } });
   host.itemDelay = 40;
-  await choose($, 0, "delete", 5);
+  await choose($, 0, "never_save", 5);
   $("#query").value = "page 1";
   $("#query").dispatch("keydown", { key: "Enter" });
   await settle(60);
@@ -302,17 +226,6 @@ test("a new search or a vault switch closes the dialog, and its late answer fill
   assert.deepEqual(requests(host, "policy_item_apply"), []);
   // The search typed before still applies, now in vault B.
   assert.deepEqual(rows($).map(urlOf), [pages("B", 2)[1].url]);
-});
-
-test("one confirmation deletes once, even clicked twice", async () => {
-  const { $, host } = await openUrlTab();
-  await choose($, 0, "delete");
-  host.itemDelay = 40;
-  $("#item-dialog-confirm").dispatch("click");
-  $("#item-dialog-confirm").dispatch("click");
-  await settle(80);
-  assert.equal(requests(host, "url_delete").length, 1);
-  assert.equal(rows($).length, 2);
 });
 
 test("a late preview of the item chosen before never fills the dialog of the item chosen after", async () => {
@@ -341,7 +254,7 @@ test("a rule added elsewhere since the list was judged: the preview says nothing
 
 test("a vault switch closes the dialog at once, before the new list arrives", async () => {
   const { $, host, document } = await openUrlTab({ vaults: { A: pages("A", 3), B: pages("B", 2) } });
-  await choose($, 0, "delete");
+  await choose($, 0, "never_save");
   assert.equal($("#item-dialog").hidden, false);
   host.searchDelay.B = 200;
   $("#tab-settings").dispatch("click");
@@ -349,7 +262,7 @@ test("a vault switch closes the dialog at once, before the new list arrives", as
   document.querySelector('[data-manual="vault_open"]').dispatch("click");
   await settle(40);
   assert.equal($("#item-dialog").hidden, true, "closed with the old vault's rows");
-  assert.deepEqual(requests(host, "url_delete"), []);
+  assert.deepEqual(requests(host, "policy_item_apply"), []);
 });
 
 test("a next page from another vault (switched in another window) is not appended: the list starts again", async () => {
@@ -387,11 +300,11 @@ async function manage($, action, wait = 30) {
   await settle(wait);
 }
 
-test("the image details offer the four actions, with what the host says of the image's URLs", async () => {
+test("the image details offer the three policy actions (deleting has its own buttons), with what the host says of the image's URLs", async () => {
   const { $, host } = await openImage();
   assert.equal($("#gallery-manage-section").hidden, false);
   assert.equal($("#gallery-manage").disabled, false);
-  assert.deepEqual($("#gallery-manage").children.map((o) => o.value), ["", "never_save", "save_but_no_mcp", "delete", "publish"]);
+  assert.deepEqual($("#gallery-manage").children.map((o) => o.value), ["", "never_save", "save_but_no_mcp", "publish"]);
   const judged = requests(host, "policy_evaluate_batch").at(-1).items.map((item) => item.url);
   assert.deepEqual(judged.sort(), ["https://frame.test/f", "https://img.test/30.png", "https://page.test/a", "https://page.test/b"], "a data: marker is no URL");
   assert.match($("#gallery-manage-note").textContent, /公開 4・MCPサーバに見せない 0・保存しない 0/);
@@ -450,47 +363,6 @@ test("publishing for an image says what MCP also needs, and URLs already public 
   assert.deepEqual(requests(host, "image_mcp_public_set"), [], "the permission per save is not changed");
 });
 
-test("deleting an image shows the host's counts and removes it, its details and only its tags", async () => {
-  const { $, host } = await openImage();
-  host.tags.A = { 3: ["cat", "only"], 2: ["cat"] };
-  await manage($, "delete");
-  assert.deepEqual(requests(host, "image_delete_preview").map((m) => [m.blobId, m.sha256]), [[3, imageSummary(3, 0).sha256]]);
-  const said = dialogText($);
-  for (const words of [/完全に削除します。取り消せません/, /保存履歴: 2件（すべて）/, /サムネイル: 1件/, /タグの付与: 2件（ほかの画像に付いていないタグ 1件はタグ一覧からも消えます）/, /バックアップファイルには、この画像が残ります/]) assert.match(said, words);
-  assert.equal($("#gallery-grid").children.length, 2, "nothing removed by the preview");
-  await confirm($);
-  assert.deepEqual(requests(host, "image_delete").map((m) => [m.blobId, m.vaultToken]), [[3, tokenOf("A")]]);
-  assert.deepEqual($("#gallery-grid").children.map((li) => Number(li.dataset.blobId)), [2]);
-  assert.equal($("#gallery-details").hidden, true);
-  assert.equal($("#gallery-status").textContent, "画像をVaultから削除しました。");
-  assert.deepEqual(host.tags.A, { 2: ["cat"] }, "the other image keeps its tags");
-});
-
-test("an image deletion for a vault switched elsewhere deletes nothing; another selection drops a late preview", async () => {
-  // Vault B (made active in another window) holds the same image, and one more.
-  const { $, host } = await openImage(0, { imagesB: [imageSummary(3, 1_000_003), imageSummary(9, 1)] });
-  host.active = "B";
-  await manage($, "delete");
-  assert.equal($("#item-dialog").hidden, true);
-  assert.deepEqual(requests(host, "image_delete"), []);
-  await settle(30);
-  assert.deepEqual($("#gallery-grid").children.map((li) => Number(li.dataset.blobId)), [3, 9], "the list follows the active vault");
-  assert.match($("#gallery-status").textContent, /Vaultが切り替えられたため、削除しませんでした/);
-  assert.equal(host.images.B.length, 2);
-  host.active = "A";
-  $("#gallery-refresh").dispatch("click");
-  await settle(40);
-  $("#gallery-grid").dispatch("click", { target: $("#gallery-grid").children[0].children[0], detail: 1 });
-  await settle(30);
-  host.itemDelay = 40;
-  await manage($, "delete", 5);
-  $("#gallery-grid").dispatch("click", { target: $("#gallery-grid").children[1].children[0], detail: 1 });
-  await settle(80);
-  assert.equal($("#item-dialog").hidden, true, "the dialog belonged to the other image");
-  assert.equal(text($("#item-dialog-body")).trim(), "");
-  assert.deepEqual(requests(host, "image_delete"), []);
-});
-
 test("without vault_items_v1 the image details say the host must be updated, and copying still works as before", async () => {
   const { $, host } = await openImage(0, { capabilities: ["navigation_v1"] });
   assert.equal($("#gallery-manage-section").hidden, false);
@@ -499,25 +371,9 @@ test("without vault_items_v1 the image details say the host must be updated, and
   assert.deepEqual(requests(host, "policy_evaluate_batch"), []);
 });
 
-test("an image the vault no longer has is not offered again for deletion", async () => {
-  const { $, host } = await openImage();
-  host.images.A = host.images.A.filter((item) => item.blobId !== 3); // deleted elsewhere
-  await manage($, "delete");
-  assert.equal($("#item-dialog").hidden, false);
-  assert.match($("#item-dialog-error").textContent, /この画像がVaultに見つかりません.*画像一覧を更新してください/);
-  assert.equal($("#item-dialog-confirm").disabled, true);
-  assert.equal($("#item-dialog-repreview").hidden, true);
-  assert.deepEqual(requests(host, "image_delete"), []);
-});
-
-// --- With the real host -------------------------------------------------------------------------------
-// Opt-in (MEMOCAMPUS_TEST_HOST): the side panel's real code drives the real host binary, one process
-// per message as Chrome does, in a temporary MEMOCAMPUS_APP_DIR with a fresh vault and policy. Nothing
-// touches the user's vault, policy or Chrome profile.
-
 const HOST_BIN = process.env.MEMOCAMPUS_TEST_HOST;
 
-test("end to end with the real host: a URL hidden, published and deleted, an image deleted, all from the panel", { skip: HOST_BIN ? false : "set MEMOCAMPUS_TEST_HOST to run" }, async () => {
+test("end to end with the real host: a URL hidden and published, a visit, a URL and an image deleted, all from the panel", { skip: HOST_BIN ? false : "set MEMOCAMPUS_TEST_HOST to run" }, async () => {
   const { spawn } = await import("node:child_process");
   const { mkdtempSync, rmSync } = await import("node:fs");
   const os = await import("node:os");
@@ -527,7 +383,14 @@ test("end to end with the real host: a URL hidden, published and deleted, an ima
   const env = { ...process.env, MEMOCAMPUS_APP_DIR: appDir };
   delete env.MEMOCAMPUS_DB;
   const running = new Set();
+  const children = [];
   let closing = false;
+  const frame = (child, message) => {
+    const body = Buffer.from(JSON.stringify(message), "utf8");
+    const length = Buffer.alloc(4);
+    length.writeUInt32LE(body.length);
+    child.stdin.write(Buffer.concat([length, body]));
+  };
   const call = (message) =>
     new Promise((resolve, reject) => {
       if (closing) return reject(new Error("test finished"));
@@ -547,6 +410,28 @@ test("end to end with the real host: a URL hidden, published and deleted, an ima
       length.writeUInt32LE(body.length);
       child.stdin.end(Buffer.concat([length, body]));
     });
+  // A lasting port: one real host process for the whole conversation, as chrome.runtime.connectNative gives.
+  const connect = () => {
+    const child = spawn(HOST_BIN, [], { env, cwd: appDir, stdio: ["pipe", "pipe", "pipe"] });
+    running.add(child.pid);
+    children.push(child);
+    let buffer = Buffer.alloc(0);
+    const listeners = { message: [], disconnect: [] };
+    const port = { onMessage: { addListener: (f) => listeners.message.push(f) }, onDisconnect: { addListener: (f) => listeners.disconnect.push(f) }, postMessage: (m) => frame(child, m), disconnect: () => child.kill() };
+    child.stdin.on("error", () => {});
+    child.stderr.resume();
+    child.on("close", () => { running.delete(child.pid); listeners.disconnect.forEach((f) => f()); });
+    child.stdout.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (buffer.length >= 4 && buffer.length >= 4 + buffer.readUInt32LE(0)) {
+        const length = buffer.readUInt32LE(0);
+        const value = JSON.parse(buffer.subarray(4, 4 + length).toString("utf8"));
+        buffer = buffer.subarray(4 + length);
+        listeners.message.forEach((f) => f(value));
+      }
+    });
+    return port;
+  };
   const vault = path.join(appDir, "memocampus.sqlite3");
   const A = "https://forum.test/thread/1?page=2";
   const B = "https://blog.test/post";
@@ -557,8 +442,9 @@ test("end to end with the real host: a URL hidden, published and deleted, an ima
     const db = new DatabaseSync(vault);
     try {
       db.exec("PRAGMA foreign_keys = ON;");
-      const visit = db.prepare("INSERT INTO visits VALUES (?, ?, ?, '2026-11-07T10:00:00.000Z')");
-      for (const [id, url, title] of [["a1", A, "Thread"], ["a2", A, "Thread"], ["b1", B, "Blog"]]) visit.run(id, url, title);
+      const visit = db.prepare("INSERT INTO visits VALUES (?, ?, ?, ?)");
+      for (const [id, url, title, at] of [["a1", A, "Thread one", "2026-11-07T10:00:00.000Z"], ["a2", A, "Thread two", "2026-11-08T10:00:00.000Z"], ["b1", B, "Blog", "2026-11-07T10:00:00.000Z"]]) visit.run(id, url, title, at);
+      db.exec(`INSERT INTO tab_snapshots VALUES ('s1', 1, 0, '${A}', 'Thread', 0, 0, '2026-11-09T10:00:00.000Z')`);
       db.exec(`INSERT INTO image_blobs VALUES (1, '${"a".repeat(64)}', 'image/png', 3, 40, 30, 1762509600000, 1762509600000, 2, x'010203')`);
       db.exec(`INSERT INTO image_blobs VALUES (2, '${"b".repeat(64)}', 'image/png', 3, 40, 30, 1762509500000, 1762509500000, 1, x'040506')`);
       const save = db.prepare("INSERT INTO saved_images (save_id, blob_id, image_url, page_url, saved_at, incognito, mcp_public) VALUES (?, ?, ?, ?, ?, 0, 1)");
@@ -569,10 +455,12 @@ test("end to end with the real host: a URL hidden, published and deleted, an ima
       db.close();
     }
     const { $ } = await loadSidePanel({ vaults: { [vault]: [] }, active: vault, images: {}, forward: call });
+    globalThis.chrome.runtime.connectNative = connect;
     await settle(2500);
     assert.deepEqual(rows($).map(urlOf).sort(), [B, A].sort());
     const rowOf = (url) => rows($).findIndex((li) => urlOf(li) === url);
     assert.deepEqual(rows($).map((li) => actions(li).badge.textContent), ["公開", "公開"]);
+    const delConfirm = async (wait = 1500) => { $("#item-delete-confirm").dispatch("click"); await settle(wait); };
 
     await choose($, rowOf(A), "never_save", 800);
     assert.match(dialogText($), /Exact URL「https:\/\/forum\.test\/thread\/1\?page=2」/);
@@ -587,25 +475,40 @@ test("end to end with the real host: a URL hidden, published and deleted, an ima
     rules = (await call({ type: "policy_get", requestId: "g" })).policy.layers;
     assert.deepEqual(rules.neverSave.rules, []);
 
-    await choose($, rowOf(B), "delete", 800);
-    assert.match(dialogText($), /閲覧記録: 1件/);
-    assert.match(dialogText($), /保存履歴 2件は削除されません/);
-    await confirm($, 1500);
+    // One visit of A: the group opens to its visits, the icon-only button deletes that one.
+    const rowA = rows($)[rowOf(A)];
+    rowA.children[2].children[0].dispatch("click");
+    await settle(1500);
+    const events = rowA.children[3].children[1].children;
+    assert.equal(events.length, 2);
+    events[1].children[1].dispatch("click"); // the older visit, a1
+    await settle(1500);
+    assert.match(allText($("#item-delete-description")), /削除する閲覧履歴 1件/);
+    assert.match(allText($("#item-delete-description")), /スナップショット/);
+    await delConfirm();
+    assert.ok(rows($)[rowOf(A)], "A stays: another visit and a snapshot remain");
+
+    // The whole URL B.
+    rows($)[rowOf(B)].children[2].children[1].dispatch("click");
+    await settle(1500);
+    assert.match(allText($("#item-delete-description")), /削除する閲覧履歴 1件/);
+    assert.match(allText($("#item-delete-description")), /保存画像の保存履歴 2件は削除しません/);
+    await delConfirm();
     assert.deepEqual(rows($).map(urlOf), [A]);
 
     $("#tab-image").dispatch("click");
     await settle(1500);
     assert.deepEqual($("#gallery-grid").children.map((li) => Number(li.dataset.blobId)), [1, 2]);
-    $("#gallery-grid").dispatch("click", { target: $("#gallery-grid").children[0].children[0], detail: 1 });
+    $("#gallery-grid").children[0].children[1].dispatch("click");
     await settle(1500);
-    await manage($, "delete", 800);
-    assert.match(dialogText($), /保存履歴: 2件（すべて）/);
-    await confirm($, 1500);
+    assert.match(allText($("#item-delete-description")), /保存履歴 2件/);
+    await delConfirm();
     assert.deepEqual($("#gallery-grid").children.map((li) => Number(li.dataset.blobId)), [2]);
 
     const check = new DatabaseSync(vault, { readOnly: true });
     try {
-      assert.deepEqual(check.prepare("SELECT url FROM visits ORDER BY event_id").all().map((row) => row.url), [A, A]);
+      assert.deepEqual(check.prepare("SELECT event_id FROM visits ORDER BY event_id").all().map((row) => row.event_id), ["a2"]);
+      assert.deepEqual(check.prepare("SELECT event_id FROM tab_snapshots").all().map((row) => row.event_id), ["s1"], "the snapshot stays: only a visit was deleted");
       assert.deepEqual(check.prepare("SELECT id FROM image_blobs").all().map((row) => row.id), [2]);
       assert.deepEqual(check.prepare("SELECT save_id FROM saved_images").all().map((row) => row.save_id), ["s3"], "B's image save stays: only the image deleted went");
       assert.equal(check.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
@@ -615,6 +518,7 @@ test("end to end with the real host: a URL hidden, published and deleted, an ima
     }
   } finally {
     closing = true;
+    for (const child of children) child.kill();
     for (let wait = 0; running.size > 0 && wait < 100; wait += 1) await settle(100);
     rmSync(appDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

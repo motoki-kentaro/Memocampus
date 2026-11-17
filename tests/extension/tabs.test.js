@@ -101,8 +101,8 @@ test("the Image tab hosts the gallery and ships no image or external URL of its 
   assert.doesNotMatch(panel, /https?:\/\//, "no external URLs in the markup");
 });
 
-test("the settings and refresh icons are unmodified copies without active content", () => {
-  for (const name of ["settings.svg", "cached.svg"]) {
+test("the settings, refresh and delete icons are unmodified copies without active content", () => {
+  for (const name of ["settings.svg", "cached.svg", "delete.svg"]) {
     const original = read(repoRoot, "assets", name);
     const packaged = read(extensionDir, "assets", name);
     assert.ok(original.equals(packaged), `extension/assets/${name} must stay byte-identical to assets/${name}`);
@@ -116,6 +116,7 @@ test("the settings and refresh icons are unmodified copies without active conten
   }
   assert.match(css, /mask: url\("assets\/settings\.svg"\)/);
   assert.match(css, /mask: url\("assets\/cached\.svg"\)/);
+  assert.match(css, /mask: url\("assets\/delete\.svg"\)/);
 });
 
 test("the Image tab refresh control is a 44 px icon button with an accessible name", () => {

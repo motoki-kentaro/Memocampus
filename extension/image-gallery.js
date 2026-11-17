@@ -17,13 +17,16 @@
 //   export, details) is shared. Tag writes carry the vault token of the list they were made from,
 //   so the host refuses them in any other vault. The filter, the picker and the details belong to
 //   the vault: a vault change drops all of them. Tag names are shown as the host normalized them.
-// - Managing (Issue #43): the details offer one drop-down of four actions. Deleting is the image
-//   itself (its id, bytes and the gallery's vault token); a policy change is for one URL of its save
-//   history, which the person picks. Both go through the shared confirmation dialog (item-dialog.js).
+// - Managing (Issue #43): the details offer one drop-down of three policy actions. A policy change is
+//   for one URL of its save history, which the person picks (item-dialog.js).
+// - Deleting (Issue #7): a red icon button on every tile deletes that image (its saves, bytes, thumbnail
+//   and tag links); one button above the grid deletes every image, or every image with the tag the
+//   grid is filtered to. Both ask the host for a preview and confirm that exact set (delete-ui.js).
 
 import { SearchError, VAULT_UNAVAILABLE_CODES, isWebUrl } from "./search-client.js";
 import { ACTION_LABEL, DECISION_LABEL, SAME_STATE, sameState } from "./item-dialog.js";
 import { evaluateUrls } from "./vault-items-client.js";
+import { DELETE_TEXT, createStatusNotice, createTrashButton, deleteErrorText, setDangerLabel } from "./delete-ui.js";
 import {
   THUMBNAIL_BATCH,
   changeImageTag,
@@ -70,6 +73,8 @@ export function createImageGallery({
   itemDialog = null,
   itemsSupported = () => false,
   onPolicyChanged = () => {},
+  deleteDialog = null,
+  deleteSupported = () => false,
 }) {
   const scroller = $("#panel-image");
   const grid = $("#gallery-grid");
@@ -112,6 +117,7 @@ export function createImageGallery({
   const manageSection = $("#gallery-manage-section");
   const manageSelect = $("#gallery-manage");
   const manageNote = $("#gallery-manage-note");
+  const deleteAll = $("#gallery-delete-all");
 
   let generation = 0;
   let tiles = new Map(); // blobId -> { item, li, button, img, status, url }
@@ -150,7 +156,79 @@ export function createImageGallery({
 
   function updateSummary() {
     summary.textContent = tiles.size === 0 ? "" : `${tiles.size}${next ? "件以上" : "件"}`;
+    updateDeleteControls();
   }
+
+  /** The tile buttons and the range button: shown only for a host that offers reviewed deletion. */
+  function updateDeleteControls() {
+    const on = deleteSupported() === true;
+    for (const tile of tiles.values()) tile.trash.hidden = !on;
+    setDangerLabel(deleteAll, filter ? DELETE_TEXT.imagesFiltered : DELETE_TEXT.imagesAll);
+    const label = filter ? `${DELETE_TEXT.imagesFiltered}（タグ「${filter.tag}」の付いた画像すべて）` : `${DELETE_TEXT.imagesAll}（保存した画像すべて）`;
+    deleteAll.title = label;
+    deleteAll.setAttribute("aria-label", label);
+    deleteAll.hidden = !on;
+    deleteAll.disabled = !vaultToken;
+  }
+
+  /** What a confirmed deletion removes from this list: gone tiles, the details if they showed one of them. */
+  function removeDeleted(blobIds) {
+    if (pickerState) closePicker({ restoreFocus: false });
+    if (selected && blobIds.includes(selected.blobId)) closeDetails();
+    for (const id of blobIds) removeTile(id);
+  }
+
+  function deleteImage(item, opener) {
+    if (!deleteDialog || deleteSupported() !== true || !vaultToken) return;
+    showStatus("");
+    void deleteDialog.open({
+      target: { scope: "image", blobId: item.blobId, sha256: item.sha256 },
+      vaultToken,
+      condition: tileLabel(item),
+      opener,
+      onDeleted: () => {
+        // Only now, after the host committed: the tile, the details and any list of tags go.
+        const order = [...grid.children];
+        const index = order.findIndex((li) => li.dataset.blobId === String(item.blobId));
+        removeDeleted([item.blobId]);
+        showStatus("画像を削除しました。");
+        const near = [...grid.children][Math.min(index, grid.children.length - 1)];
+        const tile = near ? tiles.get(Number(near.dataset.blobId)) : null;
+        if (tile) tile.button.focus();
+        else scroller.focus();
+      },
+      onVaultMismatch: () => {
+        void vaultMismatch();
+        showStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しました。", true);
+      },
+      onStale: () => void reload(),
+      onError: (code) => showStatus(deleteErrorText(code), true),
+      onUnknown: (code, info) => status.unknown(info.vaultToken),
+    });
+  }
+
+  deleteAll.addEventListener("click", () => {
+    if (!deleteDialog || deleteSupported() !== true || !vaultToken) return;
+    showStatus("");
+    const tag = filter?.tag ?? null;
+    void deleteDialog.open({
+      target: { scope: "images", tag },
+      vaultToken,
+      opener: deleteAll,
+      onDeleted: (deleted) => {
+        showStatus(`画像${deleted.images}件を削除しました。`);
+        void reload();
+        deleteAll.focus();
+      },
+      onVaultMismatch: () => {
+        void vaultMismatch();
+        showStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しました。", true);
+      },
+      onStale: () => void reload(),
+      onError: (code) => showStatus(deleteErrorText(code), true),
+      onUnknown: (code, info) => status.unknown(info.vaultToken),
+    });
+  });
 
   function showError(error) {
     const vault = error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code);
@@ -186,8 +264,10 @@ export function createImageGallery({
     selected = null;
     details.hidden = true;
     itemDialog?.cancel("image");
+    deleteDialog?.cancel();
     resetManage();
     updateManage();
+    updateDeleteControls();
     tagsList.replaceChildren();
     setTagsMessage("");
     closePicker({ restoreFocus: false });
@@ -205,9 +285,16 @@ export function createImageGallery({
     return reload();
   }
 
+  // An unknown deletion stays above every later message of this tab (Issue #7).
+  const status = createStatusNotice({
+    paint: (text, isError) => {
+      statusLine.textContent = text;
+      statusLine.className = isError ? "gallery-status is-error" : "gallery-status";
+    },
+    vault: () => vaultToken,
+  });
   function showStatus(text, isError = false) {
-    statusLine.textContent = text;
-    statusLine.className = isError ? "gallery-status is-error" : "gallery-status";
+    status.show(text, isError);
   }
 
   /** Gives focus back to a tile, or to the Image tab itself when that tile is gone. */
@@ -242,8 +329,12 @@ export function createImageGallery({
       badge.textContent = `×${item.saveCount}`;
       button.append(badge);
     }
-    li.append(button);
-    return { item, li, button, placeholder, img: null, status: item.hasThumbnail ? "idle" : "missing", url: null };
+    // Not inside the tile button (a button in a button is invalid): a sibling at its corner.
+    const trash = createTrashButton({ label: `${DELETE_TEXT.trashImage}（${tileLabel(item)}）`, onClick: () => deleteImage(item, trash) });
+    trash.className += " tile-trash";
+    trash.hidden = deleteSupported() !== true;
+    li.append(button, trash);
+    return { item, li, button, trash, placeholder, img: null, status: item.hasThumbnail ? "idle" : "missing", url: null };
   }
 
   /** Loads the next page; resolves true when it was applied to the current list. */
@@ -529,7 +620,7 @@ export function createImageGallery({
   // A policy rule is for a URL, never for the image itself: the person picks which URL of the save
   // history (image, page or frame URL) a rule is for. Deleting is the image itself.
 
-  const MANAGE_ACTIONS = ["never_save", "save_but_no_mcp", "delete", "publish"];
+  const MANAGE_ACTIONS = ["never_save", "save_but_no_mcp", "publish"];
   const MAX_SOURCE_PAGES = 50;
   const URL_KIND = { imageUrl: "画像URL", pageUrl: "ページURL", frameUrl: "フレームURL" };
 
@@ -577,7 +668,7 @@ export function createImageGallery({
     const urls = candidates(state.sources);
     const complete = state.next === null && state.sourcesLoaded;
     for (const option of manageSelect.children) {
-      if (!option.value || option.value === "delete") continue;
+      if (!option.value) continue;
       let reason = null;
       if (complete && urls.length === 0) reason = "対象にできるURLがありません";
       else if (complete && urls.every((choice) => sameState(option.value, state.decisions.get(choice.url)))) reason = `すべてのURLが${SAME_STATE[option.value]}`;
@@ -699,31 +790,7 @@ export function createImageGallery({
       resetManage();
       return;
     }
-    if (action !== "delete") {
-      void choosePolicy(state, action);
-      return;
-    }
-    const { item, blobId } = state;
-    itemDialog.openImageDelete({
-      owner: "image",
-      item,
-      label: tileLabel(item),
-      vaultToken,
-      opener: manageSelect,
-      onClose: resetManage,
-      onDeleted: () => {
-        // Only now, after the host committed: the tile, the details and any list of tags go.
-        if (pickerState) closePicker({ restoreFocus: false });
-        if (selected?.blobId === blobId) closeDetails();
-        removeTile(blobId);
-        showStatus("画像をVaultから削除しました。");
-        focusTile(blobId);
-      },
-      onVaultMismatch: () => {
-        void vaultMismatch();
-        showStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しました。", true);
-      },
-    });
+    void choosePolicy(state, action);
   }
 
   // --- Details (save history) ----------------------------------------------------------------
@@ -1026,6 +1093,7 @@ export function createImageGallery({
   function renderFilter() {
     filterChip.hidden = !filter;
     filterName.textContent = filter ? `タグ: ${filter.tag}` : "";
+    updateDeleteControls();
   }
 
   /** Sets the filter (null: all images); the caller reloads the list. */
@@ -1245,7 +1313,12 @@ export function createImageGallery({
     /** Whether the host offers item actions became known. */
     itemsChanged() {
       updateManage();
+      updateDeleteControls();
       if (selected) void evaluateSources(selected);
+    },
+    /** The deletion client's port ended or the Vault selection changed: a pending deletion dialog is void. */
+    deleteInvalidated() {
+      deleteDialog?.cancel();
     },
     /** The policy changed (in the URL tab): the open image's URLs are judged again. */
     policyChanged() {

@@ -146,3 +146,38 @@ fn only_days_that_exist_are_timestamps() {
         assert!(!is_calendar_timestamp(bad), "{bad}");
     }
 }
+
+#[test]
+fn a_source_is_present_censored_or_unknown_and_never_guessed() {
+    assert_eq!(
+        source_state(Some(SOURCE), false),
+        Some(SourceState::Present(SOURCE))
+    );
+    assert_eq!(source_state(None, true), Some(SourceState::Censored));
+    assert_eq!(
+        source_state(None, false),
+        Some(SourceState::Unknown),
+        "a bare NULL is not a deletion"
+    );
+    assert_eq!(
+        source_state(Some(SOURCE), true),
+        None,
+        "no row of this host is both; nothing is shown for it"
+    );
+    let present = |id: &str| format!("visit {id}");
+    assert_eq!(
+        source_state(Some("a"), false)
+            .unwrap()
+            .label(present, "不明"),
+        "visit a"
+    );
+    assert_eq!(
+        source_state(None, true).unwrap().label(present, "不明"),
+        "[CENSORED]"
+    );
+    assert_eq!(
+        source_state(None, false).unwrap().label(present, "不明"),
+        "不明"
+    );
+    assert_eq!(CENSORED_LABEL, "[CENSORED]");
+}

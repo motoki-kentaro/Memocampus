@@ -56,6 +56,41 @@ const KEYS: [&str; 9] = [
     "occurredAt",
 ];
 
+/// What the source of a stored navigation is (Issue #7, `navigation_events.source_censored`). Three
+/// states a reader must not confuse: a visit that is there, a visit the person deleted on purpose, and a
+/// source that was never known, stored or allowed (a bare NULL). Only the deletion sets the marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceState<'a> {
+    Present(&'a str),
+    Censored,
+    Unknown,
+}
+
+/// What a reader shows where a deleted source stood. Display only: it is never stored in place of a URL.
+pub const CENSORED_LABEL: &str = "[CENSORED]";
+
+/// The state of a row's source. A censored row with a source is no row this host writes (the table's
+/// CHECK refuses it): `None`, so a reader never shows a guess.
+pub fn source_state(source: Option<&str>, censored: bool) -> Option<SourceState<'_>> {
+    match (source, censored) {
+        (Some(id), false) => Some(SourceState::Present(id)),
+        (None, true) => Some(SourceState::Censored),
+        (None, false) => Some(SourceState::Unknown),
+        (Some(_), true) => None,
+    }
+}
+
+impl SourceState<'_> {
+    /// The text for a source: the visit as the caller names it, `[CENSORED]`, or the caller's "unknown".
+    pub fn label(self, present: impl FnOnce(&str) -> String, unknown: &str) -> String {
+        match self {
+            Self::Present(id) => present(id),
+            Self::Censored => CENSORED_LABEL.to_owned(),
+            Self::Unknown => unknown.to_owned(),
+        }
+    }
+}
+
 /// One navigation, checked, as stored in `navigation_events` (the target is the visit itself).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Navigation {

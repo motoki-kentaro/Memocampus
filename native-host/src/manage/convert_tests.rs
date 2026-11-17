@@ -137,7 +137,7 @@ fn fill(session: &mut Session) {
                  INSERT INTO visits VALUES ('v2', 'https://canary.test/two', 'two', '2026-11-10T10:01:00.000Z');
                  INSERT INTO page_metadata (url, event_id, title, description, captured_at)
                    VALUES ('https://canary.test/CANARY-url', 'v1', 'CANARY-meta', 'desc', '2026-11-10T10:00:00.000Z');
-                 INSERT INTO navigation_events VALUES ('v2', 'v1', 'document', 'link', 0, 0, 0, 0, 0, '2026-11-10T10:01:00.000Z');
+                 INSERT INTO navigation_events (target_visit_id, source_visit_id, kind, transition_type, client_redirect, server_redirect, forward_back, from_address_bar, new_tab, occurred_at) VALUES ('v2', 'v1', 'document', 'link', 0, 0, 0, 0, 0, '2026-11-10T10:01:00.000Z');
                  INSERT INTO tab_snapshots VALUES ('t1', 1, 0, 'https://canary.test/tab', 'tab', 0, 0, '2026-11-10T10:02:00.000Z');
                  INSERT INTO image_tags (id, name) VALUES (1, 'canary-tag'), (2, 'other-tag');",
             )?;

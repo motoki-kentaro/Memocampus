@@ -33,6 +33,27 @@ Provenance as checked on 2026-10-30:
   additional path points (deviating by at most 0.34 units).
 - Which Google download format or tool produced this exact encoding has not been confirmed.
 
+## Material Symbols — “delete” icon
+
+| | |
+|---|---|
+| File | `assets/delete.svg` (the red delete buttons of the URL, Image and Page tabs) |
+| Material | Material Symbols, icon “delete” (Outlined style) |
+| Provider | Google LLC |
+| Source | Google Fonts Material Symbols — https://fonts.google.com/icons (documentation: https://developers.google.com/fonts/docs/material_symbols , repository: https://github.com/google/material-design-icons ) |
+| License | Apache License, Version 2.0 — full text in `LICENSES/Apache-2.0.txt` (also at https://www.apache.org/licenses/LICENSE-2.0 ) |
+| NOTICE | Same upstream as above: no NOTICE file to carry over (checked 2026-10-30; not re-checked for this icon). |
+| Changes by Memocampus | None. The file is used unmodified and displayed through a CSS mask, which only sets the rendered colour. |
+
+Provenance:
+
+- The file was supplied by the project owner (Issue #7) as the Google Material Symbols “delete” icon. Google states
+  that Material Symbols are available under the Apache License Version 2.0.
+- It has **not** been compared with the SVG Google serves for this icon, so it is not claimed to be byte-identical to it.
+  It uses `viewBox="0 0 24 24"` and `fill="#1f1f1f"`, like the other two icons in this folder.
+- The file is one `<svg>` with a single `<path>`: no script, style, link, image or other external reference
+  (checked by a test).
+
 ## Material Symbols — “cached” icon
 
 | | |

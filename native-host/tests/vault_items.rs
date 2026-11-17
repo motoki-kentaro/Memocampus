@@ -108,8 +108,8 @@ fn setup() -> TempDir {
         .unwrap();
     }
     db.execute_batch(&format!(
-        "INSERT INTO navigation_events VALUES ('a2', 'a1', 'document', 'link', 0, 0, 0, 0, 0, '{T}');
-         INSERT INTO navigation_events VALUES ('b1', 'a3', 'document', 'link', 0, 0, 0, 0, 1, '{T}');
+        "INSERT INTO navigation_events (target_visit_id, source_visit_id, kind, transition_type, client_redirect, server_redirect, forward_back, from_address_bar, new_tab, occurred_at) VALUES ('a2', 'a1', 'document', 'link', 0, 0, 0, 0, 0, '{T}');
+         INSERT INTO navigation_events (target_visit_id, source_visit_id, kind, transition_type, client_redirect, server_redirect, forward_back, from_address_bar, new_tab, occurred_at) VALUES ('b1', 'a3', 'document', 'link', 0, 0, 0, 0, 1, '{T}');
          INSERT INTO tab_snapshots VALUES ('s1', 1, 0, '{A}', 'A', 0, 0, '{T}');
          INSERT INTO page_metadata (url, event_id, title, captured_at) VALUES ('{A}', 'a3', 'A', '{T}');"
     ))
@@ -158,7 +158,7 @@ fn dump(path: &Path) -> Vec<String> {
             "SELECT 'v ' || event_id || ' ' || url FROM visits
              UNION ALL SELECT 's ' || event_id || ' ' || url FROM tab_snapshots
              UNION ALL SELECT 'p ' || url FROM page_metadata
-             UNION ALL SELECT 'n ' || target_visit_id || ' <- ' || coalesce(source_visit_id, 'NULL') FROM navigation_events
+             UNION ALL SELECT 'n ' || target_visit_id || ' <- ' || coalesce(source_visit_id, 'NULL') || CASE WHEN source_censored = 1 THEN ' CENSORED' ELSE '' END FROM navigation_events
              UNION ALL SELECT 'b ' || id FROM image_blobs
              UNION ALL SELECT 'i ' || save_id FROM saved_images
              UNION ALL SELECT 'th ' || blob_id FROM image_thumbnails
@@ -192,6 +192,64 @@ fn without(rows: &[String], gone: &[&str]) -> Vec<String> {
         .collect()
 }
 
+/// One host process kept open, as Chrome keeps one per `connectNative` port.
+struct Port {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    stdout: std::process::ChildStdout,
+}
+
+impl Port {
+    fn open(tmp: &TempDir) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_memocampus-native-host"))
+            .env("MEMOCAMPUS_APP_DIR", tmp.app_dir())
+            .env_remove("MEMOCAMPUS_DB")
+            .current_dir(&tmp.0)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        Self {
+            child,
+            stdin,
+            stdout,
+        }
+    }
+    fn send(&mut self, message: &Value) -> Value {
+        let body = serde_json::to_vec(message).unwrap();
+        self.stdin
+            .write_all(&(body.len() as u32).to_ne_bytes())
+            .unwrap();
+        self.stdin.write_all(&body).unwrap();
+        let mut length = [0u8; 4];
+        self.stdout.read_exact(&mut length).unwrap();
+        let mut reply = vec![0u8; u32::from_ne_bytes(length) as usize];
+        self.stdout.read_exact(&mut reply).unwrap();
+        serde_json::from_slice(&reply).unwrap()
+    }
+    fn state(&mut self) -> Value {
+        self.send(&json!({ "type": "item_state", "requestId": "s" }))
+    }
+    fn call(&mut self, binding: &Value, kind: &str, extra: Value) -> Value {
+        let mut message = json!({ "type": kind, "requestId": "r", "vaultToken": binding["vaultToken"], "generation": binding["generation"] });
+        message
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        self.send(&message)
+    }
+}
+
+impl Drop for Port {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 #[test]
 fn a_url_is_previewed_then_deleted_whole_and_alone() {
     let tmp = setup();
@@ -205,37 +263,48 @@ fn a_url_is_previewed_then_deleted_whole_and_alone() {
     );
     let backup = PathBuf::from(backup["backupPath"].as_str().unwrap());
 
-    let preview = call(
-        &tmp,
-        json!({ "type": "url_delete_preview", "requestId": "p", "url": A }),
+    let mut port = Port::open(&tmp);
+    let binding = port.state();
+    let preview = port.call(
+        &binding,
+        "item_delete_preview",
+        json!({ "target": { "scope": "url", "url": A } }),
     );
-    let token = vault_token(&tmp);
-    let counts = json!({ "visits": 3, "tabSnapshots": 1, "pageMetadata": 1, "navigations": 1, "navigationSourcesCleared": 1, "imageSavesKept": 3 });
-    assert_eq!(
-        preview,
-        json!({ "ok": true, "type": "url_delete_preview_result", "requestId": "p", "vaultToken": token, "url": A, "counts": counts, "irreversible": true })
-    );
+    let counts = json!({ "kind": "url", "urls": 1, "visits": 3, "tabSnapshots": 1, "pageMetadata": 1, "navigations": 1, "navigationSourcesCleared": 1, "imageSavesKept": 3 });
+    assert_eq!(preview["ok"], true, "{preview}");
+    assert_eq!(preview["counts"], counts);
     assert_eq!(dump(&tmp.vault()), before, "a preview changes nothing");
 
-    // A token of no vault: refused, nothing changed.
-    let refused = call(
-        &tmp,
-        json!({ "type": "url_delete", "requestId": "d", "url": A, "vaultToken": "0".repeat(64) }),
+    // Another process cannot confirm it (a restarted Host, another port); a wrong id neither.
+    let mut other = Port::open(&tmp);
+    let other_binding = other.state();
+    let refused = other.call(
+        &other_binding,
+        "item_delete",
+        json!({ "reviewId": preview["reviewId"] }),
     );
     assert_eq!(
         (refused["ok"].clone(), refused["error"].clone()),
-        (json!(false), json!("vault_switched"))
+        (json!(false), json!("invalid_review"))
     );
+    let refused = port.call(&binding, "item_delete", json!({ "reviewId": "not-the-id" }));
+    assert_eq!(refused["error"], "invalid_review");
     assert_eq!(dump(&tmp.vault()), before);
 
-    let deleted = call(
-        &tmp,
-        json!({ "type": "url_delete", "requestId": "d", "url": A, "vaultToken": token }),
+    let deleted = port.call(
+        &binding,
+        "item_delete",
+        json!({ "reviewId": preview["reviewId"] }),
     );
-    assert_eq!(
-        deleted,
-        json!({ "ok": true, "type": "url_delete_result", "requestId": "d", "vaultToken": token, "url": A, "deleted": counts, "irreversible": true })
+    assert_eq!(deleted["ok"], true, "{deleted}");
+    assert_eq!(deleted["deleted"], counts);
+    assert_eq!(deleted["operationId"], preview["reviewId"]);
+    let status = port.call(
+        &binding,
+        "item_delete_status",
+        json!({ "operationId": preview["reviewId"] }),
     );
+    assert_eq!(status["confirmed"], true);
     let mut expected = without(
         &before,
         &[
@@ -248,7 +317,7 @@ fn a_url_is_previewed_then_deleted_whole_and_alone() {
             "n b1 <- a3",
         ],
     );
-    expected.push("n b1 <- NULL".into());
+    expected.push("n b1 <- NULL CENSORED".into());
     expected.sort();
     assert_eq!(
         dump(&tmp.vault()),
@@ -271,12 +340,13 @@ fn a_url_is_previewed_then_deleted_whole_and_alone() {
         "{urls:?}"
     );
     assert_eq!(dump(&backup), before, "the backup still holds it");
-    // Again: a no-op with zero counts.
-    let again = call(
-        &tmp,
-        json!({ "type": "url_delete", "requestId": "d", "url": A, "vaultToken": token }),
+    // Confirmed once: the same id does nothing a second time.
+    let again = port.call(
+        &binding,
+        "item_delete",
+        json!({ "reviewId": preview["reviewId"] }),
     );
-    assert_eq!(again["deleted"]["visits"], 0);
+    assert_eq!(again["error"], "invalid_review");
     // A new visit of the URL is recorded again: the policy allows it.
     let ack = call(
         &tmp,
@@ -286,9 +356,72 @@ fn a_url_is_previewed_then_deleted_whole_and_alone() {
 }
 
 #[test]
+fn visits_are_previewed_and_deleted_by_event_and_by_filter() {
+    let tmp = setup();
+    let before = dump(&tmp.vault());
+    let mut port = Port::open(&tmp);
+    let binding = port.state();
+    let history = port.call(&binding, "visit_history", json!({ "url": A }));
+    assert_eq!(
+        history["counts"],
+        json!({ "matched": 3, "total": 3, "snapshots": 1 })
+    );
+    assert_eq!(history["items"].as_array().unwrap().len(), 3);
+    // One event: the others of the URL, its snapshot and the other URLs stay.
+    let preview = port.call(
+        &binding,
+        "item_delete_preview",
+        json!({ "target": { "scope": "visit", "id": "a2" } }),
+    );
+    assert_eq!(preview["counts"]["visits"], 1, "{preview}");
+    assert_eq!(
+        port.call(
+            &binding,
+            "item_delete",
+            json!({ "reviewId": preview["reviewId"] })
+        )["ok"],
+        true
+    );
+    assert_eq!(
+        dump(&tmp.vault()),
+        without(&before, &[&format!("v a2 {A}"), "n a2 <- a1"])
+    );
+    // A filter: the visits found by the list's own query (here: by URL), never snapshots.
+    let preview = port.call(
+        &binding,
+        "item_delete_preview",
+        json!({ "target": { "scope": "visits", "query": "forum.test/thread/1?page=2" } }),
+    );
+    assert_eq!(preview["counts"]["visits"], 2, "{preview}");
+    assert_eq!(preview["counts"]["snapshotsKept"], 1);
+    assert_eq!(
+        port.call(
+            &binding,
+            "item_delete",
+            json!({ "reviewId": preview["reviewId"] })
+        )["ok"],
+        true
+    );
+    let left = dump(&tmp.vault());
+    assert!(
+        left.contains(&format!("s s1 {A}"))
+            && left.contains(&format!("v q1 {A_OTHER_QUERY}"))
+            && left.contains(&format!("v b1 {B}"))
+    );
+    assert!(!left.iter().any(|row| row.starts_with("v a")));
+}
+
+#[test]
 fn a_deletion_meant_for_the_previous_vault_is_refused_in_the_new_one() {
     let tmp = setup();
-    let token_a = vault_token(&tmp);
+    let mut port = Port::open(&tmp);
+    let binding_a = port.state();
+    let preview_image = port.call(
+        &binding_a,
+        "item_delete_preview",
+        json!({ "target": { "scope": "image", "blobId": 1, "sha256": sha('a') } }),
+    );
+    assert_eq!(preview_image["ok"], true, "{preview_image}");
     let before_a = dump(&tmp.vault());
     // Another vault becomes active (another window, the settings page), with the same URL and image.
     let vault_b = tmp.0.join("second.sqlite3");
@@ -313,17 +446,26 @@ fn a_deletion_meant_for_the_previous_vault_is_refused_in_the_new_one() {
     db.execute("INSERT INTO saved_images (save_id, blob_id, image_url, saved_at, incognito, mcp_public) VALUES ('s', 1, 'https://img.test/1.png', 0, 0, 0)", []).unwrap();
     drop(db);
     let before_b = dump(&vault_b);
-    for message in [
-        json!({ "type": "url_delete", "requestId": "d", "url": A, "vaultToken": token_a }),
-        json!({ "type": "image_delete", "requestId": "d", "blobId": 1, "sha256": sha('a'), "vaultToken": token_a }),
-    ] {
-        let reply = call(&tmp, message);
-        assert_eq!(
-            (reply["ok"].clone(), reply["error"].clone()),
-            (json!(false), json!("vault_switched")),
-            "{reply}"
-        );
-    }
+    // The pending review is for A: its confirmation is refused now that B is active.
+    let reply = port.call(
+        &binding_a,
+        "item_delete",
+        json!({ "reviewId": preview_image["reviewId"] }),
+    );
+    assert_eq!(
+        (reply["ok"].clone(), reply["error"].clone()),
+        (json!(false), json!("vault_switched")),
+        "{reply}"
+    );
+    let reply = port.call(
+        &binding_a,
+        "item_delete_preview",
+        json!({ "target": { "scope": "url", "url": A } }),
+    );
+    assert_eq!(
+        reply["error"], "vault_switched",
+        "an old binding previews nothing either"
+    );
     assert_eq!(
         dump(&vault_b),
         before_b,
@@ -337,37 +479,36 @@ fn an_image_is_deleted_with_its_history_thumbnail_and_unused_tags_only() {
     let tmp = setup();
     let before = dump(&tmp.vault());
     let token = vault_token(&tmp);
-    let preview = call(
-        &tmp,
-        json!({ "type": "image_delete_preview", "requestId": "p", "blobId": 1, "sha256": sha('a') }),
-    );
-    let counts = json!({ "saves": 2, "thumbnails": 1, "tagLinks": 2, "tagsRemoved": 1 });
-    assert_eq!(
-        preview,
-        json!({ "ok": true, "type": "image_delete_preview_result", "requestId": "p", "vaultToken": token, "blobId": 1, "sha256": sha('a'), "byteLength": 3, "counts": counts, "irreversible": true })
-    );
-    // The bytes of another image, or an image that does not exist: refused, nothing changed.
+    let mut port = Port::open(&tmp);
+    let binding = port.state();
+    let target = json!({ "scope": "image", "blobId": 1, "sha256": sha('a') });
+    let preview = port.call(&binding, "item_delete_preview", json!({ "target": target }));
+    let counts = json!({ "kind": "images", "images": 1, "bytes": 3, "saves": 2, "thumbnails": 1, "tagLinks": 2, "tagsRemoved": 1 });
+    assert_eq!(preview["counts"], counts, "{preview}");
+    assert_eq!(preview["vaultToken"], token);
+    // The bytes of another image, or an image that does not exist: no such image, nothing changed.
     for (id, c) in [(1, 'b'), (2, 'a'), (9, 'a')] {
-        let reply = call(
-            &tmp,
-            json!({ "type": "image_delete", "requestId": "d", "blobId": id, "sha256": sha(c), "vaultToken": token }),
+        let reply = port.call(
+            &binding,
+            "item_delete_preview",
+            json!({ "target": { "scope": "image", "blobId": id, "sha256": sha(c) } }),
         );
         assert_eq!(
             (reply["ok"].clone(), reply["error"].clone()),
-            (json!(false), json!("blob_missing")),
+            (json!(false), json!("item_not_found")),
             "{reply}"
         );
     }
     assert_eq!(dump(&tmp.vault()), before);
 
-    let deleted = call(
-        &tmp,
-        json!({ "type": "image_delete", "requestId": "d", "blobId": 1, "sha256": sha('a'), "vaultToken": token }),
+    let preview = port.call(&binding, "item_delete_preview", json!({ "target": target }));
+    let deleted = port.call(
+        &binding,
+        "item_delete",
+        json!({ "reviewId": preview["reviewId"] }),
     );
-    assert_eq!(
-        deleted,
-        json!({ "ok": true, "type": "image_delete_result", "requestId": "d", "vaultToken": token, "blobId": 1, "sha256": sha('a'), "deleted": counts, "irreversible": true })
-    );
+    assert_eq!(deleted["ok"], true, "{deleted}");
+    assert_eq!(deleted["deleted"], counts);
     assert_eq!(
         dump(&tmp.vault()),
         without(
@@ -410,11 +551,35 @@ fn an_image_is_deleted_with_its_history_thumbnail_and_unused_tags_only() {
         json!({ "type": "image_sources", "requestId": "s", "blobId": 1 }),
     );
     assert_eq!(sources["items"], json!([]), "{sources}");
-    let again = call(
-        &tmp,
-        json!({ "type": "image_delete", "requestId": "d", "blobId": 1, "sha256": sha('a'), "vaultToken": token }),
+    // The old one-shot messages no longer exist.
+    for kind in [
+        "url_delete",
+        "url_delete_preview",
+        "image_delete",
+        "image_delete_preview",
+    ] {
+        let reply = call(
+            &tmp,
+            json!({ "type": kind, "requestId": "d", "url": A, "blobId": 1, "sha256": sha('a'), "vaultToken": token }),
+        );
+        assert_eq!(reply["ok"], false, "{kind}");
+    }
+    assert_eq!(
+        dump(&tmp.vault()).len(),
+        without(
+            &before,
+            &[
+                "b 1",
+                "i save-1-0",
+                "i save-1-1",
+                "th 1",
+                "l 1 only-one",
+                "l 1 shared",
+                "t only-one"
+            ]
+        )
+        .len()
     );
-    assert_eq!(again["error"], "blob_missing");
 }
 
 fn preview(tmp: &TempDir, url: &str, action: &str, scope: Option<&str>) -> Value {

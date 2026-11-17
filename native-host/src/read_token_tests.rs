@@ -1,6 +1,6 @@
 //! One vault per read answer: every reply that names a vault (`vaultToken`) names the vault its
 //! data was read from, also when another process switches the active vault while the request is
-//! answered. Drives the real handlers of image_query, image_tags, vault_items, image_original and
+//! answered. Drives the real handlers of image_query, image_tags, image_original and
 //! the image save protocol, with the switch placed deterministically by `Session::after_open`
 //! (right after a resolution opened its vault: the window in which a `ticket()` followed by a
 //! `read()` paired one vault's token with the other's data).
@@ -11,7 +11,7 @@ use crate::images::tests::{configure, png};
 use crate::images::{self, sha256_hex, SaveRequest, ThumbnailInput};
 use crate::vault::tests::TempDir;
 use crate::vault::{create_vault, open_vault, vault_token, Environment, Session};
-use crate::{image_original, image_query, image_tags, vault_items};
+use crate::{image_original, image_query, image_tags};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -157,6 +157,7 @@ fn switching(t: &Two, to: &Path) -> Session {
 
 /// Every read handler that names its vault, with one request each.
 #[derive(Clone, Copy, Debug)]
+#[allow(clippy::enum_variant_names)]
 enum Read {
     ImageList,
     ImageThumbnails,
@@ -164,19 +165,15 @@ enum Read {
     ImageTagsGet,
     ImageTagList,
     ImageTagSearch,
-    UrlDeletePreview,
-    ImageDeletePreview,
 }
 
-const READS: [Read; 8] = [
+const READS: [Read; 6] = [
     Read::ImageList,
     Read::ImageThumbnails,
     Read::ImageSources,
     Read::ImageTagsGet,
     Read::ImageTagList,
     Read::ImageTagSearch,
-    Read::UrlDeletePreview,
-    Read::ImageDeletePreview,
 ];
 
 fn ask(session: &mut Session, read: Read) -> Value {
@@ -187,10 +184,6 @@ fn ask(session: &mut Session, read: Read) -> Value {
         Read::ImageTagsGet => json!({ "type": "image_tags_get", "blobId": 1 }),
         Read::ImageTagList => json!({ "type": "image_tag_list" }),
         Read::ImageTagSearch => json!({ "type": "image_tag_search", "tag": "shared" }),
-        Read::UrlDeletePreview => json!({ "type": "url_delete_preview", "url": URL }),
-        Read::ImageDeletePreview => {
-            json!({ "type": "image_delete_preview", "blobId": 1, "sha256": sha() })
-        }
     };
     let mut message = message;
     message["requestId"] = "r".into();
@@ -201,7 +194,6 @@ fn ask(session: &mut Session, read: Read) -> Value {
         Read::ImageTagsGet | Read::ImageTagList | Read::ImageTagSearch => {
             image_tags::handle(session, &message)
         }
-        Read::UrlDeletePreview | Read::ImageDeletePreview => vault_items::handle(session, &message),
     }
 }
 
@@ -300,45 +292,6 @@ fn no_vault_or_a_missing_one_is_the_error_it_was() {
         let answer = ask(&mut Session::new(t.env.clone()), read);
         assert_eq!(answer["error"], "vault_missing", "{read:?}");
         assert!(answer.get("vaultToken").is_none());
-    }
-}
-
-#[test]
-fn a_delete_confirmed_on_a_preview_never_lands_in_the_vault_switched_to() {
-    // The preview answered in flight names A (with A's counts); B is active by then. A delete that
-    // names that preview's token is refused, and neither vault loses anything.
-    let t = two();
-    let mut session = switching(&t, &t.b);
-    let preview = ask(&mut session, Read::UrlDeletePreview);
-    assert_eq!(preview["vaultToken"], token(&t.a));
-    assert_eq!(preview["counts"]["visits"], 1, "A's count: {preview}");
-    let deleted = vault_items::handle(
-        &mut session,
-        &json!({ "type": "url_delete", "requestId": "d", "url": URL, "vaultToken": preview["vaultToken"] }),
-    );
-    assert_eq!(deleted["ok"], false);
-    assert_eq!(deleted["error"], "vault_switched");
-
-    configure(&t.env, &t.a);
-    let mut session = switching(&t, &t.b);
-    let preview = ask(&mut session, Read::ImageDeletePreview);
-    assert_eq!(preview["vaultToken"], token(&t.a));
-    let deleted = vault_items::handle(
-        &mut session,
-        &json!({ "type": "image_delete", "requestId": "d", "blobId": 1, "sha256": sha(),
-                 "vaultToken": preview["vaultToken"] }),
-    );
-    assert_eq!(deleted["error"], "vault_switched");
-
-    for (vault, visits, saves) in [(&t.a, 1, 1), (&t.b, 2, 2)] {
-        let db = open_vault(vault).unwrap();
-        let count = |table: &str| -> i64 {
-            db.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
-                row.get(0)
-            })
-            .unwrap()
-        };
-        assert_eq!((count("visits"), count("saved_images")), (visits, saves));
     }
 }
 
