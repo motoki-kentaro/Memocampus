@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Memocampus History</title>
+    <link rel="stylesheet" href="history.css">
+  </head>
+  <body>
+    <header class="history-header">
+      <h1>Memocampus History</h1>
+      <p id="history-status" class="history-status" role="status" aria-live="polite" hidden></p>
+    </header>
+
+    <div class="history-layout">
+      <aside class="history-side" aria-label="日付と検索条件">
+        <section class="calendar" aria-labelledby="cal-title">
+          <div class="calendar-head">
+            <button id="cal-prev" type="button" class="icon-button" aria-label="前の月" title="前の月">‹</button>
+            <h2 id="cal-title" class="calendar-title" aria-live="polite"></h2>
+            <button id="cal-next" type="button" class="icon-button" aria-label="次の月" title="次の月">›</button>
+          </div>
+          <table id="cal-table" class="cal-table" aria-labelledby="cal-title"></table>
+          <button id="cal-jump" type="button" class="link-button" hidden>選択中の日の月へ戻る</button>
+          <p id="cal-status" class="note" role="status" hidden></p>
+          <p class="note"><span class="cal-dot-sample" aria-hidden="true"></span> 記録のある日（現在のドメイン条件に一致）</p>
+        </section>
+
+        <section class="domain-filter" aria-labelledby="domain-label">
+          <label id="domain-label" for="domain-input">ドメイン</label>
+          <input id="domain-input" type="search" maxlength="256" placeholder="未入力ならすべてのドメイン" autocomplete="off" spellcheck="false" aria-describedby="domain-hint domain-error">
+          <fieldset class="mode-switch">
+            <legend>照合方法</legend>
+            <label><input id="mode-exact" type="radio" name="mode" value="exact" checked> 完全一致</label>
+            <label><input id="mode-regex" type="radio" name="mode" value="regex"> 正規表現</label>
+          </fieldset>
+          <p id="domain-hint" class="note"></p>
+          <p id="domain-error" class="field-error" role="alert" hidden></p>
+        </section>
+      </aside>
+
+      <main class="history-main">
+        <div class="list-head">
+          <h2 id="selected-heading" tabindex="-1"></h2>
+          <p id="result-count" class="note" role="status" aria-live="polite"></p>
+          <label class="size-label">表示件数
+            <select id="size-select">
+              <option value="25">25件</option>
+              <option value="50" selected>50件</option>
+              <option value="100">100件</option>
+            </select>
+          </label>
+        </div>
+        <div id="history-state" class="state-panel">
+          <p id="history-state-text" role="status"></p>
+          <button id="history-retry" type="button" hidden>再読み込み</button>
+          <button id="history-settings" type="button" hidden>Vault設定を開く</button>
+        </div>
+        <ol id="history-list" class="visit-list" aria-labelledby="selected-heading" hidden></ol>
+        <nav id="history-pager" class="pager" aria-label="ページ" hidden></nav>
+      </main>
+    </div>
+    <script type="module" src="history.js"></script>
+  </body>
+</html>

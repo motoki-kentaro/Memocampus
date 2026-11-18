@@ -69,6 +69,17 @@ const deleteClient = createDeleteClient({
     showItemStatus(code === "vault_switched" ? "Vaultが変更されたため、削除の確認を取り消しました。" : deleteErrorText(code));
   },
 });
+// The full-page History opens in a new tab; the side panel stays. A second click while the tab is being made does nothing.
+const openHistoryButton = document.querySelector("#open-history");
+let openingHistory = false;
+openHistoryButton.addEventListener("click", () => {
+  if (openingHistory) return;
+  openingHistory = true;
+  chrome.tabs
+    .create({ url: chrome.runtime.getURL("history.html") })
+    .catch(() => showItemStatus("Historyを開けませんでした。"))
+    .finally(() => setTimeout(() => { openingHistory = false; }, 600));
+});
 const deleteDialog = createDeleteDialog({ client: deleteClient });
 deleteDialog.onStatus((text) => showItemStatus(text));
 const tabs = createTabs(
