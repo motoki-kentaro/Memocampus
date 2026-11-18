@@ -142,7 +142,7 @@ export function createCalendarView({ table, document, onSelect }) {
  * (`data-visit-id`) so that a later detail can be attached to it. A title opens the page in a new tab only when
  * the URL is a complete http(s) one; a cut URL is fetched in full first (`onOpenCut`), never opened as cut.
  */
-export function renderRows({ list, document, items, onOpenCut }) {
+export function renderRows({ list, document, items, onOpenCut, onToggle = null }) {
   const rows = items.map((item) => {
     const row = make(document, "li", "visit-row");
     row.dataset.visitId = item.id;
@@ -170,6 +170,23 @@ export function renderRows({ list, document, items, onOpenCut }) {
     meta.append(make(document, "span", "visit-host", item.host === "" ? "（ホスト名なし）" : item.host), make(document, "span", "visit-url", item.urlTruncated ? `${item.url}…` : item.url));
     body.append(title, meta);
     row.append(time, body);
+    if (onToggle) {
+      // The expander is its own button (never the title link), and the detail region it controls sits under the row.
+      const regionId = `visit-detail-${item.id}`;
+      const toggle = make(document, "button", "visit-toggle", "詳細を表示");
+      toggle.setAttribute("type", "button");
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.setAttribute("aria-controls", regionId);
+      const region = make(document, "section", "visit-detail");
+      region.setAttribute("id", regionId);
+      region.setAttribute("aria-label", `${titleText}の詳細`);
+      region.hidden = true;
+      const ui = { id: item.id, row, toggle, region };
+      toggle.addEventListener("click", () => onToggle(item, ui));
+      body.append(toggle);
+      row.append(region);
+      row.ui = ui;
+    }
     return row;
   });
   list.replaceChildren(...rows);
@@ -214,4 +231,137 @@ export function renderPager({ nav, document, page, pages, onPage }) {
   parts.push(button("›", "次のページ", page + 1, { disabled: page >= pages }), button("»", "最後のページ", pages, { disabled: page >= pages }));
   nav.replaceChildren(...parts);
   return currentButton;
+}
+
+// ---------------------------------------------------------------------------------------------- detail
+
+export const SOURCE_CENSORED = "[CENSORED]";
+
+/** The row's detail region: closed, loading, failed (with a retry) or showing a visit. */
+export function setOpen(ui, open) {
+  ui.toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  ui.toggle.textContent = open ? "詳細を閉じる" : "詳細を表示";
+  ui.region.hidden = !open;
+  if (!open) ui.region.replaceChildren();
+  setClass(ui.row, "is-expanded", open);
+}
+
+export function showDetailLoading(ui, document) {
+  const text = make(document, "p", "detail-note", "詳細を読み込み中…");
+  text.setAttribute("role", "status");
+  ui.region.replaceChildren(text);
+}
+
+export function showDetailError(ui, document, message, onRetry) {
+  const text = make(document, "p", "detail-error", message);
+  text.setAttribute("role", "alert");
+  const parts = [text];
+  if (onRetry) {
+    const retry = make(document, "button", "link-button", "再読み込み");
+    retry.setAttribute("type", "button");
+    retry.addEventListener("click", onRetry);
+    parts.push(retry);
+  }
+  ui.region.replaceChildren(...parts);
+}
+
+/** A web URL is a link that opens in a new tab; a cut one, or anything else, is only text (never opened as given). */
+function urlNode(document, url, { cut = false, label = url, className = "detail-url" } = {}) {
+  if (!cut && isWebUrl(url)) {
+    const link = make(document, "a", className, label);
+    link.href = url;
+    link.setAttribute("href", url);
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noopener noreferrer");
+    return link;
+  }
+  return make(document, "span", className, cut ? `${label}…` : label);
+}
+
+const card = (document, heading, extraClass = "") => {
+  const section = make(document, "div", extraClass ? `detail-card ${extraClass}` : "detail-card");
+  section.append(make(document, "h4", "detail-heading", heading));
+  return section;
+};
+const field = (document, name, value) => {
+  const row = make(document, "div", "detail-field");
+  row.append(make(document, "span", "detail-name", name));
+  const content = make(document, "span", "detail-value");
+  content.append(value);
+  row.append(content);
+  return row;
+};
+const when = (iso) => {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${localTime(iso)}`;
+};
+
+function visitLine(document, item, extra = "") {
+  const line = make(document, "div", "detail-visit");
+  const titleText = item.title === "" ? NO_TITLE : item.titleTruncated ? `${item.title}…` : item.title;
+  line.append(make(document, "span", "detail-visit-title", titleText));
+  line.append(urlNode(document, item.url, { cut: item.urlTruncated, className: "detail-url" }));
+  const meta = [item.host, when(item.visitedAt), extra].filter((part) => part !== "").join(" ・ ");
+  line.append(make(document, "span", "detail-meta", meta));
+  return line;
+}
+
+/**
+ * The detail of one visit, from `historyVisit`'s model. The three states of the source are told apart and never
+ * stand in for each other: `present` shows the visit, `[CENSORED]` shows nothing of it, `unknown` is not "direct access".
+ */
+export function showDetail(ui, document, detail) {
+  const parts = [];
+  const visit = card(document, "訪問情報", "detail-card-visit");
+  visit.append(field(document, "訪問日時", make(document, "span", "", when(detail.visit.visitedAt))));
+  visit.append(field(document, "タイトル", make(document, "span", "", detail.visit.title === "" ? NO_TITLE : detail.visit.title)));
+  visit.append(field(document, "URL", urlNode(document, detail.visit.url)));
+  if (detail.navigation && (detail.navigation.kind || detail.navigation.transitionType)) {
+    visit.append(field(document, "記録された遷移の種類", make(document, "span", "", [detail.navigation.kind, detail.navigation.transitionType].filter(Boolean).join(" / "))));
+  }
+
+  const source = card(document, "遷移元", "detail-card-source");
+  if (detail.source.state === "present") {
+    source.append(visitLine(document, detail.source.visit));
+  } else if (detail.source.state === "censored") {
+    source.append(make(document, "strong", "detail-censored", SOURCE_CENSORED));
+    source.append(make(document, "p", "detail-note", "遷移元の閲覧履歴は削除されています"));
+  } else {
+    source.append(make(document, "p", "detail-unknown", "遷移元：不明"));
+    source.append(make(document, "p", "detail-note", "遷移元は記録されていないか、確定できませんでした。"));
+  }
+  parts.push(source, visit);
+
+  const targets = card(document, "遷移先", "detail-card-targets");
+  const shownCount = detail.targets.length;
+  const summary = detail.targetsTruncated ? `遷移先 ${detail.targetCount.toLocaleString("ja-JP")}件（先頭${shownCount.toLocaleString("ja-JP")}件を表示）` : `遷移先 ${detail.targetCount.toLocaleString("ja-JP")}件`;
+  if (detail.targetCount === 0) {
+    targets.append(make(document, "p", "detail-note", "記録された遷移先はありません"));
+  } else {
+    targets.append(make(document, "p", "detail-note", summary));
+    if (shownCount === 0) targets.append(make(document, "p", "detail-note", "表示できる遷移先の訪問がありません。"));
+    const list = make(document, "ul", "detail-targets");
+    for (const target of detail.targets) {
+      const item = make(document, "li", "detail-target");
+      item.dataset.visitId = target.id;
+      item.append(visitLine(document, target, [target.kind, target.transitionType].filter(Boolean).join(" / ")));
+      list.append(item);
+    }
+    if (shownCount > 0) targets.append(list);
+  }
+  parts.push(targets);
+
+  if (detail.pageMetadata) {
+    const meta = card(document, "取得したページ情報", "detail-card-meta");
+    const note = detail.pageMetadata.capturedAt ? `この訪問に紐づく取得（${when(detail.pageMetadata.capturedAt)}）。訪問時点の内容とは限りません。` : "この訪問に紐づく取得。訪問時点の内容とは限りません。";
+    meta.append(make(document, "p", "detail-note", note));
+    const labels = [["title", "タイトル"], ["description", "説明"], ["ogTitle", "OGタイトル"], ["ogDescription", "OG説明"], ["ogSiteName", "サイト名"], ["ogImageUrl", "画像URL"], ["faviconUrl", "ファビコンURL"]];
+    for (const [key, name] of labels) {
+      const value = detail.pageMetadata[key];
+      if (value) meta.append(field(document, name, make(document, "span", "", value)));
+    }
+    parts.push(meta);
+  }
+  ui.region.replaceChildren(...parts);
 }

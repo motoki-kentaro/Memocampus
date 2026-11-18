@@ -119,7 +119,7 @@ test("with no parameters the day is today and the month the calendar shows is to
   const { $, app, win } = await openHistory({ visits: { A: FULL } });
   assert.deepEqual(app.state.date, TODAY);
   assert.deepEqual(app.shownMonth, { year: 2026, monthIndex: 10 });
-  assert.equal($("cal-title").textContent, "2026年11月");
+  assert.equal($("cal-title").textContent, "2026 ▼ 11月");
   assert.deepEqual(win.log, []);
 });
 
@@ -164,7 +164,7 @@ test("the month moves without touching the chosen day, the list or the URL; the 
   const lists = host.of("history_list").length;
   $("cal-prev").dispatch("click");
   await settle(10);
-  assert.equal($("cal-title").textContent, "2026年10月");
+  assert.equal($("cal-title").textContent, "2026 ▼ 10月");
   assert.deepEqual(marked($), [20]);
   assert.equal(host.of("history_list").length, lists, "no list request");
   assert.deepEqual(win.log, [], "the URL did not change");
@@ -176,7 +176,7 @@ test("the month moves without touching the chosen day, the list or the URL; the 
   assert.deepEqual(host.of("history_days").at(-1).bounds, monthBounds(2026, 9));
   $("cal-jump").dispatch("click");
   await settle(10);
-  assert.equal($("cal-title").textContent, "2026年11月");
+  assert.equal($("cal-title").textContent, "2026 ▼ 11月");
   assert.equal(withClass($("cal-table"), "is-selected").length, 1);
   assert.equal($("cal-jump").hidden, true);
 });
@@ -191,11 +191,72 @@ test("a late answer for another month never overwrites the month shown", async (
   $("cal-prev").dispatch("click");
   $("cal-prev").dispatch("click");
   await settle(10);
-  assert.equal($("cal-title").textContent, "2026年10月");
+  assert.equal($("cal-title").textContent, "2026 ▼ 10月");
   assert.deepEqual(marked($), [20]);
   releaseNovember();
   await settle(10);
   assert.deepEqual(marked($), [20], "the held answer of another month is dropped");
+});
+
+test("the calendar head has ◀ and ▶ and the title opens the year-month picker", async () => {
+  const { $, host, document } = await openHistory({ visits: { A: FULL } });
+  assert.equal($("cal-prev").textContent, "◀");
+  assert.equal($("cal-next").textContent, "▶");
+  assert.equal($("cal-prev").getAttribute("aria-label"), "前の月");
+  assert.equal($("cal-next").getAttribute("aria-label"), "次の月");
+  assert.equal($("cal-title").textContent, "2026 ▼ 11月");
+  assert.equal($("cal-title").getAttribute("aria-expanded"), "false");
+  assert.equal($("cal-table").hidden, false);
+  assert.equal($("cal-months").hidden, true);
+
+  // Click title: opens the year-month picker.
+  $("cal-title").dispatch("click");
+  assert.equal($("cal-title").textContent, "2026 ▲");
+  assert.equal($("cal-title").getAttribute("aria-expanded"), "true");
+  assert.equal($("cal-prev").getAttribute("aria-label"), "前の年");
+  assert.equal($("cal-next").getAttribute("aria-label"), "次の年");
+  assert.equal($("cal-table").hidden, true);
+  assert.equal($("cal-months").hidden, false);
+  assert.equal($("cal-jump").hidden, true);
+
+  // 12 month buttons exist.
+  const months = withClass($("cal-months"), "calendar-month");
+  assert.equal(months.length, 12);
+  assert.equal(months[10].getAttribute("aria-current"), "true", "November is current");
+  assert.equal(months[0].getAttribute("aria-current"), null);
+
+  // Moving years in the picker asks nothing of the host.
+  const daysCalls = host.of("history_days").length;
+  $("cal-prev").dispatch("click");
+  assert.equal($("cal-title").textContent, "2025 ▲");
+  assert.equal(host.of("history_days").length, daysCalls, "moving years sends no host requests");
+  $("cal-next").dispatch("click");
+  assert.equal($("cal-title").textContent, "2026 ▲");
+
+  // Closing the picker by clicking title again restores days view without changing month.
+  $("cal-title").dispatch("click");
+  assert.equal($("cal-title").textContent, "2026 ▼ 11月");
+  assert.equal($("cal-title").getAttribute("aria-expanded"), "false");
+  assert.equal($("cal-table").hidden, false);
+  assert.equal($("cal-months").hidden, true);
+
+  // Re-open and close with Escape.
+  $("cal-title").dispatch("click");
+  assert.equal($("cal-title").textContent, "2026 ▲");
+  document.dispatch("keydown", { key: "Escape" });
+  assert.equal($("cal-title").textContent, "2026 ▼ 11月");
+  assert.equal($("cal-table").hidden, false);
+  assert.equal($("cal-months").hidden, true);
+
+  // Picking a month moves to it and asks the host for that month.
+  $("cal-title").dispatch("click");
+  months[4].dispatch("click"); // 5月 (May)
+  await settle(10);
+  assert.equal($("cal-title").textContent, "2026 ▼ 5月");
+  assert.equal($("cal-table").hidden, false);
+  assert.equal($("cal-months").hidden, true);
+  assert.equal($("cal-jump").hidden, false, "May !== November 17, so cal-jump is visible");
+  assert.deepEqual(host.of("history_days").at(-1).bounds, monthBounds(2026, 4));
 });
 
 test("today and the chosen day look different, and a chosen day is told by aria-pressed and the label", async () => {
@@ -438,7 +499,7 @@ test("Back and Forward restore the search, the inputs and the calendar's month f
   assert.deepEqual([app.state.date.day, app.state.mode], [3, "exact"]);
   assert.equal($("mode-exact").checked, true);
   assert.deepEqual(app.shownMonth, { year: 2026, monthIndex: 10 }, "the month of the restored day");
-  assert.equal($("cal-title").textContent, "2026年11月");
+  assert.equal($("cal-title").textContent, "2026 ▼ 11月");
   win.back();
   await settle(10);
   assert.equal(app.state.date.day, 17);
@@ -664,15 +725,16 @@ test("a complete http(s) URL opens in a new tab by a link; a cut URL is fetched 
   assert.equal(tabs.opened.length, 1);
 });
 
-test("a cut title and URL say so; rows keep their visit id for the details of the next slice", async () => {
+test("a cut title and URL say so; rows keep their visit id and a closed detail toggle", async () => {
   const longTitle = "t".repeat(600);
   const { $ } = await openHistory({ visits: { A: [visit("c1", `https://c.test/${"x".repeat(2100)}`, longTitle, at(2026, 11, 17, 8))] } });
   const row = rowsOf($)[0];
   assert.equal(row.dataset.visitId, "c1");
   assert.ok(text(row).includes("…"));
   assert.equal(withClass(row, "visit-link")[0].textContent.endsWith("…"), true);
-  // No expand control is offered yet.
-  assert.equal(walk(row).some((e) => e.tagName === "BUTTON" && !e.className.includes("visit-link")), false);
+  // Slice 3: the only other control is the detail toggle, closed at first.
+  const others = walk(row).filter((e) => e.tagName === "BUTTON" && !e.className.includes("visit-link"));
+  assert.deepEqual(others.map((e) => [e.className, e.getAttribute("aria-expanded")]), [["visit-toggle", "false"]]);
 });
 
 // -------------------------------------------------------------------------------------------- security
@@ -738,3 +800,15 @@ test("the side panel opens History in a new tab, once for a double click, and th
   assert.match(html, /<button id="open-history" type="button" class="secondary"/);
 });
 
+test("the calendar title's accessible name follows the month shown; history.html carries no fixed year or month", async () => {
+  const html = readFileSync(path.join(extensionDir, "history.html"), "utf8");
+  assert.doesNotMatch(html, /id="cal-title"[^>]*\d{4}/, "no year or month in the static title");
+  assert.doesNotMatch(html, /aria-labelledby="cal-title"/);
+  const { $ } = await openHistory({ visits: { A: FULL } });
+  assert.equal($("cal-title").getAttribute("aria-label"), "2026年11月、年と月を選ぶ");
+  $("cal-prev").dispatch("click");
+  await settle(10);
+  assert.equal($("cal-title").getAttribute("aria-label"), "2026年10月、年と月を選ぶ");
+  $("cal-title").dispatch("click");
+  assert.equal($("cal-title").getAttribute("aria-label"), "2026年、月の一覧を閉じる");
+});

@@ -12,7 +12,7 @@ import { SearchError, VAULT_UNAVAILABLE_CODES, createLatestGate, describeErrorCo
 import { historyDays, historyList, historyVisit, hostSupportsHistory } from "./history-client.js";
 import { buildSearch, parseSearch, sameState } from "./history-state.js";
 import { MIN_YEAR, YEARS_AHEAD, addMonths, localDayBounds, localToday, monthBounds } from "./visit-calendar.js";
-import { createCalendarView, longDate, renderPager, renderRows } from "./history-view.js";
+import { createCalendarView, longDate, renderPager, renderRows, setOpen, showDetail, showDetailError, showDetailLoading } from "./history-view.js";
 
 /** Errors of the domain input itself: shown at the input, and no list is shown for a condition that cannot be applied. */
 export const INPUT_CODES = new Set(["invalid_regex", "unsupported_regex", "regex_limit", "regex_too_long", "invalid_domain"]);
@@ -24,6 +24,7 @@ const MESSAGES = Object.freeze({
   regex_too_long: "正規表現が長すぎます（512バイトまで）。",
   invalid_domain: "ドメインの形式が正しくありません。ホスト名だけを入力してください（例: github.com）。",
   response_too_large: "この日の表示データが大きすぎて取得できません。ページサイズを小さくするか、条件を絞ってください。",
+  visit_not_found: "この訪問は見つかりません（削除された可能性があります）。",
   vault_unstable: "Vaultが何度も切り替わっているため、表示を止めました。「再読み込み」を押してください。",
 });
 export const errorText = (code) => (Object.hasOwn(MESSAGES, code) ? MESSAGES[code] : describeErrorCode(code));
@@ -32,6 +33,15 @@ const HINTS = Object.freeze({ exact: "完全一致の例: github.com（サブド
 const MAX_VAULT_RESETS = 3;
 const MAX_RANGE_CORRECTIONS = 3;
 const REFRESH_MIN_MS = 1000;
+
+// VaultError::code in native-host/src/vault.rs. Busy / transport / DB errors do not prove a Vault state change.
+const VAULT_STATE_CODES = new Set([...VAULT_UNAVAILABLE_CODES, "vault_locked", "vault_switched", "key_unavailable", "vault_decrypt_failed", "vault_mode_mismatch", "vault_encryption_unsupported", "vault_legacy_unsupported"]);
+const COMMUNICATION_CODES = new Set(["timeout", "host_unavailable"]);
+const codeOf = (error) => error instanceof SearchError ? error.code : "host_unavailable";
+
+export function isPickerSelectionValid(view, year, monthIndex, lastYear) {
+  return view === "months" && Number.isInteger(year) && Number.isInteger(lastYear) && year >= MIN_YEAR && year <= lastYear && Number.isInteger(monthIndex) && monthIndex >= 0 && monthIndex < 12;
+}
 
 export function createHistoryApp({
   document,
@@ -45,7 +55,7 @@ export function createHistoryApp({
 }) {
   const $ = (id) => document.querySelector(`#${id}`);
   const el = Object.fromEntries(
-    ["history-status", "cal-prev", "cal-next", "cal-title", "cal-table", "cal-jump", "cal-status", "domain-input", "mode-exact", "mode-regex", "domain-hint", "domain-error", "selected-heading", "result-count", "size-select", "history-state", "history-state-text", "history-retry", "history-settings", "history-list", "history-pager"].map((id) => [id, $(id)]),
+    ["history-status", "cal-prev", "cal-next", "cal-title", "cal-table", "cal-months", "cal-legend", "cal-jump", "cal-status", "domain-input", "mode-exact", "mode-regex", "domain-hint", "domain-error", "selected-heading", "result-count", "size-select", "history-state", "history-state-text", "history-retry", "history-settings", "history-list", "history-pager"].map((id) => [id, $(id)]),
   );
   const options = { send };
   const listGate = createLatestGate();
@@ -54,6 +64,8 @@ export function createHistoryApp({
   let state = null;
   let shown = null; // the calendar's month: { year, monthIndex }
   let counts = null; // the marks of `shown` for the current domain condition, or null while unknown
+  let view = "days"; // or "months"
+  let pickerYear = null;
   let supported = null;
   let vaultToken = null;
   let vaultResets = 0;
@@ -63,11 +75,34 @@ export function createHistoryApp({
   let opening = null; // the full-URL fetch in flight: { id, epoch, token }
   let listEpoch = 0; // bumped whenever what the list shows may no longer be what a pending detail was asked for
   let shownIds = new Set();
+  let expanded = new Map(); // visit id -> the context of its open detail: { id, ui, epoch, token }
+  let uiById = new Map(); // visit id -> the row's controls, of the list on screen only
   let lastRefresh = 0;
   let started = 0;
 
   const today = () => localToday(now());
+  const maxYear = () => Math.max(today().year + YEARS_AHEAD, state ? state.date.year : today().year + YEARS_AHEAD);
+  const inRange = (year) => Number.isInteger(year) && year >= MIN_YEAR && year <= maxYear();
   const calendar = createCalendarView({ table: el["cal-table"], document, onSelect: (date) => commit({ ...withDraft(), date, page: 1 }, { push: true }) });
+
+  const monthButtons = el["cal-months"] ? Array.from({ length: 12 }, (_, monthIndex) => {
+    const choice = document.createElement("button");
+    choice.type = "button";
+    choice.className = "calendar-month";
+    choice.textContent = `${monthIndex + 1}月`;
+    choice.dataset.month = String(monthIndex);
+    choice.addEventListener("click", () => {
+      if (choice.disabled || !isPickerSelectionValid(view, pickerYear, monthIndex, maxYear())) return;
+      shown = { year: pickerYear, monthIndex };
+      view = "days";
+      counts = null;
+      drawCalendar();
+      if (supported === true) void loadDays();
+      el["cal-title"].focus();
+    });
+    el["cal-months"].append(choice);
+    return choice;
+  }) : [];
 
   // ---------------------------------------------------------------------------------------------- drawing
 
@@ -76,13 +111,61 @@ export function createHistoryApp({
     el["history-status"].hidden = text === "";
   };
 
+  function renderCalendarHead() {
+    if (view === "days") {
+      const before = addMonths(shown.year, shown.monthIndex, -1);
+      const after = addMonths(shown.year, shown.monthIndex, 1);
+      el["cal-prev"].disabled = !inRange(before.year);
+      el["cal-next"].disabled = !inRange(after.year);
+      el["cal-prev"].textContent = "◀";
+      el["cal-next"].textContent = "▶";
+      el["cal-prev"].setAttribute("aria-label", "前の月");
+      el["cal-next"].setAttribute("aria-label", "次の月");
+      el["cal-prev"].title = "前の月";
+      el["cal-next"].title = "次の月";
+      el["cal-title"].textContent = `${shown.year} ▼ ${shown.monthIndex + 1}月`;
+      el["cal-title"].setAttribute("aria-label", `${shown.year}年${shown.monthIndex + 1}月、年と月を選ぶ`);
+      el["cal-title"].setAttribute("aria-expanded", "false");
+    } else {
+      el["cal-prev"].disabled = !inRange(pickerYear - 1);
+      el["cal-next"].disabled = !inRange(pickerYear + 1);
+      el["cal-prev"].textContent = "◀";
+      el["cal-next"].textContent = "▶";
+      el["cal-prev"].setAttribute("aria-label", "前の年");
+      el["cal-next"].setAttribute("aria-label", "次の年");
+      el["cal-prev"].title = "前の年";
+      el["cal-next"].title = "次の年";
+      el["cal-title"].textContent = `${pickerYear} ▲`;
+      el["cal-title"].setAttribute("aria-label", `${pickerYear}年、月の一覧を閉じる`);
+      el["cal-title"].setAttribute("aria-expanded", "true");
+    }
+  }
+
+  function renderMonths() {
+    const shownHere = pickerYear === shown.year;
+    for (const [monthIndex, choice] of monthButtons.entries()) {
+      choice.setAttribute("aria-label", `${pickerYear}年${monthIndex + 1}月`);
+      if (shownHere && monthIndex === shown.monthIndex) {
+        choice.setAttribute("aria-current", "true");
+      } else {
+        choice.removeAttribute("aria-current");
+      }
+      choice.disabled = !inRange(pickerYear);
+    }
+  }
+
   function drawCalendar() {
-    calendar.show({ year: shown.year, monthIndex: shown.monthIndex, counts, selected: state.date, today: today() });
-    el["cal-title"].textContent = `${shown.year}年${shown.monthIndex + 1}月`;
-    const limit = Math.max(today().year + YEARS_AHEAD, state.date.year);
-    el["cal-prev"].disabled = shown.year <= MIN_YEAR && shown.monthIndex === 0;
-    el["cal-next"].disabled = shown.year >= limit && shown.monthIndex === 11;
-    el["cal-jump"].hidden = shown.year === state.date.year && shown.monthIndex === state.date.monthIndex;
+    renderCalendarHead();
+    el["cal-table"].hidden = view !== "days";
+    if (el["cal-months"]) el["cal-months"].hidden = view !== "months";
+    if (el["cal-legend"]) el["cal-legend"].hidden = view !== "days";
+    if (view === "days") {
+      calendar.show({ year: shown.year, monthIndex: shown.monthIndex, counts, selected: state.date, today: today() });
+      el["cal-jump"].hidden = shown.year === state.date.year && shown.monthIndex === state.date.monthIndex;
+    } else {
+      el["cal-jump"].hidden = true;
+      renderMonths();
+    }
   }
 
   /** Anything a pending detail answer was bound to has changed: it will no longer be accepted. */
@@ -114,6 +197,8 @@ export function createHistoryApp({
     el["history-list"].hidden = true;
     el["history-list"].replaceChildren();
     shownIds = new Set();
+    expanded = new Map();
+    uiById = new Map();
     el["history-pager"].replaceChildren();
     el["history-pager"].hidden = true;
     el["result-count"].textContent = "";
@@ -128,7 +213,9 @@ export function createHistoryApp({
       return;
     }
     el["history-list"].hidden = false;
-    renderRows({ list: el["history-list"], document, items: result.items, onOpenCut: openCut });
+    expanded = new Map(); // a new list: nothing of an old one stays open
+    const rows = renderRows({ list: el["history-list"], document, items: result.items, onOpenCut: openCut, onToggle: toggleDetail });
+    uiById = new Map(rows.map((row) => [row.ui.id, row.ui]));
     shownIds = new Set(result.items.map((item) => item.id));
     el["result-count"].textContent = `${filtered ? "条件に一致する訪問 " : ""}${result.total.toLocaleString("ja-JP")}件（${result.page} / ${result.pages}ページ）`;
     const current = renderPager({ nav: el["history-pager"], document, page: result.page, pages: result.pages, onPage: (page) => { pendingFocus = "pager"; commit({ ...withDraft(), page }, { push: true }); } });
@@ -137,6 +224,40 @@ export function createHistoryApp({
   }
 
   // ----------------------------------------------------------------------------------------------- loading
+
+  /** Only call after the caller's latest-request / row-context check. No automatic re-fetch. */
+  function revokeVault(error) {
+    vaultToken = null;
+    counts = null;
+    opening = null;
+    invalidateList();
+    listGate.next();
+    dayGate.next();
+    started++;
+    for (const context of expanded.values()) setOpen(context.ui, false);
+    panel(errorText(codeOf(error)), { retry: true, settings: VAULT_UNAVAILABLE_CODES.has(codeOf(error)) });
+    say("");
+    el["cal-status"].textContent = "";
+    el["cal-status"].hidden = true;
+    drawCalendar();
+  }
+
+  function vaultFailed(error) {
+    if (!VAULT_STATE_CODES.has(codeOf(error))) return false;
+    revokeVault(error);
+    return true;
+  }
+
+  /** A transport failure is not a Vault switch. Keep completed data, but never adopt pending detail/URL replies. */
+  function cancelPendingDetails(error) {
+    opening = null;
+    for (const context of expanded.values()) {
+      if (!context.pending) continue;
+      context.pending = false;
+      context.cancelled = true;
+      showDetailError(context.ui, document, errorText(codeOf(error)), () => retryDetail({ id: context.id }, context.ui, context));
+    }
+  }
 
   /** A response of another Vault than the one this page is showing: everything shown is dropped and read again. */
   function accept(token) {
@@ -164,9 +285,12 @@ export function createHistoryApp({
   }
 
   function failed(error) {
+    if (vaultFailed(error)) return;
     invalidateList();
     shownIds = new Set();
-    const code = error instanceof SearchError ? error.code : "host_unavailable";
+    expanded = new Map();
+    uiById = new Map();
+    const code = codeOf(error);
     if (INPUT_CODES.has(code)) {
       domainError(errorText(code));
       panel("検索条件を修正してください。");
@@ -222,6 +346,8 @@ export function createHistoryApp({
       result = await historyDays({ bounds: monthBounds(asked.year, asked.monthIndex), domain: state.domain, mode: state.mode }, options);
     } catch (error) {
       if (!dayGate.isCurrent(ticket)) return;
+      if (vaultFailed(error)) return;
+      if (COMMUNICATION_CODES.has(codeOf(error))) cancelPendingDetails(error);
       counts = null;
       drawCalendar();
       const code = error instanceof SearchError ? error.code : "host_unavailable";
@@ -263,13 +389,18 @@ export function createHistoryApp({
   async function begin() {
     const run = ++started;
     invalidateList();
+    listGate.next();
+    dayGate.next();
     panel("読み込み中…");
     domainError("");
     try {
-      supported = await hostSupportsHistory(options);
+      const available = await hostSupportsHistory(options);
+      if (run !== started) return;
+      supported = available;
     } catch (error) {
+      if (run !== started) return;
       supported = null;
-      if (run === started) failed(error);
+      failed(error);
       return;
     }
     if (run !== started) return;
@@ -289,8 +420,64 @@ export function createHistoryApp({
     if (at - lastRefresh < REFRESH_MIN_MS) return;
     lastRefresh = at;
     vaultResets = 0;
-    void loadList({ reset: false });
+    // Open details belong to the list on screen: reading it again would close them. The marks are still read, which
+    // is also how a switch of Vault is noticed.
+    if (expanded.size === 0) void loadList({ reset: false });
     void loadDays({ keep: true });
+  }
+
+  // ------------------------------------------------------------------------------------------ detail
+
+  const detailErrorText = (error) => errorText(error instanceof SearchError ? error.code : "host_unavailable");
+
+  /**
+   * Opens or closes the detail of a row. Every opening has its own context (visit id, list epoch, Vault token), so an
+   * answer belongs to that opening only: closing, another list, another Vault, another visit's answer or a reopening
+   * all drop it without a trace on the screen.
+   */
+  function toggleDetail(item, ui) {
+    if (expanded.has(item.id)) {
+      expanded.delete(item.id);
+      setOpen(ui, false);
+      return;
+    }
+    if (supported !== true || vaultToken === null || !shownIds.has(item.id) || uiById.get(item.id) !== ui) return;
+    void openDetail(item, ui);
+  }
+
+  async function openDetail(item, ui) {
+    const context = { id: item.id, ui, epoch: listEpoch, token: vaultToken, pending: true, cancelled: false };
+    expanded.set(item.id, context);
+    setOpen(ui, true);
+    showDetailLoading(ui, document);
+    const current = () => !context.cancelled && expanded.get(context.id) === context && uiById.get(context.id) === ui && context.epoch === listEpoch && vaultToken !== null && vaultToken === context.token && shownIds.has(context.id);
+    let detail;
+    try {
+      detail = await historyVisit(item.id, options);
+    } catch (error) {
+      if (!current() || vaultFailed(error)) return;
+      if (COMMUNICATION_CODES.has(codeOf(error))) {
+        cancelPendingDetails(error);
+      } else {
+        context.pending = false;
+        showDetailError(ui, document, detailErrorText(error), () => retryDetail(item, ui, context));
+      }
+      return;
+    }
+    if (detail.id !== context.id || detail.vaultToken !== context.token || !current()) {
+      // Another Vault answered while this page still believes in the old one: read again, show nothing of it.
+      if (detail.vaultToken !== context.token && current()) accept(detail.vaultToken);
+      return;
+    }
+    context.pending = false;
+    showDetail(ui, document, detail);
+  }
+
+  function retryDetail(item, ui, context) {
+    if (expanded.get(context.id) !== context || context.epoch !== listEpoch) return;
+    expanded.delete(context.id);
+    if (vaultToken === null) return;
+    void openDetail(item, ui);
   }
 
   /**
@@ -304,12 +491,12 @@ export function createHistoryApp({
     if (opening && opening.epoch === listEpoch) return;
     const context = { id: item.id, epoch: listEpoch, token: vaultToken };
     opening = context;
-    const stillHere = () => context.epoch === listEpoch && vaultToken !== null && vaultToken === context.token && shownIds.has(context.id);
+    const stillHere = () => opening === context && context.epoch === listEpoch && vaultToken !== null && vaultToken === context.token && shownIds.has(context.id);
     try {
       const visit = await historyVisit(item.id, options);
       if (visit.id !== context.id || visit.vaultToken !== context.token || !stillHere()) {
         // A different Vault answered while this page still believes in the old one: read again, do not open.
-        if (visit.vaultToken !== context.token && context.epoch === listEpoch && vaultToken === context.token) accept(visit.vaultToken);
+        if (visit.vaultToken !== context.token && stillHere()) accept(visit.vaultToken);
         return;
       }
       if (isWebUrl(visit.url)) {
@@ -318,8 +505,10 @@ export function createHistoryApp({
       } else {
         say("完全なURLを取得できなかったため、開きません。");
       }
-    } catch {
-      if (stillHere()) say("完全なURLを取得できなかったため、開きません。");
+    } catch (error) {
+      if (!stillHere() || vaultFailed(error)) return;
+      if (COMMUNICATION_CODES.has(codeOf(error))) cancelPendingDetails(error);
+      say("完全なURLを取得できなかったため、開きません。");
     } finally {
       if (opening === context) opening = null;
     }
@@ -364,9 +553,46 @@ export function createHistoryApp({
     drawCalendar();
     if (supported === true) void loadDays();
   };
-  el["cal-prev"].addEventListener("click", () => moveMonth(-1));
-  el["cal-next"].addEventListener("click", () => moveMonth(1));
+  el["cal-prev"].addEventListener("click", () => {
+    if (view === "months") {
+      if (!inRange(pickerYear - 1)) return;
+      pickerYear -= 1;
+      drawCalendar();
+    } else {
+      moveMonth(-1);
+    }
+  });
+  el["cal-next"].addEventListener("click", () => {
+    if (view === "months") {
+      if (!inRange(pickerYear + 1)) return;
+      pickerYear += 1;
+      drawCalendar();
+    } else {
+      moveMonth(1);
+    }
+  });
+  el["cal-title"].addEventListener("click", () => {
+    if (view === "days") {
+      view = "months";
+      pickerYear = shown.year;
+      drawCalendar();
+      (monthButtons[shown.monthIndex] ?? el["cal-title"]).focus();
+    } else {
+      view = "days";
+      drawCalendar();
+      el["cal-title"].focus();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && view === "months") {
+      event.preventDefault?.();
+      view = "days";
+      drawCalendar();
+      el["cal-title"].focus();
+    }
+  });
   el["cal-jump"].addEventListener("click", () => {
+    view = "days";
     shown = { year: state.date.year, monthIndex: state.date.monthIndex };
     counts = null;
     drawCalendar();
@@ -378,6 +604,7 @@ export function createHistoryApp({
   win.addEventListener("popstate", () => {
     if (typingTimer !== null) timers.clearTimeout(typingTimer);
     typingTimer = null;
+    view = "days";
     readUrl();
     invalidateList();
     rangeCorrections = 0;

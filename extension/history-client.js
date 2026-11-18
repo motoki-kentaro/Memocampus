@@ -69,10 +69,58 @@ export async function historyDays({ bounds, domain, mode }, options) {
   return { counts: [...counts], total: counts.reduce((a, b) => a + b, 0), vaultToken };
 }
 
-/** One visit with its full URL (the list may carry a cut one). Only what Slice 2 needs is returned. */
+const SOURCE_STATES = new Set(["present", "censored", "unknown"]);
+const optionalText = (value) => (typeof value === "string" ? value : null);
+
+function checkedTarget(item) {
+  const base = checkedItem(item);
+  return { ...base, kind: optionalText(item.kind), transitionType: optionalText(item.transitionType), occurredAt: optionalText(item.occurredAt) };
+}
+
+function checkedNavigation(value) {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw bad();
+  return { kind: optionalText(value.kind), transitionType: optionalText(value.transitionType), occurredAt: optionalText(value.occurredAt) };
+}
+
+/**
+ * `source.state` is one of three, and only `present` carries a visit. A `censored` or `unknown` source keeps nothing
+ * but its state (whatever else the answer carries is dropped); any other state is `invalid_response`, never guessed.
+ */
+function checkedSource(value) {
+  if (!value || typeof value !== "object" || !SOURCE_STATES.has(value.state)) throw bad();
+  if (value.state === "present") return { state: "present", visit: checkedItem(value.visit) };
+  return { state: value.state };
+}
+
+function checkedMetadata(value) {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw bad();
+  const { title, description, ogTitle, ogDescription, ogSiteName, ogImageUrl, faviconUrl, capturedAt } = value;
+  return { title: optionalText(title), description: optionalText(description), ogTitle: optionalText(ogTitle), ogDescription: optionalText(ogDescription), ogSiteName: optionalText(ogSiteName), ogImageUrl: optionalText(ogImageUrl), faviconUrl: optionalText(faviconUrl), capturedAt: optionalText(capturedAt) };
+}
+
+/**
+ * One visit in full: the visit with its whole URL and title, how it was reached (`navigation`, `source`), the visits
+ * reached from it (`targets`, at most the host's cap, with `targetCount` the real total) and the page metadata
+ * recorded for this very visit. `url` and `vaultToken` stay at the top for callers that only need the URL.
+ */
 export async function historyVisit(id, options) {
   const response = await callHost({ type: "history_visit", id }, { ...options, resultType: "history_visit_result" });
   const visit = response.visit;
-  if (!visit || visit.id !== id || typeof visit.url !== "string" || !TOKEN.test(response.vaultToken ?? "")) throw bad();
-  return { id, url: visit.url, vaultToken: response.vaultToken };
+  if (!visit || visit.id !== id || typeof visit.url !== "string" || typeof visit.title !== "string" || typeof visit.visitedAt !== "string" || !TOKEN.test(response.vaultToken ?? "")) throw bad();
+  const { targets, targetCount, targetsTruncated } = response;
+  if (!Array.isArray(targets) || !isCount(targetCount) || targetCount < targets.length || typeof targetsTruncated !== "boolean") throw bad();
+  return {
+    id,
+    url: visit.url,
+    vaultToken: response.vaultToken,
+    visit: { id, url: visit.url, title: visit.title, visitedAt: visit.visitedAt, host: typeof visit.host === "string" ? visit.host : "" },
+    navigation: checkedNavigation(response.navigation ?? null),
+    source: checkedSource(response.source),
+    targets: targets.map(checkedTarget),
+    targetCount,
+    targetsTruncated,
+    pageMetadata: checkedMetadata(response.pageMetadata ?? null),
+  };
 }

@@ -39,6 +39,8 @@ export function createHistoryHost(options = {}) {
     fullUrls: {},
     /** `mutate.history_visit = (reply) => ({ ...reply, … })` rewrites the answer of a type (a broken or foreign one). */
     mutate: {},
+    /** `relations[id] = { source: 'v1' | 'censored' | {raw}, targets: [ids], targetCount, navigation, pageMetadata, leak }` */
+    relations: {},
     ...options,
   };
   host.of = (type) => host.calls.filter((call) => call.type === type);
@@ -79,9 +81,30 @@ export function createHistoryHost(options = {}) {
       return reply({ vaultToken: tokenOf(vault), counts, total: counts.reduce((a, b) => a + b, 0) });
     }
     if (message.type === "history_visit") {
-      const found = (host.visits[vault] ?? []).find((v) => v.id === message.id);
+      const all = host.visits[vault] ?? [];
+      const found = all.find((v) => v.id === message.id);
       if (!found) return fail("visit_not_found");
-      return reply({ vaultToken: tokenOf(vault), visit: { id: found.id, url: host.fullUrls[found.id] ?? found.url, title: found.title, visitedAt: found.visitedAt, host: hostOf(found.url) } });
+      const entry = host.relations[message.id] ?? {};
+      const summary = (v) => { const [url, urlTruncated] = clip(v.url, 2048); const [title, titleTruncated] = clip(v.title, 512); return { id: v.id, visitedAt: v.visitedAt, url, title, host: hostOf(v.url), urlTruncated, titleTruncated }; };
+      let source = { state: "unknown" };
+      if (entry.source === "censored") source = { state: "censored", ...(entry.leak ?? {}) };
+      else if (typeof entry.source === "string") {
+        const from = all.find((v) => v.id === entry.source);
+        source = from ? { state: "present", visit: summary(from) } : { state: "unknown" };
+      } else if (entry.source) source = entry.source;
+      const wanted = (entry.targets ?? []).map((id) => all.find((v) => v.id === id)).filter(Boolean);
+      const limit = host.targetLimit ?? 200;
+      const targets = wanted.slice(0, limit).map((v) => ({ ...summary(v), kind: "link", transitionType: "link", occurredAt: v.visitedAt }));
+      return reply({
+        vaultToken: tokenOf(vault),
+        visit: { id: found.id, url: host.fullUrls[found.id] ?? found.url, title: found.title, visitedAt: found.visitedAt, host: hostOf(found.url) },
+        navigation: entry.navigation === undefined ? (entry.source ? { kind: "navigation", transitionType: "link", clientRedirect: false, serverRedirect: false, forwardBack: false, fromAddressBar: false, newTab: false, occurredAt: found.visitedAt } : null) : entry.navigation,
+        source,
+        targets,
+        targetCount: entry.targetCount ?? wanted.length,
+        targetsTruncated: (entry.targetCount ?? wanted.length) > targets.length,
+        pageMetadata: entry.pageMetadata ?? null,
+      });
     }
     return fail("unknown_type");
   };
