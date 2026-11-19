@@ -457,7 +457,7 @@ fn every_tool_answers_the_same_over_http_as_over_stdio() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    assert_eq!(tools.len(), 4, "{tools:?}");
+    assert_eq!(tools.len(), 5, "{tools:?}");
     // Private rows are absent from HTTP answers and counts exactly as over stdio.
     let domains = &over_http[5]["result"]["structuredContent"];
     assert_eq!(domains["total_visits"], 3);
@@ -991,7 +991,7 @@ fn an_unusable_token_file_refuses_the_start_and_is_never_rewritten() {
         &env,
         &[json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})],
     );
-    assert_eq!(answers[0]["result"]["tools"].as_array().unwrap().len(), 4);
+    assert_eq!(answers[0]["result"]["tools"].as_array().unwrap().len(), 5);
 }
 
 // --- Concurrency and lifecycle ----------------------------------------------------------------
@@ -1203,7 +1203,7 @@ fn an_explicitly_allowed_host_is_accepted_and_still_needs_the_token() {
     );
     let reply = raw(port, "POST", "/mcp", &headers(TS_HOST, good), &list);
     assert_eq!(reply.status, 200, "{}", reply.body);
-    assert_eq!(reply.json()["result"]["tools"].as_array().unwrap().len(), 4);
+    assert_eq!(reply.json()["result"]["tools"].as_array().unwrap().len(), 5);
     let reply = raw(
         port,
         "POST",
@@ -1606,4 +1606,283 @@ fn an_encrypted_vault_answers_the_same_over_http_as_over_stdio_and_never_without
         bytes,
         "MCP never writes the vault"
     );
+}
+
+// --- Image thumbnails (Issue #61, Slice 2) ---------------------------------------------------------
+
+fn png(width: u32, height: u32, len: usize) -> Vec<u8> {
+    let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    bytes.extend(width.to_be_bytes());
+    bytes.extend(height.to_be_bytes());
+    bytes.extend([8, 6, 0, 0, 0]);
+    let mut at = 0u8;
+    while bytes.len() < len {
+        bytes.push(at);
+        at = at.wrapping_add(37);
+    }
+    bytes
+}
+
+/// Public images saved from `https://<name>.public.test/`: a good thumbnail, none, a broken one,
+/// the largest one, and one that is private (`mcp_public = 0`, with a thumbnail).
+fn seed_thumbnails(env: &Env) {
+    let db = Connection::open(&env.vault).unwrap();
+    let cases: [(&str, i64, Option<Vec<u8>>, i64); 5] = [
+        ("ok", 1, Some(png(320, 180, 1500)), 1),
+        ("missing", 2, None, 1),
+        ("broken", 3, Some(b"CANARY not an image".to_vec()), 1),
+        ("limit", 4, Some(png(320, 180, 256 * 1024)), 1),
+        ("private", 5, Some(png(64, 64, 700)), 0),
+    ];
+    for (name, n, thumbnail, public) in cases {
+        db.execute(
+            "INSERT INTO image_blobs (sha256, mime_type, byte_length, width, height, created_at, last_saved_at, save_count, data)
+             VALUES (printf('%064d', ?1), 'image/png', 27, 640, 360, 1, 9999999999999, 1, CAST('ORIGINAL-IMAGE-BYTES-CANARY' AS BLOB))",
+            params![n],
+        )
+        .unwrap();
+        let blob = db.last_insert_rowid();
+        if let Some(data) = thumbnail {
+            let (w, h) = if name == "private" {
+                (64, 64)
+            } else {
+                (320, 180)
+            };
+            db.execute(
+                "INSERT INTO image_thumbnails (blob_id, mime_type, width, height, generator, data) VALUES (?1, 'image/png', ?2, ?3, 1, ?4)",
+                params![blob, w, h, data],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO saved_images (save_id, blob_id, image_url, page_url, saved_at, incognito, mcp_public) VALUES (?1, ?2, ?3, ?4, 1790000000000, 0, ?5)",
+            params![
+                format!("s-{name}"),
+                blob,
+                format!("https://{name}.public.test/image.png"),
+                format!("https://{name}.public.test/"),
+                public
+            ],
+        )
+        .unwrap();
+    }
+}
+
+/// A stdio session whose calls may depend on earlier answers (ids are keyed per process).
+fn stdio_session<T>(env: &Env, run: impl FnOnce(&mut dyn FnMut(Value) -> Value) -> T) -> T {
+    let mut command = env.command(&[]);
+    let mut child = command.stdin(Stdio::piped()).spawn().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut send = |value: Value| -> Value {
+        stdin.write_all(value.to_string().as_bytes()).unwrap();
+        stdin.write_all(b"\n").unwrap();
+        stdin.flush().unwrap();
+        if value.get("id").is_none() {
+            return Value::Null;
+        }
+        let mut line = String::new();
+        out.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap()
+    };
+    send(
+        json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": LEGACY, "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}}),
+    );
+    send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+    let value = run(&mut send);
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    value
+}
+
+/// What one transport answers for the thumbnail of every case, in a fixed order.
+fn thumbnail_answers(call: &mut dyn FnMut(Value) -> Value) -> Vec<Value> {
+    let mut next = 100;
+    let mut tool = |call: &mut dyn FnMut(Value) -> Value, name: &str, arguments: Value| {
+        next += 1;
+        call(call_body(next, name, &arguments))
+    };
+    let mut ids = Vec::new();
+    for name in ["ok", "missing", "broken", "limit", "private"] {
+        let list = tool(
+            call,
+            "memocampus_search_images",
+            json!({"query": format!("{name}.public.test")}),
+        );
+        ids.push(list["result"]["structuredContent"]["images"][0]["id"].clone());
+    }
+    assert_eq!(
+        ids[4],
+        Value::Null,
+        "a private image is not found by search"
+    );
+    let unknown = json!("image_0123456789abcdef0123456789abcdef");
+    let mut answers = Vec::new();
+    for id in [
+        ids[0].clone(),
+        ids[1].clone(),
+        ids[2].clone(),
+        ids[3].clone(),
+        unknown,
+        json!("not an id"),
+        json!(""),
+    ] {
+        answers.push(tool(
+            call,
+            "memocampus_get_image_thumbnail",
+            json!({"image_id": id}),
+        ));
+    }
+    answers
+}
+
+#[test]
+fn the_thumbnail_tool_is_listed_and_answers_the_same_over_http_as_over_stdio() {
+    let env = Env::new();
+    seed_thumbnails(&env);
+    let over_stdio = stdio_session(&env, |send| thumbnail_answers(send));
+    let server = Server::start(&env, "127.0.0.1:0");
+    let token = env.token();
+    let mut http = |body: Value| {
+        let reply = post(&server, &token, &body);
+        assert_eq!(reply.status, 200, "{}", reply.body);
+        reply.json()
+    };
+    let listed = http(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 5);
+    let tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "memocampus_get_image_thumbnail")
+        .expect("listed over HTTP");
+    assert_eq!(tool["inputSchema"]["required"], json!(["image_id"]));
+    assert!(tool.get("outputSchema").is_none());
+    let over_http = thumbnail_answers(&mut http);
+
+    assert_eq!(over_http.len(), over_stdio.len());
+    for (index, (h, s)) in over_http.iter().zip(&over_stdio).enumerate() {
+        // The ids inside the metadata differ per process; everything else is identical.
+        let strip = |answer: &Value| -> Value {
+            let mut answer = answer["result"].clone();
+            if let Some(text) = answer["content"][0]["text"].as_str() {
+                if let Ok(mut info) = serde_json::from_str::<Value>(text) {
+                    if info.get("image_id").is_some() {
+                        info["image_id"] = json!("<id>");
+                    }
+                    answer["content"][0]["text"] = json!(info.to_string());
+                }
+            }
+            answer
+        };
+        assert_eq!(strip(h), strip(s), "case {index}");
+    }
+    // ok: one text block and one image block; the bytes are the stored ones.
+    let ok = &over_http[0]["result"];
+    assert_ne!(ok["isError"], true, "{ok}");
+    assert_eq!(ok["content"].as_array().unwrap().len(), 2);
+    assert_eq!(ok["content"][1]["type"], "image");
+    assert_eq!(ok["content"][1]["mimeType"], "image/png");
+    assert!(ok.get("structuredContent").is_none());
+    // Failures: fixed codes, one text block, no image.
+    assert_ne!(
+        over_http[3]["result"]["isError"], true,
+        "the largest is sent"
+    );
+    assert_eq!(
+        over_http[3]["result"]["content"].as_array().unwrap().len(),
+        2
+    );
+    let errors: Vec<Value> = [1, 2, 4, 5, 6]
+        .into_iter()
+        .map(|index| {
+            let result = &over_http[index]["result"];
+            assert_eq!(result["isError"], true, "{result}");
+            assert_eq!(result["content"].as_array().unwrap().len(), 1);
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap()
+        })
+        .collect();
+    assert_eq!(
+        errors,
+        [
+            json!({"error": "thumbnail_missing"}),
+            json!({"error": "thumbnail_invalid"}),
+            json!({"error": "not_found"}),
+            json!({"error": "invalid_argument", "argument": "image_id"}),
+            json!({"error": "invalid_argument", "argument": "image_id"}),
+        ]
+    );
+    let all = serde_json::to_string(&over_http).unwrap();
+    for needle in ["ORIGINAL", "CANARY", "never.test", "SELECT"] {
+        assert!(!all.contains(needle), "{needle}");
+    }
+    // The wire size of the largest answer, as measured over HTTP.
+    let largest = serde_json::to_string(&over_http[3]).unwrap().len();
+    println!("HTTP largest thumbnail answer: {largest} bytes");
+    assert!(largest <= 349_528 + 4 * 1024, "{largest}");
+}
+
+#[test]
+fn the_thumbnail_tool_needs_the_token_and_a_local_origin_like_every_other_call() {
+    let env = Env::new();
+    seed_thumbnails(&env);
+    let server = Server::start(&env, "127.0.0.1:0");
+    let token = env.token();
+    let list = post(
+        &server,
+        &token,
+        &call_body(
+            1,
+            "memocampus_search_images",
+            &json!({"query": "ok.public.test"}),
+        ),
+    )
+    .json();
+    let id = list["result"]["structuredContent"]["images"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let call = call_body(
+        2,
+        "memocampus_get_image_thumbnail",
+        &json!({"image_id": id}),
+    )
+    .to_string();
+    let good = format!("Bearer {token}");
+    let wrong = format!("Bearer {}", "0".repeat(64));
+    for auth in ["", wrong.as_str()] {
+        let reply = raw(
+            server.port,
+            "POST",
+            "/mcp",
+            &[("Authorization", auth), ("MCP-Protocol-Version", LEGACY)],
+            &call,
+        );
+        assert_eq!(reply.status, 401, "{auth:?}");
+        assert!(!reply.body.contains("\"image\""), "{}", reply.body);
+        assert!(!reply.body.contains("data"), "{}", reply.body);
+    }
+    for auth in ["", good.as_str()] {
+        let reply = raw(
+            server.port,
+            "POST",
+            "/mcp",
+            &[
+                ("Authorization", auth),
+                ("Origin", "http://evil.test"),
+                ("MCP-Protocol-Version", LEGACY),
+            ],
+            &call,
+        );
+        assert_eq!(reply.status, 403, "{auth:?}");
+        assert!(!reply.body.contains("\"image\""), "{}", reply.body);
+    }
+    let reply = raw(
+        server.port,
+        "POST",
+        "/mcp",
+        &[("Authorization", &good), ("MCP-Protocol-Version", LEGACY)],
+        &call,
+    );
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.json()["result"]["content"][1]["type"], "image");
 }
