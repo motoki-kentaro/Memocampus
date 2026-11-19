@@ -1539,7 +1539,7 @@ fn source_files() -> Vec<(String, String)> {
 #[test]
 fn the_public_api_exposes_no_connection_or_sql_and_nothing_logs() {
     let files = source_files();
-    assert_eq!(files.len(), 6);
+    assert_eq!(files.len(), 7);
     for (name, source) in &files {
         for line in source.lines().map(str::trim_start) {
             assert!(
@@ -4641,5 +4641,838 @@ mod encrypted {
         activate(&f.app, &path, "plain", Some("confirmed"));
         let store = VisibleStore::follow_active(f.app.clone()).unwrap();
         assert_failed(store.search_visits(&ALL), VisibleError::VaultModeMismatch);
+    }
+}
+
+// --- Issue #61, Slice 1: thumbnails of public images --------------------------------------------
+
+/// `get_image_thumbnail` over synthetic vaults only; every private value holds `CANARY`, so a
+/// thumbnail that is not the public one shows in the bytes.
+mod thumbnails {
+    use super::*;
+
+    fn png(width: u32, height: u32, filler: &[u8]) -> Vec<u8> {
+        let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        bytes.extend(width.to_be_bytes());
+        bytes.extend(height.to_be_bytes());
+        bytes.extend([8, 6, 0, 0, 0]);
+        bytes.extend(filler);
+        bytes
+    }
+
+    fn jpeg(width: u16, height: u16) -> Vec<u8> {
+        let mut bytes = vec![0xFF, 0xD8, 0xFF, 0xC0, 0, 17, 8];
+        bytes.extend(height.to_be_bytes());
+        bytes.extend(width.to_be_bytes());
+        bytes.extend([3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+        bytes
+    }
+
+    fn webp_extended(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = b"RIFF\x16\0\0\0WEBPVP8X\x0a\0\0\0\0\0\0\0".to_vec();
+        bytes.extend(&(width - 1).to_le_bytes()[..3]);
+        bytes.extend(&(height - 1).to_le_bytes()[..3]);
+        bytes
+    }
+
+    fn thumbnail(db: &Connection, blob_id: i64, mime: &str, width: i64, height: i64, data: &[u8]) {
+        db.execute(
+            "INSERT INTO image_thumbnails (blob_id, mime_type, width, height, generator, data) VALUES (?1, ?2, ?3, ?4, 1, ?5)",
+            params![blob_id, mime, width, height, data],
+        )
+        .unwrap();
+    }
+
+    fn public_png() -> Vec<u8> {
+        png(40, 30, b"public-thumbnail")
+    }
+
+    /// The ID `search_images` gives the image of `blob(db, n)`, in the store `store`.
+    fn id_in(store: &VisibleStore, n: u32) -> String {
+        public_id(&store.id_key, "image", &format!("{n:064}"))
+    }
+
+    fn id_of(f: &Fixture, n: u32) -> String {
+        id_in(&f.store, n)
+    }
+
+    fn get(store: &VisibleStore, id: &str) -> Result<VisibleThumbnail, VisibleError> {
+        store.get_image_thumbnail(&GetImageThumbnail { image_id: id })
+    }
+
+    fn get_staged(
+        store: &VisibleStore,
+        id: &str,
+        stage: &mut dyn FnMut(Stage),
+    ) -> Result<VisibleThumbnail, VisibleError> {
+        store.get_image_thumbnail_staged(&GetImageThumbnail { image_id: id }, stage)
+    }
+
+    /// A vault with one public image (blob 1) and its thumbnail.
+    fn with_public_image() -> (Fixture, String) {
+        let f = Fixture::new();
+        let db = writer(&f.vault);
+        let blob_id = blob(&db, 1);
+        save(&db, blob_id, &PUBLIC_SAVE);
+        thumbnail(&db, blob_id, "image/png", 40, 30, &public_png());
+        let id = image_page(&f).items.remove(0).id;
+        assert_eq!(id, id_of(&f, 1), "the ID of a search result");
+        (f, id)
+    }
+
+    fn other_public_save(id: &'static str, url: &'static str) -> Save<'static> {
+        Save {
+            id,
+            image: url,
+            ..PUBLIC_SAVE
+        }
+    }
+
+    #[test]
+    fn the_id_a_search_returned_gives_the_stored_thumbnail() {
+        let (f, id) = with_public_image();
+        let thumb = get(&f.store, &id).unwrap();
+        assert_eq!(thumb.mime_type, "image/png");
+        assert_eq!((thumb.width, thumb.height), (40, 30));
+        assert_eq!(thumb.data, public_png());
+        assert_clean(&thumb);
+    }
+
+    #[test]
+    fn several_public_saves_of_one_image_still_give_one_thumbnail() {
+        let (f, id) = with_public_image();
+        let db = writer(&f.vault);
+        save(
+            &db,
+            1,
+            &other_public_save("second", "https://cdn.public.test/two.png"),
+        );
+        assert_eq!(get(&f.store, &id).unwrap().data, public_png());
+    }
+
+    #[test]
+    fn webp_and_jpeg_thumbnails_are_given_by_their_header() {
+        let f = Fixture::new();
+        let db = writer(&f.vault);
+        let (a, b) = (blob(&db, 1), blob(&db, 2));
+        save(&db, a, &PUBLIC_SAVE);
+        save(
+            &db,
+            b,
+            &other_public_save("two", "https://cdn.public.test/two.png"),
+        );
+        thumbnail(&db, a, "image/webp", 320, 200, &webp_extended(320, 200));
+        thumbnail(&db, b, "image/jpeg", 64, 48, &jpeg(64, 48));
+        let webp = get(&f.store, &id_of(&f, 1)).unwrap();
+        assert_eq!(
+            (webp.mime_type.as_str(), webp.width, webp.height),
+            ("image/webp", 320, 200)
+        );
+        let jpg = get(&f.store, &id_of(&f, 2)).unwrap();
+        assert_eq!(
+            (jpg.mime_type.as_str(), jpg.width, jpg.height),
+            ("image/jpeg", 64, 48)
+        );
+    }
+
+    /// Every save shares one blob; the private ones are newer and hold every `CANARY`.
+    #[test]
+    fn a_public_save_releases_the_image_and_nothing_of_the_private_saves() {
+        let (f, id) = with_public_image();
+        let db = writer(&f.vault);
+        let privates = [
+            Save {
+                id: "CANARY-off",
+                image: "https://cdn.public.test/CANARY-off.png",
+                page: Some("https://page.public.test/CANARY-off"),
+                at: T1 + 10,
+                public: 0,
+                ..PUBLIC_SAVE
+            },
+            Save {
+                id: "CANARY-incognito",
+                image: "https://cdn.public.test/CANARY-incognito.png",
+                at: T1 + 20,
+                incognito: 1,
+                ..PUBLIC_SAVE
+            },
+            Save {
+                id: "CANARY-b",
+                image: "https://b-layer.test/CANARY-b.png",
+                page: None,
+                at: T1 + 30,
+                ..PUBLIC_SAVE
+            },
+            Save {
+                id: "CANARY-a",
+                image: "https://a-layer.test/CANARY-a.png",
+                page: None,
+                at: T1 + 40,
+                ..PUBLIC_SAVE
+            },
+        ];
+        for (n, row) in privates.iter().enumerate() {
+            save(&db, 1, row);
+            let thumb = get(&f.store, &id).unwrap_or_else(|e| panic!("{n}: {e:?}"));
+            assert_clean(&thumb);
+            assert_eq!(thumb.data, public_png());
+        }
+        // What a reader can learn is unchanged: one public save.
+        assert_eq!(image_page(&f).items[0].public_save_count, 1);
+    }
+
+    /// One image per way of not being public. None gives a thumbnail, and each gives exactly what
+    /// an ID that never existed gives.
+    #[test]
+    fn an_image_without_a_public_save_gives_the_answer_of_an_unknown_id() {
+        let private = [
+            (
+                "not marked",
+                Save {
+                    public: 0,
+                    ..PUBLIC_SAVE
+                },
+            ),
+            (
+                "incognito",
+                Save {
+                    incognito: 1,
+                    ..PUBLIC_SAVE
+                },
+            ),
+            (
+                "save but no MCP",
+                Save {
+                    image: "https://b-layer.test/one.png",
+                    page: None,
+                    ..PUBLIC_SAVE
+                },
+            ),
+            (
+                "never save",
+                Save {
+                    image: "https://a-layer.test/one.png",
+                    page: None,
+                    ..PUBLIC_SAVE
+                },
+            ),
+            (
+                "one source never save",
+                Save {
+                    page: Some("https://a-layer.test/page"),
+                    ..PUBLIC_SAVE
+                },
+            ),
+        ];
+        for (name, row) in private {
+            let f = Fixture::new();
+            let db = writer(&f.vault);
+            let blob_id = blob(&db, 1);
+            save(
+                &db,
+                blob_id,
+                &Save {
+                    id: "CANARY-save",
+                    ..row
+                },
+            );
+            thumbnail(
+                &db,
+                blob_id,
+                "image/png",
+                40,
+                30,
+                &png(40, 30, b"CANARY-bytes"),
+            );
+            assert_eq!(image_page(&f).total, 0, "{name}");
+            let result = get(&f.store, &id_of(&f, 1));
+            assert_eq!(result, Err(VisibleError::NotFound), "{name}");
+            assert_eq!(
+                result,
+                get(&f.store, &id_of(&f, 9)),
+                "{name}: as an unknown ID"
+            );
+            assert_failed(result, VisibleError::NotFound);
+        }
+    }
+
+    #[test]
+    fn a_policy_that_now_forbids_the_image_is_applied_to_the_next_read() {
+        let (f, id) = with_public_image();
+        get(&f.store, &id).unwrap();
+        f.add_rule(false, "cdn.public.test");
+        assert_failed(get(&f.store, &id), VisibleError::NotFound);
+    }
+
+    #[test]
+    fn withdrawing_the_last_public_save_or_deleting_the_image_ends_access() {
+        let (f, id) = with_public_image();
+        let db = writer(&f.vault);
+        save(
+            &db,
+            1,
+            &other_public_save("second", "https://cdn.public.test/two.png"),
+        );
+        db.execute(
+            "UPDATE saved_images SET mcp_public = 0 WHERE save_id = 'public-save'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            get(&f.store, &id).unwrap().data,
+            public_png(),
+            "one public save is left"
+        );
+        db.execute("UPDATE saved_images SET mcp_public = 0", [])
+            .unwrap();
+        assert_failed(get(&f.store, &id), VisibleError::NotFound);
+        db.execute("UPDATE saved_images SET mcp_public = 1", [])
+            .unwrap();
+        assert_eq!(get(&f.store, &id).unwrap().data, public_png());
+        // The image is deleted: saves, thumbnail and blob.
+        db.execute_batch(
+            "DELETE FROM saved_images; DELETE FROM image_thumbnails; DELETE FROM image_blobs;",
+        )
+        .unwrap();
+        assert_failed(get(&f.store, &id), VisibleError::NotFound);
+    }
+
+    #[test]
+    fn only_an_id_of_this_process_and_form_is_taken() {
+        let (f, id) = with_public_image();
+        let hex = id.strip_prefix("image_").unwrap().to_owned();
+        // Not of the form `search_images` writes: a different error, and no read at all.
+        let sha = format!("{:064}", 1);
+        for malformed in [
+            "".to_owned(),
+            "1".to_owned(),
+            "42".to_owned(),
+            "image_".to_owned(),
+            "image_zz".to_owned(),
+            sha,
+            format!("source_{hex}"),
+            format!("visit_{hex}"),
+            format!("image_{}", hex.to_uppercase()),
+            format!("image_{hex}0"),
+            format!(" image_{hex}"),
+            format!("image_{hex}\n"),
+            format!("image_{}", &hex[..31]),
+        ] {
+            assert_failed(get(&f.store, &malformed), VisibleError::InvalidArgument);
+        }
+        // Well formed but not an image of this store: the same answer as a private one.
+        assert_failed(
+            get(&f.store, &format!("image_{}", "0".repeat(32))),
+            VisibleError::NotFound,
+        );
+        let source = sources_of(&f, &id).unwrap().items.remove(0).id;
+        assert_failed(get(&f.store, &source), VisibleError::InvalidArgument);
+        assert_failed(
+            get(
+                &f.store,
+                &format!("image_{}", source.strip_prefix("source_").unwrap()),
+            ),
+            VisibleError::NotFound,
+        );
+        // Another process (another key) never accepts this process's ID, though the vault is the same.
+        let other = VisibleStore::ungated(f.vault.clone(), f.app.clone()).unwrap();
+        assert_failed(get(&other, &id), VisibleError::NotFound);
+        let again = other.search_images(&ALL_IMAGES).unwrap().items.remove(0).id;
+        assert_ne!(again, id);
+        assert_eq!(get(&other, &again).unwrap().data, public_png());
+    }
+
+    type Stored = Option<(&'static str, i64, i64, Vec<u8>)>;
+
+    #[test]
+    fn an_unusable_public_thumbnail_is_missing_or_invalid_and_no_bytes_are_given() {
+        let oversized = png(40, 30, &vec![7u8; 256 * 1024]);
+        let at_limit = png(40, 30, &vec![7u8; 256 * 1024 - png(40, 30, &[]).len()]);
+        assert_eq!(at_limit.len(), 256 * 1024);
+        let cases: Vec<(&str, Stored, Result<(), VisibleError>)> = vec![
+            ("none stored", None, Err(VisibleError::ThumbnailMissing)),
+            (
+                "exactly the limit",
+                Some(("image/png", 40, 30, at_limit)),
+                Ok(()),
+            ),
+            (
+                "over the limit",
+                Some(("image/png", 40, 30, oversized)),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "type says webp, bytes are png",
+                Some(("image/webp", 40, 30, public_png())),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "type is not allowed (gif)",
+                Some(("image/gif", 40, 30, b"GIF89a\x28\0\x1e\0;".to_vec())),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "stored width is not the header's",
+                Some(("image/png", 41, 30, public_png())),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "stored height is not the header's",
+                Some(("image/png", 40, 31, public_png())),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "wider than the host allows",
+                Some(("image/png", 1025, 30, png(1025, 30, b"x"))),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "the largest size the host allows",
+                Some(("image/png", 1024, 1024, png(1024, 1024, b"x"))),
+                Ok(()),
+            ),
+            (
+                "zero size in the file",
+                Some(("image/png", 1, 1, png(0, 0, b"x"))),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "png signature without a header",
+                Some((
+                    "image/png",
+                    40,
+                    30,
+                    b"\x89PNG\r\n\x1a\nCANARY broken".to_vec(),
+                )),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "cut-off png header",
+                Some(("image/png", 40, 30, public_png()[..20].to_vec())),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "not an image",
+                Some(("image/png", 40, 30, b"CANARY not an image".to_vec())),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "markup",
+                Some((
+                    "image/png",
+                    40,
+                    30,
+                    b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec(),
+                )),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "empty",
+                Some(("image/png", 40, 30, Vec::new())),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+            (
+                "jpeg without a frame header",
+                Some((
+                    "image/jpeg",
+                    40,
+                    30,
+                    vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 2, 0, 0, 0, 0, 0, 0],
+                )),
+                Err(VisibleError::ThumbnailInvalid),
+            ),
+        ];
+        for (name, stored, expected) in cases {
+            let f = Fixture::new();
+            let db = writer(&f.vault);
+            let blob_id = blob(&db, 1);
+            save(&db, blob_id, &PUBLIC_SAVE);
+            if let Some((mime, width, height, data)) = &stored {
+                thumbnail(&db, blob_id, mime, *width, *height, data);
+            }
+            let result = get(&f.store, &id_of(&f, 1));
+            match expected {
+                Ok(()) => {
+                    let thumb = result.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+                    assert_eq!(thumb.data, stored.unwrap().3, "{name}");
+                }
+                Err(error) => assert_failed(result, error),
+            }
+            // The image itself is still listed: only its thumbnail is unusable.
+            assert_eq!(image_page(&f).total, 1, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_thumbnail_that_is_not_a_blob_is_invalid() {
+        let f = Fixture::new();
+        let db = writer(&f.vault);
+        let blob_id = blob(&db, 1);
+        save(&db, blob_id, &PUBLIC_SAVE);
+        db.execute(
+            "INSERT INTO image_thumbnails (blob_id, mime_type, width, height, generator, data) VALUES (?1, 'image/png', 40, 30, 1, 'CANARY text')",
+            [blob_id],
+        )
+        .unwrap();
+        assert_failed(get(&f.store, &id_of(&f, 1)), VisibleError::ThumbnailInvalid);
+    }
+
+    /// The thumbnail of another image is never given for this one, whatever else is stored.
+    #[test]
+    fn only_the_thumbnail_of_the_blob_the_id_names_is_given() {
+        let f = Fixture::new();
+        let db = writer(&f.vault);
+        let (public, other) = (blob(&db, 1), blob(&db, 2));
+        save(&db, public, &PUBLIC_SAVE);
+        save(
+            &db,
+            other,
+            &Save {
+                id: "CANARY-other",
+                image: "https://cdn.public.test/CANARY-other.png",
+                public: 0,
+                ..PUBLIC_SAVE
+            },
+        );
+        // Only the other, private image has a thumbnail.
+        thumbnail(
+            &db,
+            other,
+            "image/png",
+            40,
+            30,
+            &png(40, 30, b"CANARY-other"),
+        );
+        assert_failed(get(&f.store, &id_of(&f, 1)), VisibleError::ThumbnailMissing);
+        assert_failed(get(&f.store, &id_of(&f, 2)), VisibleError::NotFound);
+        // Both have one: the public one gives its own, the private one nothing.
+        thumbnail(&db, public, "image/png", 40, 30, &public_png());
+        assert_eq!(get(&f.store, &id_of(&f, 1)).unwrap().data, public_png());
+        assert_failed(get(&f.store, &id_of(&f, 2)), VisibleError::NotFound);
+    }
+
+    #[test]
+    fn a_policy_change_at_any_point_of_a_thumbnail_read_is_applied_to_that_read() {
+        for moment in [
+            Stage::PolicyLoaded,
+            Stage::SchemaChecked,
+            Stage::VaultClosed,
+            Stage::SetBuilt,
+        ] {
+            let (f, id) = with_public_image();
+            let mut applied = false;
+            let result = get_staged(&f.store, &id, &mut |stage| {
+                if stage == moment && !applied {
+                    applied = true;
+                    f.add_rule(false, "cdn.public.test");
+                }
+            });
+            assert!(applied);
+            assert_eq!(result, Err(VisibleError::NotFound), "{moment:?}");
+        }
+    }
+
+    /// The vault changes under a read. What comes back is one committed state, never a mixture,
+    /// and never bytes that state did not make public.
+    #[test]
+    fn a_vault_change_during_a_read_gives_one_committed_state_or_nothing() {
+        // Before the vault is opened: the change is simply what is read.
+        for moment in [Stage::Admitted, Stage::PolicyLoaded] {
+            let (f, id) = with_public_image();
+            let mut done = false;
+            let result = get_staged(&f.store, &id, &mut |stage| {
+                if stage == moment && !done {
+                    done = true;
+                    writer(&f.vault)
+                        .execute("UPDATE saved_images SET mcp_public = 0", [])
+                        .unwrap();
+                }
+            });
+            assert!(done);
+            assert_eq!(result, Err(VisibleError::NotFound), "{moment:?}");
+        }
+        // The image is replaced before the read by another one under the same blob row (another
+        // SHA-256, private, with its own thumbnail): the ID names bytes that are gone.
+        let (f, id) = with_public_image();
+        let mut done = false;
+        let result = get_staged(&f.store, &id, &mut |stage| {
+            if stage == Stage::Admitted && !done {
+                done = true;
+                let db = writer(&f.vault);
+                db.execute_batch(
+                    "DELETE FROM saved_images; DELETE FROM image_thumbnails; DELETE FROM image_blobs;",
+                )
+                .unwrap();
+                let blob_id = blob(&db, 2);
+                db.execute("UPDATE image_blobs SET id = 1 WHERE id = ?1", [blob_id])
+                    .unwrap();
+                save(
+                    &db,
+                    1,
+                    &Save {
+                        id: "CANARY",
+                        public: 0,
+                        ..PUBLIC_SAVE
+                    },
+                );
+                thumbnail(&db, 1, "image/png", 40, 30, &png(40, 30, b"CANARY-new"));
+            }
+        });
+        assert!(done);
+        assert_eq!(result, Err(VisibleError::NotFound));
+
+        // After the read the vault is closed: what was read decides, as for every other read. The
+        // bytes are the ones that were public in that state, whatever happens next.
+        for moment in [Stage::VaultClosed, Stage::SetBuilt] {
+            let (f, id) = with_public_image();
+            let mut done = false;
+            let result = get_staged(&f.store, &id, &mut |stage| {
+                if stage == moment && !done {
+                    done = true;
+                    let db = writer(&f.vault);
+                    db.execute("UPDATE saved_images SET mcp_public = 0", [])
+                        .unwrap();
+                    db.execute(
+                        "UPDATE image_thumbnails SET data = ?1",
+                        [png(40, 30, b"CANARY-later")],
+                    )
+                    .unwrap();
+                }
+            });
+            assert!(done);
+            assert_eq!(result.unwrap().data, public_png(), "{moment:?}");
+            // The very next read sees the new state.
+            assert_failed(get(&f.store, &id), VisibleError::NotFound);
+        }
+    }
+
+    #[test]
+    fn an_uncommitted_change_is_never_read() {
+        let (f, id) = with_public_image();
+        let db = writer(&f.vault);
+        db.execute_batch("BEGIN IMMEDIATE").unwrap();
+        db.execute(
+            "UPDATE image_thumbnails SET data = ?1",
+            [png(40, 30, b"CANARY-uncommitted")],
+        )
+        .unwrap();
+        // A reader sees the committed state; it never reads the half-written one.
+        let result = get(&f.store, &id);
+        db.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(result.unwrap().data, public_png());
+        assert_eq!(get(&f.store, &id).unwrap().data, public_png());
+    }
+
+    #[test]
+    fn a_thumbnail_read_fails_closed_like_every_other_read() {
+        let (f, id) = with_public_image();
+        let lock = f.lock_policy();
+        assert_failed(get(&f.store, &id), VisibleError::PolicyUnavailable);
+        drop(lock);
+        let policy = f.app.join("policy.json");
+        let good = fs::read(&policy).unwrap();
+        fs::write(&policy, b"{ CANARY damaged").unwrap();
+        assert_failed(get(&f.store, &id), VisibleError::PolicyUnavailable);
+        fs::write(&policy, &good).unwrap();
+        assert_eq!(get(&f.store, &id).unwrap().data, public_png());
+        let uninitialized =
+            VisibleStore::ungated(f.vault.clone(), f.dir.join("empty-app")).unwrap();
+        assert_failed(get(&uninitialized, &id), VisibleError::PolicyUnavailable);
+
+        // A replaced vault is read fresh: what the old one held does not survive.
+        let bytes = fs::read(&f.vault).unwrap();
+        fs::remove_file(&f.vault).unwrap();
+        assert_failed(get(&f.store, &id), VisibleError::VaultUnavailable);
+        create_vault(&f.vault, APP_ID, SUPPORTED_SCHEMA);
+        assert_failed(get(&f.store, &id), VisibleError::NotFound);
+        fs::write(&f.vault, bytes).unwrap();
+        assert_eq!(get(&f.store, &id).unwrap().data, public_png());
+    }
+
+    #[test]
+    fn reading_a_thumbnail_leaves_the_vault_untouched() {
+        let (f, id) = with_public_image();
+        let before = f.fingerprint();
+        get(&f.store, &id).unwrap();
+        assert_failed(get(&f.store, &id_of(&f, 9)), VisibleError::NotFound);
+        assert_eq!(f.fingerprint(), before);
+        assert!(!f.sidecars());
+    }
+
+    // --- The publication gate and the active vault -----------------------------------------------
+
+    #[test]
+    fn an_unpublished_or_pending_vault_gives_no_thumbnail() {
+        let (f, _) = with_public_image();
+        let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+        let id = id_in(&store, 1);
+        assert_failed(get(&store, &id), VisibleError::VaultNotConfigured);
+        activate(&f.app, &f.vault, "plain", Some("pending"));
+        assert_failed(get(&store, &id), VisibleError::VaultPublicationPending);
+        activate(&f.app, &f.vault, "plain", None);
+        assert_failed(get(&store, &id), VisibleError::VaultPublicationPending);
+        activate(&f.app, &f.vault, "plain", Some("confirmed"));
+        assert_eq!(get(&store, &id).unwrap().data, public_png());
+    }
+
+    /// A second vault with the same bytes as vault A's image under another thumbnail, and an image
+    /// of its own.
+    fn second_vault(f: &Fixture) -> PathBuf {
+        let b = f.dir.join("b.sqlite3");
+        create_vault(&b, APP_ID, SUPPORTED_SCHEMA);
+        let db = writer(&b);
+        let same = blob(&db, 1);
+        save(&db, same, &PUBLIC_SAVE);
+        thumbnail(
+            &db,
+            same,
+            "image/png",
+            40,
+            30,
+            &png(40, 30, b"vault-b-thumbnail"),
+        );
+        let only_b = blob(&db, 2);
+        save(
+            &db,
+            only_b,
+            &other_public_save("b-only", "https://cdn.public.test/b.png"),
+        );
+        thumbnail(
+            &db,
+            only_b,
+            "image/png",
+            40,
+            30,
+            &png(40, 30, b"vault-b-only"),
+        );
+        b
+    }
+
+    #[test]
+    fn after_a_switch_the_old_vaults_bytes_are_never_given() {
+        let (f, _) = with_public_image();
+        let b = second_vault(&f);
+        activate(&f.app, &f.vault, "plain", Some("confirmed"));
+        let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+        let id = id_in(&store, 1);
+        assert_eq!(get(&store, &id).unwrap().data, public_png());
+        // An image only vault A has (blob 3).
+        let db = writer(&f.vault);
+        let blob_id = blob(&db, 3);
+        save(
+            &db,
+            blob_id,
+            &other_public_save("a-only", "https://cdn.public.test/a.png"),
+        );
+        thumbnail(
+            &db,
+            blob_id,
+            "image/png",
+            40,
+            30,
+            &png(40, 30, b"vault-a-only"),
+        );
+        let a_only = id_in(&store, 3);
+        assert_eq!(
+            get(&store, &a_only).unwrap().data,
+            png(40, 30, b"vault-a-only")
+        );
+
+        activate(&f.app, &b, "plain", Some("confirmed"));
+        // The same bytes in the new vault have the same ID, and give that vault's own thumbnail.
+        assert_eq!(
+            get(&store, &id).unwrap().data,
+            png(40, 30, b"vault-b-thumbnail")
+        );
+        // An image only the old vault had is not there.
+        assert_failed(get(&store, &a_only), VisibleError::NotFound);
+        activate(&f.app, &f.vault, "plain", Some("confirmed"));
+        assert_eq!(get(&store, &id).unwrap().data, public_png());
+    }
+
+    #[test]
+    fn a_switch_or_revocation_during_a_thumbnail_read_discards_the_read() {
+        for at in [
+            Stage::Admitted,
+            Stage::PolicyLoaded,
+            Stage::SchemaChecked,
+            Stage::VaultClosed,
+        ] {
+            for revoke in [false, true] {
+                let (f, _) = with_public_image();
+                let b = second_vault(&f);
+                activate(&f.app, &f.vault, "plain", Some("confirmed"));
+                let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+                let id = id_in(&store, 1);
+                let mut done = false;
+                let result = get_staged(&store, &id, &mut |stage| {
+                    if stage == at && !done {
+                        done = true;
+                        if revoke {
+                            activate(&f.app, &f.vault, "plain", Some("pending"));
+                        } else {
+                            activate(&f.app, &b, "plain", Some("confirmed"));
+                        }
+                    }
+                });
+                assert!(done);
+                assert_eq!(
+                    result.err(),
+                    Some(VisibleError::VaultSwitched),
+                    "{at:?} revoke={revoke}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_file_replaced_between_the_gate_and_the_open_gives_no_thumbnail() {
+        let (f, _) = with_public_image();
+        let b = second_vault(&f);
+        activate(&f.app, &f.vault, "plain", Some("confirmed"));
+        let store = VisibleStore::follow_active(f.app.clone()).unwrap();
+        let id = id_in(&store, 1);
+        let aside = f.dir.join("aside.sqlite3");
+        let result = get_staged(&store, &id, &mut |stage| {
+            if stage == Stage::Admitted {
+                fs::rename(&f.vault, &aside).unwrap();
+                fs::copy(&b, &f.vault).unwrap();
+            }
+        });
+        assert_eq!(result.err(), Some(VisibleError::VaultSwitched));
+    }
+
+    #[test]
+    fn a_pinned_store_gives_thumbnails_only_while_its_file_is_the_active_vault() {
+        let (f, _) = with_public_image();
+        let b = second_vault(&f);
+        let pinned = VisibleStore::pinned(f.vault.clone(), f.app.clone()).unwrap();
+        let id = id_in(&pinned, 1);
+        activate(&f.app, &f.vault, "plain", Some("confirmed"));
+        assert_eq!(get(&pinned, &id).unwrap().data, public_png());
+        activate(&f.app, &b, "plain", Some("confirmed"));
+        assert_failed(get(&pinned, &id), VisibleError::VaultNotActive);
+    }
+
+    #[test]
+    fn errors_and_results_name_no_internal_value() {
+        let (f, id) = with_public_image();
+        let sha = format!("{:064}", 1);
+        for text in [
+            format!("{:?}", get(&f.store, &id)),
+            format!("{:?}", get(&f.store, &id_of(&f, 7))),
+            format!("{:?}", get(&f.store, "1")),
+        ] {
+            assert!(!text.contains(&sha), "{text}");
+            assert!(!text.contains("public-save"), "{text}");
+            assert!(!text.contains("cdn.public.test"), "{text}");
+        }
+        for error in [
+            VisibleError::ThumbnailMissing,
+            VisibleError::ThumbnailInvalid,
+        ] {
+            assert_clean(&error);
+            assert!(error.code().starts_with("thumbnail_"));
+        }
     }
 }

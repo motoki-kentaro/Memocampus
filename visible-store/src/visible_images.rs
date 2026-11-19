@@ -216,6 +216,17 @@ impl VisibleImages {
         })
     }
 
+    /// Whether the image has a public save. An image without one is simply not here.
+    pub(crate) fn contains(&self, image_id: &str) -> Result<bool, VisibleError> {
+        self.db
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM visible_image_sources WHERE image_id = ?1)",
+                [image_id],
+                |row| row.get(0),
+            )
+            .map_err(failed)
+    }
+
     /// An image without a public save is simply not here, so it cannot differ from an unknown ID.
     pub(crate) fn sources(
         &self,
