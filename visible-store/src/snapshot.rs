@@ -335,13 +335,97 @@ pub(crate) fn read_image_saves(
     read_committed(target, stage, read_image_rows)
 }
 
+/// The stored thumbnail of one image (`image_thumbnails`), not yet checked. Never leaves this crate.
+/// Every field is optional: a value of an unexpected type is kept as "not there", and the check
+/// that follows treats it as invalid.
+pub(crate) struct RawThumbnail {
+    /// `image_blobs.sha256` of the blob this thumbnail belongs to (by the join that read it).
+    pub sha256: Option<String>,
+    pub mime_type: Option<String>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub generator: Option<i64>,
+    /// `typeof(data) = 'blob'` and its length. The bytes are read only up to the limit.
+    pub data_is_blob: bool,
+    pub data_len: Option<i64>,
+    pub data: Option<Vec<u8>>,
+}
+
+/// All image saves and, from the same committed state, the thumbnail of the one image whose
+/// SHA-256 `wanted` accepts. Only that one thumbnail is read, and the caller releases it only if
+/// that image turns out to be public.
+pub(crate) struct ImageSavesWithThumbnail {
+    pub saves: Vec<RawImageSave>,
+    /// The SHA-256 of the image `wanted` accepted, if any save row has one.
+    pub wanted_sha256: Option<String>,
+    pub thumbnail: Option<RawThumbnail>,
+}
+
+/// Longest thumbnail whose bytes are read at all (`images::MAX_THUMBNAIL_BYTES`).
+pub(crate) const MAX_THUMBNAIL_BYTES: usize = 256 * 1024;
+const SELECT_THUMBNAIL: &str = "SELECT b.sha256, t.mime_type, t.width, t.height, t.generator, typeof(t.data), length(t.data), CASE WHEN typeof(t.data) = 'blob' AND length(t.data) <= ?2 THEN t.data END FROM image_thumbnails t JOIN image_blobs b ON b.id = t.blob_id WHERE b.sha256 = ?1";
+
+fn read_thumbnail(db: &Connection, sha256: &str) -> rusqlite::Result<Option<RawThumbnail>> {
+    let mut statement = db.prepare(SELECT_THUMBNAIL)?;
+    let mut rows = statement.query(rusqlite::params![sha256, MAX_THUMBNAIL_BYTES as i64])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    let text = |index: usize| {
+        row.get_ref(index)
+            .map(|value| value.as_str().ok().map(str::to_owned))
+    };
+    let integer = |index: usize| row.get_ref(index).map(|value| value.as_i64().ok());
+    let thumbnail = RawThumbnail {
+        sha256: text(0)?,
+        mime_type: text(1)?,
+        width: integer(2)?,
+        height: integer(3)?,
+        generator: integer(4)?,
+        data_is_blob: text(5)?.as_deref() == Some("blob"),
+        data_len: integer(6)?,
+        data: row
+            .get_ref(7)?
+            .as_blob_or_null()
+            .ok()
+            .flatten()
+            .map(<[u8]>::to_vec),
+    };
+    Ok(Some(thumbnail))
+}
+
+/// One read transaction for both: the saves the judgement is made from, and the bytes it may
+/// release. `wanted` names the image by the SHA-256 of a save row; it does not judge anything.
+pub(crate) fn read_image_saves_with_thumbnail(
+    target: &Target,
+    stage: &mut dyn FnMut(Stage),
+    wanted: &dyn Fn(&str) -> bool,
+) -> Result<ImageSavesWithThumbnail, VisibleError> {
+    read_committed(target, stage, |db| {
+        let saves = read_image_rows(db)?;
+        let wanted_sha256 = saves
+            .iter()
+            .find(|save| wanted(&save.sha256))
+            .map(|save| save.sha256.clone());
+        let thumbnail = match &wanted_sha256 {
+            Some(sha256) => read_thumbnail(db, sha256)?,
+            None => None,
+        };
+        Ok(ImageSavesWithThumbnail {
+            saves,
+            wanted_sha256,
+            thumbnail,
+        })
+    })
+}
+
 /// Returns what `read` finds in one committed state of the vault. The file read is the one the
 /// gate admitted: its identity is taken while SQLite holds it open (on Windows without delete
 /// sharing, so it cannot be replaced meanwhile) and must equal the admitted one.
 fn read_committed<T>(
     target: &Target,
     stage: &mut dyn FnMut(Stage),
-    read: fn(&Connection) -> rusqlite::Result<T>,
+    read: impl FnOnce(&Connection) -> rusqlite::Result<T>,
 ) -> Result<T, VisibleError> {
     let canonical = location::resolve_local(&target.path)?;
     let salt = check_file(&canonical, target.mode)?;

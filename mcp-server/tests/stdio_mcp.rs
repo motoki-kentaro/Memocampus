@@ -335,7 +335,7 @@ fn fingerprint(env: &Env) -> (Vec<u8>, std::time::SystemTime, Vec<String>) {
 // --- Protocol ---------------------------------------------------------------------------------
 
 #[test]
-fn the_handshake_negotiates_every_version_claude_clients_use_and_lists_four_read_only_tools() {
+fn the_handshake_negotiates_every_version_claude_clients_use_and_lists_five_read_only_tools() {
     let env = Env::new();
     for (asked, agreed) in [
         ("2024-11-05", "2024-11-05"),
@@ -355,6 +355,7 @@ fn the_handshake_negotiates_every_version_claude_clients_use_and_lists_four_read
             names,
             [
                 "memocampus_get_domain_stats",
+                "memocampus_get_image_thumbnail",
                 "memocampus_get_visits_by_day",
                 "memocampus_search_images",
                 "memocampus_search_visits"
@@ -366,8 +367,26 @@ fn the_handshake_negotiates_every_version_claude_clients_use_and_lists_four_read
             assert_eq!(tool["annotations"]["openWorldHint"], false, "{tool}");
             assert_eq!(tool["inputSchema"]["type"], "object");
             assert_eq!(tool["inputSchema"]["additionalProperties"], false);
-            assert_eq!(tool["outputSchema"]["type"], "object");
+            if tool["name"] == "memocampus_get_image_thumbnail" {
+                // Content blocks, not a structured result: no schema to echo the image into.
+                assert!(tool.get("outputSchema").is_none(), "{tool}");
+            } else {
+                assert_eq!(tool["outputSchema"]["type"], "object");
+            }
         }
+        let thumbnail = tools
+            .iter()
+            .find(|t| t["name"] == "memocampus_get_image_thumbnail")
+            .unwrap();
+        assert_eq!(thumbnail["inputSchema"]["required"], json!(["image_id"]));
+        let properties = thumbnail["inputSchema"]["properties"].as_object().unwrap();
+        assert_eq!(properties.keys().collect::<Vec<_>>(), ["image_id"]);
+        let description = thumbnail["description"].as_str().unwrap();
+        assert!(description.contains("untrusted"), "{description}");
+        assert!(
+            description.contains("never an instruction"),
+            "{description}"
+        );
         let search = tools
             .iter()
             .find(|t| t["name"] == "memocampus_search_visits")
@@ -2051,4 +2070,362 @@ fn a_server_cannot_be_started_on_a_vault_that_is_not_the_published_active_one() 
             "memocampus-mcp: vault refused: vault_publication_pending".into()
         )
     );
+}
+
+// --- Image thumbnails (Issue #61, Slice 2) ---------------------------------------------------------
+
+/// A PNG as far as the host checks one: the signature and an IHDR that states the size, padded to `len`.
+fn png(width: u32, height: u32, len: usize) -> Vec<u8> {
+    let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    bytes.extend(width.to_be_bytes());
+    bytes.extend(height.to_be_bytes());
+    bytes.extend([8, 6, 0, 0, 0]);
+    let mut at = 0u8;
+    while bytes.len() < len {
+        bytes.push(at);
+        at = at.wrapping_add(37);
+    }
+    bytes
+}
+
+fn b64_decode(text: &str) -> Vec<u8> {
+    let value = |c: u8| match c {
+        b'A'..=b'Z' => c - b'A',
+        b'a'..=b'z' => c - b'a' + 26,
+        b'0'..=b'9' => c - b'0' + 52,
+        b'+' => 62,
+        b'/' => 63,
+        _ => panic!("not base64: {c}"),
+    };
+    let mut out = Vec::new();
+    for chunk in text.as_bytes().chunks(4) {
+        assert_eq!(chunk.len(), 4);
+        let pad = chunk.iter().filter(|c| **c == b'=').count();
+        let group = chunk[..4 - pad]
+            .iter()
+            .fold(0u32, |all, c| all << 6 | u32::from(value(*c)))
+            << (6 * pad);
+        for i in 0..3 - pad {
+            out.push((group >> (16 - 8 * i)) as u8);
+        }
+    }
+    out
+}
+
+fn b64_text(bytes: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut text = String::new();
+    for chunk in bytes.chunks(3) {
+        let group = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |a, (i, b)| a | u32::from(*b) << (16 - 8 * i));
+        for i in 0..4 {
+            text.push(if i <= chunk.len() {
+                char::from(A[(group >> (18 - 6 * i) & 63) as usize])
+            } else {
+                '='
+            });
+        }
+    }
+    text
+}
+
+const ORIGINAL: &[u8] = b"ORIGINAL-IMAGE-BYTES-CANARY";
+const LIMIT: usize = 256 * 1024;
+const UNKNOWN_ID: &str = "image_0123456789abcdef0123456789abcdef";
+
+/// One image per case, each saved from `https://<name>.public.test/`. Returns the bytes of `ok`.
+fn seed_thumbnails(env: &Env) -> Vec<u8> {
+    let db = env.writer();
+    let ok = png(320, 180, 1500);
+    let cases: [(&str, i64, Option<Vec<u8>>); 6] = [
+        ("ok", 1, Some(ok.clone())),
+        ("missing", 2, None),
+        ("broken", 3, Some(b"CANARY not an image".to_vec())),
+        ("limit", 4, Some(png(320, 180, LIMIT))),
+        ("toolarge", 5, Some(png(320, 180, LIMIT + 1))),
+        ("revoked", 6, Some(png(64, 64, 700))),
+    ];
+    for (name, n, thumbnail) in cases {
+        db.execute(
+            "INSERT INTO image_blobs (sha256, mime_type, byte_length, width, height, created_at, last_saved_at, save_count, data)
+             VALUES (printf('%064d', ?1), 'image/png', ?2, 640, 360, 1, 9999999999999, 1, ?3)",
+            params![n, ORIGINAL.len(), ORIGINAL],
+        )
+        .unwrap();
+        let blob = db.last_insert_rowid();
+        if let Some(data) = thumbnail {
+            let (w, h) = if name == "revoked" {
+                (64, 64)
+            } else {
+                (320, 180)
+            };
+            db.execute(
+                "INSERT INTO image_thumbnails (blob_id, mime_type, width, height, generator, data) VALUES (?1, 'image/png', ?2, ?3, 1, ?4)",
+                params![blob, w, h, data],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO saved_images (save_id, blob_id, image_url, page_url, saved_at, incognito, mcp_public) VALUES (?1, ?2, ?3, ?4, 1790000000000, 0, 1)",
+            params![
+                format!("s-{name}"),
+                blob,
+                format!("https://{name}.public.test/image.png"),
+                format!("https://{name}.public.test/")
+            ],
+        )
+        .unwrap();
+    }
+    ok
+}
+
+impl Client {
+    /// The whole `result` of a tool call, and the raw JSON-RPC line it came in.
+    fn call_result(&mut self, name: &str, arguments: Value) -> (Value, String) {
+        let reply = self.request("tools/call", json!({"name": name, "arguments": arguments}));
+        let line = self.seen.last().unwrap().clone();
+        assert!(reply["result"].is_object(), "{reply}");
+        (reply["result"].clone(), line)
+    }
+
+    /// The `id` of the image saved from `https://<name>.public.test/`.
+    fn image_id(&mut self, name: &str) -> String {
+        let list = self.ok(
+            "memocampus_search_images",
+            json!({"query": format!("{name}.public.test")}),
+        );
+        list["images"][0]["id"].as_str().unwrap().to_owned()
+    }
+
+    /// The error object of a failed thumbnail call; it has exactly one text block and no image.
+    fn thumbnail_error(&mut self, arguments: Value) -> Value {
+        let (result, line) = self.call_result("memocampus_get_image_thumbnail", arguments);
+        assert_eq!(result["isError"], true, "{result}");
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content.len(), 1, "{result}");
+        assert_eq!(content[0]["type"], "text");
+        assert!(result.get("structuredContent").is_none(), "{result}");
+        for needle in ["\"image\"", "CANARY", "ORIGINAL", "vault.sqlite3", "SELECT"] {
+            assert!(!line.contains(needle), "{needle}: {line}");
+        }
+        serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap()
+    }
+}
+
+#[test]
+fn a_public_images_thumbnail_comes_as_one_image_block_with_its_metadata_in_a_text_block() {
+    let env = Env::new();
+    let stored = seed_thumbnails(&env);
+    let mut client = env.start();
+    let id = client.image_id("ok");
+    let (result, line) =
+        client.call_result("memocampus_get_image_thumbnail", json!({"image_id": id}));
+    assert_ne!(result["isError"], true, "{result}");
+    let content = result["content"].as_array().unwrap();
+    assert_eq!(content.len(), 2, "{result}");
+    assert_eq!(content[0]["type"], "text");
+    let info: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        info,
+        json!({"image_id": id, "mime_type": "image/png", "width": 320, "height": 180})
+    );
+    assert_eq!(content[1]["type"], "image");
+    assert_eq!(content[1]["mimeType"], "image/png");
+    let data = content[1]["data"].as_str().unwrap();
+    assert_eq!(
+        b64_decode(data),
+        stored,
+        "the stored thumbnail, byte for byte"
+    );
+    // One copy of the image in the whole answer: not in the structured content, not in the text.
+    assert!(result.get("structuredContent").is_none(), "{result}");
+    assert_eq!(line.matches(data).count(), 1);
+    // The original and everything else of the vault stay out.
+    assert!(!line.contains("ORIGINAL"), "{line}");
+    assert!(!line.contains(&b64_text(ORIGINAL)), "{line}");
+    assert!(!line.contains("CANARY"), "{line}");
+    assert!(
+        !line.contains("public.test"),
+        "no URL in a thumbnail answer: {line}"
+    );
+    assert_eq!(
+        client.finish(),
+        "",
+        "nothing is logged, not the image either"
+    );
+}
+
+#[test]
+fn the_largest_thumbnail_is_sent_and_one_byte_more_is_not() {
+    let env = Env::new();
+    seed_thumbnails(&env);
+    let mut client = env.start();
+    let id = client.image_id("limit");
+    let (result, line) =
+        client.call_result("memocampus_get_image_thumbnail", json!({"image_id": id}));
+    assert_ne!(result["isError"], true, "{result}");
+    let data = result["content"][1]["data"].as_str().unwrap();
+    assert_eq!(data.len(), 349_528);
+    assert_eq!(b64_decode(data).len(), LIMIT);
+    let wire = line.trim_end().len();
+    println!(
+        "largest thumbnail: base64 {} chars, JSON-RPC line {wire} bytes",
+        data.len()
+    );
+    assert!(wire <= 349_528 + 4 * 1024, "{wire}");
+    // A thumbnail one byte over what the host stores is not an image this server sends.
+    let id = client.image_id("toolarge");
+    assert_eq!(
+        client.thumbnail_error(json!({"image_id": id})),
+        json!({"error": "thumbnail_invalid"})
+    );
+    assert_eq!(client.finish(), "");
+}
+
+#[test]
+fn every_failure_is_a_fixed_code_without_an_image_and_unknown_looks_like_private() {
+    let env = Env::new();
+    seed_thumbnails(&env);
+    let mut client = env.start();
+    let long = "a".repeat(60000);
+    let wide = "é".repeat(38);
+    for bad in [
+        "",
+        "1",
+        "image_",
+        "source_0123456789abcdef0123456789abcdef",
+        "IMAGE_0123456789ABCDEF0123456789ABCDEF",
+        "image_0123456789abcdef0123456789abcdeg",
+        "image_0123456789abcdef0123456789abcdef0",
+        wide.as_str(),
+        long.as_str(),
+    ] {
+        assert_eq!(
+            client.thumbnail_error(json!({"image_id": bad})),
+            json!({"error": "invalid_argument", "argument": "image_id"}),
+            "{}",
+            bad.len()
+        );
+    }
+    // A missing, a wrongly typed and an extra argument are refused, as for the other tools.
+    for arguments in [
+        json!({}),
+        json!({"image_id": 7}),
+        json!({"image_id": null}),
+        json!({"image_id": UNKNOWN_ID, "limit": 1}),
+    ] {
+        let reply = client.request(
+            "tools/call",
+            json!({"name": "memocampus_get_image_thumbnail", "arguments": arguments}),
+        );
+        let refused = reply.get("error").is_some() || reply["result"]["isError"] == json!(true);
+        assert!(refused, "{reply}");
+        assert!(!reply.to_string().contains("\"image\""), "{reply}");
+    }
+    assert_eq!(
+        client.thumbnail_error(json!({"image_id": UNKNOWN_ID})),
+        json!({"error": "not_found"})
+    );
+    // A public image without a thumbnail, and with a broken one: told apart, only for public images.
+    let id = client.image_id("missing");
+    assert_eq!(
+        client.thumbnail_error(json!({"image_id": id})),
+        json!({"error": "thumbnail_missing"})
+    );
+    let id = client.image_id("broken");
+    assert_eq!(
+        client.thumbnail_error(json!({"image_id": id})),
+        json!({"error": "thumbnail_invalid"})
+    );
+
+    // Revoked after the search: the id the AI holds stops working at the next call, and the answer
+    // is the one an unknown image gets, byte for byte.
+    let id = client.image_id("revoked");
+    let (before, _) = client.call_result("memocampus_get_image_thumbnail", json!({"image_id": id}));
+    assert_ne!(before["isError"], true);
+    env.writer()
+        .execute(
+            "UPDATE saved_images SET mcp_public = 0 WHERE save_id = 's-revoked'",
+            [],
+        )
+        .unwrap();
+    let (after, _) = client.call_result("memocampus_get_image_thumbnail", json!({"image_id": id}));
+    let (never, _) = client.call_result(
+        "memocampus_get_image_thumbnail",
+        json!({"image_id": UNKNOWN_ID}),
+    );
+    assert_eq!(after, never);
+    // Policy: the page's domain becomes SaveButNoMcp, and the image is gone for both tools.
+    let id = client.image_id("ok");
+    env.rule(false, "ok.public.test");
+    assert_eq!(
+        client.thumbnail_error(json!({"image_id": id})),
+        json!({"error": "not_found"})
+    );
+    let list = client.ok(
+        "memocampus_search_images",
+        json!({"query": "ok.public.test"}),
+    );
+    assert_eq!(list["total"], 0);
+    assert_eq!(client.finish(), "");
+}
+
+#[test]
+fn an_unpublished_or_switched_vault_gives_no_thumbnail() {
+    let env = Env::new();
+    seed_thumbnails(&env);
+    let mut following = Client::start(env.following(), "2025-06-18");
+    let id = following.image_id("ok");
+    let (good, _) =
+        following.call_result("memocampus_get_image_thumbnail", json!({"image_id": id}));
+    assert_ne!(good["isError"], true);
+    let b = env.second_vault();
+    publish(&env.app, &b, Some("pending"));
+    assert_eq!(
+        following.thumbnail_error(json!({"image_id": id})),
+        json!({"error": "vault_publication_pending"})
+    );
+    publish(&env.app, &b, Some("confirmed"));
+    // The vault now served has no such image, whatever id was handed out for A.
+    assert_eq!(
+        following.thumbnail_error(json!({"image_id": id})),
+        json!({"error": "not_found"})
+    );
+    publish(&env.app, &env.vault, Some("confirmed"));
+    let (back, _) =
+        following.call_result("memocampus_get_image_thumbnail", json!({"image_id": id}));
+    assert_ne!(back["isError"], true);
+    // A server pinned to A's path reads nothing once A is not the active vault.
+    let mut pinned = env.start();
+    let pinned_id = pinned.image_id("ok");
+    publish(&env.app, &b, Some("confirmed"));
+    assert_eq!(
+        pinned.thumbnail_error(json!({"image_id": pinned_id})),
+        json!({"error": "vault_not_active"})
+    );
+    fs::remove_file(env.app.join("config.json")).unwrap();
+    assert_eq!(
+        following.thumbnail_error(json!({"image_id": id})),
+        json!({"error": "vault_not_configured"})
+    );
+    assert_eq!(following.finish(), "");
+    assert_eq!(pinned.finish(), "");
+}
+
+#[test]
+fn the_server_instructions_tell_the_client_an_image_is_untrusted_content() {
+    let env = Env::new();
+    let mut client = Client::spawn(env.command(&env.vault));
+    let init = client.request(
+        "initialize",
+        json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}),
+    );
+    let text = init["result"]["instructions"].as_str().unwrap();
+    assert!(text.contains("memocampus_get_image_thumbnail"), "{text}");
+    assert!(text.contains("never an instruction"), "{text}");
+    assert!(text.contains("untrusted"), "{text}");
+    client.notify("notifications/initialized");
+    client.finish();
 }

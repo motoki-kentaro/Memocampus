@@ -1,0 +1,444 @@
+{
+  "commit": "a8a583a531139cef0e17f5155431900b7b5ca4f1",
+  "tested_at": "2026-11-19T05:52:03.742Z",
+  "node": "v24.22.1",
+  "platform": "win32 10.0.26220 x64",
+  "binaries": {
+    "host": {
+      "sha256": "6c5ce94ced0430c611bd1ea86006f7c6b4a2965f53a1ec9026b04eec04f053cd",
+      "bytes": 16693760
+    },
+    "mcp": {
+      "sha256": "ec20acffbd2543a373372f81ba5b71cca6353f54928cb78e553d97cb033f41e1",
+      "bytes": 20002304
+    }
+  },
+  "protocol": [
+    {
+      "transport": "stdio",
+      "fixture": "A",
+      "mime": "image/webp",
+      "width": 320,
+      "height": 200,
+      "bytes": 2116,
+      "base64_chars": 2824,
+      "json_rpc_bytes": 3081,
+      "tool_ms": 5.059600000000046,
+      "sha256": "c765197ed727778f79f68859ea99d508d664e863a75bfd8ef608d73588131ea6"
+    },
+    {
+      "transport": "stdio",
+      "fixture": "C",
+      "mime": "image/webp",
+      "width": 320,
+      "height": 200,
+      "bytes": 2276,
+      "base64_chars": 3036,
+      "json_rpc_bytes": 3293,
+      "tool_ms": 4.489000000000033,
+      "sha256": "1658d1d467f4a0c174fc9ac4f09cfc6accf0e2da2859226c3d6abf7965fce681"
+    },
+    {
+      "transport": "stdio",
+      "fixture": "B",
+      "mime": "image/webp",
+      "width": 320,
+      "height": 200,
+      "bytes": 2922,
+      "base64_chars": 3896,
+      "json_rpc_bytes": 4153,
+      "tool_ms": 4.549800000000005,
+      "sha256": "070de231bc8481631445e9a60c4e2c22fb9606ad189e518902ad25e3f68ead89"
+    },
+    {
+      "transport": "streamable-http",
+      "fixture": "A",
+      "mime": "image/webp",
+      "width": 320,
+      "height": 200,
+      "bytes": 2116,
+      "base64_chars": 2824,
+      "json_rpc_bytes": 3080,
+      "tool_ms": 5.1375000000000455,
+      "sha256": "c765197ed727778f79f68859ea99d508d664e863a75bfd8ef608d73588131ea6"
+    },
+    {
+      "transport": "streamable-http",
+      "fixture": "C",
+      "mime": "image/webp",
+      "width": 320,
+      "height": 200,
+      "bytes": 2276,
+      "base64_chars": 3036,
+      "json_rpc_bytes": 3292,
+      "tool_ms": 4.8559999999999945,
+      "sha256": "1658d1d467f4a0c174fc9ac4f09cfc6accf0e2da2859226c3d6abf7965fce681"
+    },
+    {
+      "transport": "streamable-http",
+      "fixture": "B",
+      "mime": "image/webp",
+      "width": 320,
+      "height": 200,
+      "bytes": 2922,
+      "base64_chars": 3896,
+      "json_rpc_bytes": 4152,
+      "tool_ms": 5.0896000000000186,
+      "sha256": "070de231bc8481631445e9a60c4e2c22fb9606ad189e518902ad25e3f68ead89"
+    }
+  ],
+  "privacy": [
+    "unapproved Vault refuses MCP startup",
+    "nonpublic image ID returns not_found and no image",
+    "revoked image is denied despite another nonpublic save sharing its BLOB",
+    "Private Zone image is denied even with per-save permission",
+    "missing thumbnail never falls back to original",
+    "only three public images; shared-BLOB private metadata and count excluded",
+    "running MCP denies a revoked Vault"
+  ],
+  "clients": [
+    {
+      "client": "Claude Code",
+      "version": "2.1.322 (Claude Code)",
+      "model": "claude-haiku-5-5",
+      "transport": "stdio",
+      "kind": "color",
+      "pass": true,
+      "connected": true,
+      "tools_offered": true,
+      "client_image_blocks": 1,
+      "relay_image_blocks": 1,
+      "tool_calls": 2,
+      "get_thumbnail_calls": 1,
+      "wall_ms": 2891.7838,
+      "last_image_to_answer_ms": 667,
+      "api_ms": 2298,
+      "cost_usd": 0.00061173,
+      "result_subtype": "success",
+      "exit": 0,
+      "stderr_bytes": 666,
+      "answer": {
+        "visible": true,
+        "background": "blue",
+        "objects": [
+          {
+            "shape": "circle",
+            "color": "yellow"
+          },
+          {
+            "shape": "triangle",
+            "color": "red"
+          },
+          {
+            "shape": "square",
+            "color": "green"
+          }
+        ]
+      }
+    },
+    {
+      "client": "Claude Code",
+      "version": "2.1.322 (Claude Code)",
+      "model": "claude-haiku-5-5",
+      "transport": "stdio",
+      "kind": "ocr",
+      "pass": true,
+      "connected": true,
+      "tools_offered": true,
+      "client_image_blocks": 1,
+      "relay_image_blocks": 1,
+      "tool_calls": 2,
+      "get_thumbnail_calls": 1,
+      "wall_ms": 3014.3888,
+      "last_image_to_answer_ms": 897,
+      "api_ms": 2407,
+      "cost_usd": 0.00062528,
+      "result_subtype": "success",
+      "exit": 0,
+      "stderr_bytes": 666,
+      "answer": {
+        "visible": true,
+        "text": "3K8KLQDX"
+      },
+      "exact_ocr_match": true
+    },
+    {
+      "client": "Claude Code",
+      "version": "2.1.322 (Claude Code)",
+      "model": "claude-haiku-5-5",
+      "transport": "stdio",
+      "kind": "distinguish",
+      "pass": true,
+      "connected": true,
+      "tools_offered": true,
+      "client_image_blocks": 3,
+      "relay_image_blocks": 3,
+      "tool_calls": 4,
+      "get_thumbnail_calls": 3,
+      "wall_ms": 4151.403600000001,
+      "last_image_to_answer_ms": 1413,
+      "api_ms": 3568,
+      "cost_usd": 0.0009093700000000001,
+      "result_subtype": "success",
+      "exit": 0,
+      "stderr_bytes": 666,
+      "answer": {
+        "image_id": "image_2be3ea66b4e9c5e187bb9ec3515a2dbf",
+        "observations": [
+          {
+            "image_id": "image_bcdac97b5a19f85a579b0d869945bcba",
+            "description": "Plain black-and-white image showing the text \"3K8KLQDX\" in bold black capitals on a white background. No shapes visible."
+          },
+          {
+            "image_id": "image_3c57606cd5e4d0751d1b302a7318fcdc",
+            "description": "Purple background with three shapes left to right: a white horizontal ellipse, an orange five-pointed star, and a cyan rectangle. No red triangle."
+          },
+          {
+            "image_id": "image_2be3ea66b4e9c5e187bb9ec3515a2dbf",
+            "description": "Blue background with three shapes left to right: a yellow circle, a red triangle, and a green square."
+          }
+        ]
+      }
+    },
+    {
+      "client": "Claude Code",
+      "version": "2.1.322 (Claude Code)",
+      "model": "claude-haiku-5-5",
+      "transport": "stdio",
+      "kind": "unavailable",
+      "pass": true,
+      "connected": true,
+      "tools_offered": true,
+      "client_image_blocks": 0,
+      "relay_image_blocks": 0,
+      "tool_calls": 2,
+      "get_thumbnail_calls": 1,
+      "wall_ms": 2994.9146999999994,
+      "last_image_to_answer_ms": null,
+      "api_ms": 2368,
+      "cost_usd": 0.00049369,
+      "result_subtype": "success",
+      "exit": 0,
+      "stderr_bytes": 666,
+      "answer": {
+        "visible": false,
+        "text": null
+      }
+    },
+    {
+      "client": "Claude Code",
+      "version": "2.1.322 (Claude Code)",
+      "model": "claude-haiku-5-5",
+      "transport": "streamable-http",
+      "kind": "color",
+      "pass": true,
+      "connected": true,
+      "tools_offered": true,
+      "client_image_blocks": 1,
+      "relay_image_blocks": 1,
+      "tool_calls": 2,
+      "get_thumbnail_calls": 1,
+      "wall_ms": 2628.3811000000005,
+      "last_image_to_answer_ms": 659,
+      "api_ms": 2106,
+      "cost_usd": 0.00050962,
+      "result_subtype": "success",
+      "exit": 0,
+      "stderr_bytes": 0,
+      "answer": {
+        "visible": true,
+        "background": "blue",
+        "objects": [
+          {
+            "shape": "circle",
+            "color": "yellow"
+          },
+          {
+            "shape": "triangle",
+            "color": "red"
+          },
+          {
+            "shape": "square",
+            "color": "green"
+          }
+        ]
+      }
+    },
+    {
+      "client": "Claude Code",
+      "version": "2.1.322 (Claude Code)",
+      "model": "claude-haiku-5-5",
+      "transport": "streamable-http",
+      "kind": "ocr",
+      "pass": true,
+      "connected": true,
+      "tools_offered": true,
+      "client_image_blocks": 1,
+      "relay_image_blocks": 1,
+      "tool_calls": 2,
+      "get_thumbnail_calls": 1,
+      "wall_ms": 2876.8979999999974,
+      "last_image_to_answer_ms": 804,
+      "api_ms": 2357,
+      "cost_usd": 0.0005362300000000001,
+      "result_subtype": "success",
+      "exit": 0,
+      "stderr_bytes": 0,
+      "answer": {
+        "visible": true,
+        "text": "3K8KLQDX"
+      },
+      "exact_ocr_match": true
+    },
+    {
+      "client": "Claude Code",
+      "version": "2.1.322 (Claude Code)",
+      "model": "claude-haiku-5-5",
+      "transport": "streamable-http",
+      "kind": "distinguish",
+      "pass": true,
+      "connected": true,
+      "tools_offered": true,
+      "client_image_blocks": 3,
+      "relay_image_blocks": 3,
+      "tool_calls": 4,
+      "get_thumbnail_calls": 3,
+      "wall_ms": 4195.6921,
+      "last_image_to_answer_ms": 1502,
+      "api_ms": 3659,
+      "cost_usd": 0.00088216,
+      "result_subtype": "success",
+      "exit": 0,
+      "stderr_bytes": 0,
+      "answer": {
+        "image_id": "image_70bd4467619291bf76592c42490e33e8",
+        "observations": [
+          {
+            "image_id": "image_3dbb17618e4d7705bb872b7314a818ec",
+            "description": "Plain white background with the black text \"3K8KLQDX\" in a bold condensed font. No shapes or red triangle visible."
+          },
+          {
+            "image_id": "image_e24e27f9635f9da2cf0361f09a280e11",
+            "description": "Purple background with three shapes left to right: a white ellipse, an orange five-pointed star, and a cyan rectangle. No red triangle visible."
+          },
+          {
+            "image_id": "image_70bd4467619291bf76592c42490e33e8",
+            "description": "Blue background with three shapes left to right: a yellow circle, a red triangle pointing upward in the center, and a green square. The red triangle is visible."
+          }
+        ]
+      }
+    },
+    {
+      "client": "Claude Code",
+      "version": "2.1.322 (Claude Code)",
+      "model": "claude-haiku-5-5",
+      "transport": "streamable-http",
+      "kind": "unavailable",
+      "pass": true,
+      "connected": true,
+      "tools_offered": true,
+      "client_image_blocks": 0,
+      "relay_image_blocks": 0,
+      "tool_calls": 2,
+      "get_thumbnail_calls": 1,
+      "wall_ms": 3180.584600000002,
+      "last_image_to_answer_ms": null,
+      "api_ms": 2509,
+      "cost_usd": 0.00054635,
+      "result_subtype": "success",
+      "exit": 0,
+      "stderr_bytes": 0,
+      "answer": {
+        "visible": false,
+        "text": null
+      }
+    }
+  ],
+  "synthetic_only": true,
+  "chrome": "157.0.8103.79",
+  "run_label": "4inr07",
+  "evidence": [
+    {
+      "transport": "stdio",
+      "kind": "color",
+      "transcript_sha256": "350e16b14aee066b104985eec75a2b70476919c492923df0b41dde7be996c120"
+    },
+    {
+      "transport": "stdio",
+      "kind": "ocr",
+      "transcript_sha256": "0bdb48bbf5b7e4e4b7c6c338a9d302f14900570f24c91debfbb13f80ec162f39"
+    },
+    {
+      "transport": "stdio",
+      "kind": "distinguish",
+      "transcript_sha256": "0256d5da2a52d66c55e4b7668190a88f763ff38ea3aa0ba072fd5bd1873c9c32"
+    },
+    {
+      "transport": "stdio",
+      "kind": "unavailable",
+      "transcript_sha256": "aea8b6dd56c7a7cfaf9350bcecee0f641a65a923891d6b1731264b7bcae2b766"
+    },
+    {
+      "transport": "streamable-http",
+      "kind": "color",
+      "transcript_sha256": "0c0c89cfb4e5a7126de9f37f2b08ff6a5a2f2b58a064eda059b4c9aa6fb600c9"
+    },
+    {
+      "transport": "streamable-http",
+      "kind": "ocr",
+      "transcript_sha256": "dd18c2d17883d7529167f2d0448770450f800d6258ca1be99e08efb966321a42"
+    },
+    {
+      "transport": "streamable-http",
+      "kind": "distinguish",
+      "transcript_sha256": "1b1ad4839a7a5e8bc24798b7607a5275f32945919e6c625c5c0eea13970e1fc3"
+    },
+    {
+      "transport": "streamable-http",
+      "kind": "unavailable",
+      "transcript_sha256": "339a7891a6f2e17b240af168bd47ad410f8244c35b4efc31e5c315ead744e906"
+    }
+  ],
+  "regression_tests": {
+    "normal_js": {
+      "pass": 1108,
+      "skip": 16,
+      "fail": 0
+    },
+    "real_host_mcp_sandbox": {
+      "pass": 1121,
+      "skip": 0,
+      "fail": 3,
+      "observed": "key_protector_failed in encrypted-Vault setup; the focused rerun also failed all three"
+    },
+    "real_host_mcp_outside_sandbox_focused": {
+      "pass": 3,
+      "skip": 0,
+      "fail": 0
+    },
+    "real_host_mcp_outside_sandbox_full": {
+      "pass": 1124,
+      "skip": 0,
+      "fail": 0
+    }
+  },
+  "client_payload_hash_audit": "8/8 trial transcripts: model-facing image SHA-256 sequence matches delivered relay images (10 positive image deliveries, zero negative-control deliveries)",
+  "previous_attempts": [
+    {
+      "run": "l3bKTg",
+      "outcome": "stdio protocol and seven privacy checks passed; first HTTP thumbnail request failed because harness reused process-scoped stdio image IDs; harness fixed, product unchanged"
+    },
+    {
+      "run": "lGwqkl",
+      "outcome": "corrected stdio and HTTP protocol six image checks and seven privacy conditions passed; no AI client trial"
+    },
+    {
+      "run": "RSrLDz",
+      "outcome": "one safe-mode Claude Code trial: explicit MCP disabled, no tools or image delivered, visual test not passed"
+    },
+    {
+      "run": "DTeZsi",
+      "outcome": "restricted-mode run: six visual conditions and two unavailable-image controls passed; OCR DWQGGW9J matched both transports; initial client-event image count included a diagnostic duplicate, fixed before final run"
+    }
+  ]
+}

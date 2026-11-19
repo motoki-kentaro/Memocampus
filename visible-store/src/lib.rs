@@ -42,6 +42,7 @@ mod tests;
 mod time;
 mod visible_images;
 mod visible_set;
+mod visible_thumbnail;
 
 use memocampus_native_host::active_vault::{self, Admitted, GateError, VaultMode};
 
@@ -52,6 +53,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use visible_images::VisibleImages;
 use visible_set::{public_id, IdKey, Position, VisibleSet};
+use visible_thumbnail::ThumbnailSet;
 
 pub const DEFAULT_LIMIT: u32 = 50;
 pub const MAX_LIMIT: u32 = 100;
@@ -103,6 +105,12 @@ pub enum VisibleError {
     VaultLocked,
     /// The key was obtained but SQLCipher refuses it for this file.
     VaultDecryptFailed,
+    // --- Thumbnails (Issue #61). Given only for an image that is public now, so they say nothing
+    // about a private or unknown one (those are `NotFound`). ---
+    /// The public image has no stored thumbnail. Nothing is made in its place.
+    ThumbnailMissing,
+    /// What is stored is not a thumbnail the host would have written.
+    ThumbnailInvalid,
 }
 
 impl VisibleError {
@@ -126,6 +134,8 @@ impl VisibleError {
             Self::VaultEncryptionUnsupported => "vault_encryption_unsupported",
             Self::VaultLocked => "vault_locked",
             Self::VaultDecryptFailed => "vault_decrypt_failed",
+            Self::ThumbnailMissing => "thumbnail_missing",
+            Self::ThumbnailInvalid => "thumbnail_invalid",
         }
     }
 }
@@ -283,6 +293,22 @@ pub struct GetImageSources<'a> {
     pub limit: Option<u32>,
 }
 
+/// The thumbnail of a public image, as the host stored it: PNG, JPEG or WebP, at most 256 KiB and
+/// 1024 pixels on a side. Never an original.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleThumbnail {
+    pub mime_type: String,
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
+}
+
+/// `image_id` is an ID `search_images` returned (`image_` and 32 lower-case hexadecimal digits).
+#[derive(Debug, Clone)]
+pub struct GetImageThumbnail<'a> {
+    pub image_id: &'a str,
+}
+
 /// Points in one read at which tests interleave other activity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Stage {
@@ -305,8 +331,6 @@ pub(crate) struct Target {
     pub vault_id: Option<VaultId>,
     pub app_dir: PathBuf,
 }
-
-type ReadRows<Row> = fn(&Target, &mut dyn FnMut(Stage)) -> Result<Vec<Row>, VisibleError>;
 
 /// Which vault a store reads.
 enum Source {
@@ -542,6 +566,38 @@ impl VisibleStore {
         )
     }
 
+    /// The thumbnail of an image `search_images` returned, if that image has a public save in this
+    /// read. The ID grants nothing: a malformed one is `InvalidArgument`; one that is unknown,
+    /// private, from another process or vault, or no longer public is `NotFound`, the same for all
+    /// of them. A public image without a usable stored thumbnail is `ThumbnailMissing` or
+    /// `ThumbnailInvalid`.
+    pub fn get_image_thumbnail(
+        &self,
+        request: &GetImageThumbnail,
+    ) -> Result<VisibleThumbnail, VisibleError> {
+        self.get_image_thumbnail_staged(request, &mut |_| {})
+    }
+
+    fn get_image_thumbnail_staged(
+        &self,
+        request: &GetImageThumbnail,
+        stage: &mut dyn FnMut(Stage),
+    ) -> Result<VisibleThumbnail, VisibleError> {
+        let image_id = request.image_id;
+        if !is_image_id(image_id) {
+            return Err(VisibleError::InvalidArgument);
+        }
+        // Names the image whose bytes are read; it judges nothing. The set built from the same
+        // snapshot decides whether they are released.
+        let wanted = |identity: &str| public_id(&self.id_key, "image", identity) == image_id;
+        self.read_visible(
+            stage,
+            |target, stage| snapshot::read_image_saves_with_thumbnail(target, stage, &wanted),
+            ThumbnailSet::build,
+            |set| set.release(image_id),
+        )
+    }
+
     fn search_visits_staged(
         &self,
         request: &SearchVisits,
@@ -592,11 +648,11 @@ impl VisibleStore {
 
     /// Answers from a set whose policy was still current after the set was complete. The read takes
     /// effect at that check: a policy update finished before this call began is always applied.
-    fn read_visible<Row, Set, T>(
+    fn read_visible<Rows, Set, T>(
         &self,
         stage: &mut dyn FnMut(Stage),
-        read: ReadRows<Row>,
-        build: fn(Vec<Row>, &CompiledPolicy, &IdKey) -> Result<Set, VisibleError>,
+        read: impl Fn(&Target, &mut dyn FnMut(Stage)) -> Result<Rows, VisibleError>,
+        build: impl Fn(Rows, &CompiledPolicy, &IdKey) -> Result<Set, VisibleError>,
         query: impl Fn(&Set) -> Result<T, VisibleError>,
     ) -> Result<T, VisibleError> {
         for _ in 0..POLICY_CHANGE_ATTEMPTS {
@@ -662,6 +718,16 @@ fn search_terms(
     }
     let limit = checked_limit(limit)?;
     Ok((visible_set::like_pattern(query), range, limit))
+}
+
+/// `image_` and 32 lower-case hexadecimal digits, as `public_id` writes them.
+fn is_image_id(id: &str) -> bool {
+    id.strip_prefix("image_").is_some_and(|hex| {
+        hex.len() == 32
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
 }
 
 /// `visit_` and 32 lower-case hexadecimal digits, as `public_id` writes them.
