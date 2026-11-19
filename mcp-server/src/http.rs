@@ -31,7 +31,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::{TcpListener, TcpSocket};
-use tokio::sync::Semaphore;
+use tokio::sync::{oneshot, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 pub const DEFAULT_LISTEN: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8765);
@@ -300,25 +300,39 @@ impl Gate {
     }
 }
 
-/// Resolves when the process is asked to stop: Ctrl+C, Ctrl+Break, or its console closing.
-async fn stop_requested() -> &'static str {
+/// Resolves when the process is asked to stop: Ctrl+C, Ctrl+Break, its console closing, or, only
+/// when a supervisor's management channel was given (`mgmt`), that channel's stop request or loss.
+async fn stop_requested(management: Option<oneshot::Receiver<&'static str>>) -> &'static str {
+    // Without a channel this never resolves, so the select below is the old one.
+    let from_supervisor = async {
+        match management {
+            // A reader that ended without a word (it could not start) counts as the channel lost.
+            Some(channel) => channel.await.unwrap_or("management_closed"),
+            None => std::future::pending().await,
+        }
+    };
     #[cfg(windows)]
     {
         use tokio::signal::windows;
         let (Ok(mut brk), Ok(mut close)) = (windows::ctrl_break(), windows::ctrl_close()) else {
-            let _ = tokio::signal::ctrl_c().await;
-            return "ctrl_c";
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => return "ctrl_c",
+                reason = from_supervisor => return reason,
+            }
         };
         tokio::select! {
             _ = tokio::signal::ctrl_c() => "ctrl_c",
             _ = brk.recv() => "ctrl_break",
             _ = close.recv() => "console_close",
+            reason = from_supervisor => reason,
         }
     }
     #[cfg(not(windows))]
     {
-        let _ = tokio::signal::ctrl_c().await;
-        "ctrl_c"
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => "ctrl_c",
+            reason = from_supervisor => reason,
+        }
     }
 }
 
@@ -328,6 +342,7 @@ pub async fn serve(
     listener: TcpListener,
     token: Token,
     extra_hosts: Vec<AllowedHost>,
+    management: Option<oneshot::Receiver<&'static str>>,
 ) -> &'static str {
     let port = listener.local_addr().map(|addr| addr.port()).unwrap_or(0);
     let cancel = CancellationToken::new();
@@ -362,7 +377,7 @@ pub async fn serve(
     };
     let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let graceful = GracefulShutdown::new();
-    let stop = stop_requested();
+    let stop = stop_requested(management);
     tokio::pin!(stop);
     let reason = loop {
         let accepted = tokio::select! {

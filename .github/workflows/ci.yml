@@ -73,3 +73,13 @@ jobs:
         working-directory: mcp-server
       - run: cargo build --release --locked
         working-directory: mcp-server
+      # Issue #67: the Windows tray (no SQLite, no OpenSSL). Its tests start real processes, so they
+      # run here and nowhere else.
+      - run: cargo fmt --all -- --check
+        working-directory: tray
+      - run: cargo test --locked
+        working-directory: tray
+      - run: cargo clippy --locked --all-targets -- -D warnings
+        working-directory: tray
+      - run: cargo build --release --locked
+        working-directory: tray

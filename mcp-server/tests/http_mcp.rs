@@ -187,7 +187,11 @@ impl Server {
     fn start_with(env: &Env, listen: &str, extra: &[&str]) -> Self {
         let mut args = vec!["--transport", "streamable-http", "--listen", listen];
         args.extend_from_slice(extra);
-        let mut command = env.command(&args);
+        Self::spawn(env.command(&args))
+    }
+
+    /// Starts `command` (an HTTP server) and waits for it to report its address.
+    fn spawn(mut command: Command) -> Self {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -217,11 +221,16 @@ impl Server {
 
     /// Asks the server to stop as Ctrl+Break would, and waits for its exit; returns its stderr.
     #[cfg(windows)]
-    fn stop(mut self) -> (std::process::ExitStatus, Vec<String>) {
+    fn stop(self) -> (std::process::ExitStatus, Vec<String>) {
         use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT};
         // SAFETY: sends a console control event to the server's own process group.
         let sent = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, self.child.id()) };
         assert_ne!(sent, 0, "{}", std::io::Error::last_os_error());
+        self.finish()
+    }
+
+    /// Waits for the server to end by itself (it was asked some other way); returns its stderr.
+    fn finish(mut self) -> (std::process::ExitStatus, Vec<String>) {
         let started = Instant::now();
         let status = loop {
             if let Some(status) = self.child.try_wait().unwrap() {
@@ -1885,4 +1894,677 @@ fn the_thumbnail_tool_needs_the_token_and_a_local_origin_like_every_other_call()
     );
     assert_eq!(reply.status, 200);
     assert_eq!(reply.json()["result"]["content"][1]["type"], "image");
+}
+
+// --- The management channel (Issue #67, Slice 1) ---------------------------------------------------
+//
+// A supervisor (the Windows tray) that started the server holds the write end of an anonymous pipe
+// whose read end the server inherited. These tests use the real `memocampus-mcp` process, synthetic
+// vaults only, and never a process or port they did not start.
+
+#[cfg(windows)]
+mod management {
+    use super::*;
+    use memocampus_tray::settings::{Settings, VaultMode};
+    use memocampus_tray::state::{
+        ErrorKind, LastExit, RestartPolicy, ServerState, Snapshot, VaultStatus,
+    };
+    use memocampus_tray::supervisor::{Command as Order, Supervisor, Timings};
+    use memocampus_tray::winproc::WinLauncher;
+    use std::fs::File;
+    use std::os::windows::io::FromRawHandle;
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, WAIT_TIMEOUT,
+    };
+    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+    use windows_sys::Win32::System::Pipes::CreatePipe;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+    };
+
+    /// `(read handle value, write end)`. The read end is inheritable (the server gets it); the write
+    /// end is not, so no child can ever hold it. With `inherit_write` both ends are inheritable: only
+    /// for the test that hands the server the wrong end.
+    fn pipe(inherit_write: bool) -> (usize, usize, File) {
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: std::ptr::null_mut(),
+            bInheritHandle: 1,
+        };
+        let (mut read, mut write): (HANDLE, HANDLE) = (std::ptr::null_mut(), std::ptr::null_mut());
+        // SAFETY: live out-pointers and a live attribute block; the handles are ours.
+        unsafe {
+            assert_ne!(CreatePipe(&mut read, &mut write, &attributes, 0), 0);
+            if !inherit_write {
+                assert_ne!(SetHandleInformation(write, HANDLE_FLAG_INHERIT, 0), 0);
+            }
+            (read as usize, write as usize, File::from_raw_handle(write))
+        }
+    }
+
+    fn alive(pid: u32) -> bool {
+        // SAFETY: a query about a process by id with the least access; the handle is closed.
+        unsafe {
+            let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+            let running = WaitForSingleObject(handle, 0) == WAIT_TIMEOUT;
+            CloseHandle(handle);
+            running
+        }
+    }
+
+    fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
+        let until = Instant::now() + WAIT;
+        while !condition() {
+            assert!(Instant::now() < until, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    fn managed(env: &Env, handle: usize) -> Server {
+        Server::spawn(env.command(&[
+            "--transport",
+            "streamable-http",
+            "--listen",
+            "127.0.0.1:0",
+            "--management-pipe-handle",
+            &handle.to_string(),
+        ]))
+    }
+
+    /// Runs a managed server, lets `act` use the write end, and returns how the server ended.
+    fn ended_by(
+        env: &Env,
+        act: impl FnOnce(File) -> Option<File>,
+    ) -> (std::process::ExitStatus, Vec<String>, u32, u16, usize) {
+        let (read, _, write) = pipe(false);
+        let server = managed(env, read);
+        let (pid, port) = (server.child.id(), server.port);
+        let keep = act(write);
+        let (status, stderr) = server.finish();
+        drop(keep);
+        (status, stderr, pid, port, read)
+    }
+
+    fn events_of(env: &Env, pid: u32) -> Vec<Value> {
+        env.log()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .filter(|event| event["pid"] == json!(pid))
+            .collect()
+    }
+
+    fn assert_ended_gracefully(
+        env: &Env,
+        (status, stderr, pid, port, handle): (
+            std::process::ExitStatus,
+            Vec<String>,
+            u32,
+            u16,
+            usize,
+        ),
+        reason: &str,
+    ) {
+        assert!(status.success(), "{status}");
+        assert_eq!(
+            stderr.last().map(String::as_str),
+            Some(format!("memocampus-mcp: stopped ({reason})").as_str()),
+            "{stderr:?}"
+        );
+        // Through the same shutdown as Ctrl+C: the port is closed, the shutdown is logged with its reason.
+        assert!(
+            TcpStream::connect(("127.0.0.1", port)).is_err(),
+            "the port is closed"
+        );
+        let events = events_of(env, pid);
+        let names: Vec<&str> = events
+            .iter()
+            .map(|e| e["event"].as_str().unwrap())
+            .collect();
+        for expected in [
+            "management_ipc_ready",
+            "http_listening",
+            "http_shutdown",
+            "process_exit",
+        ] {
+            assert!(names.contains(&expected), "{names:?}");
+        }
+        let shutdown = events
+            .iter()
+            .find(|e| e["event"] == "http_shutdown")
+            .unwrap();
+        assert_eq!(shutdown["reason"], reason);
+        assert_eq!(shutdown["ok"], true, "connections drained");
+        // The handle value is a number in the server's handle table, not a secret, and still it is
+        // in neither stderr nor the log.
+        let value = handle.to_string();
+        for text in stderr
+            .iter()
+            .map(String::as_str)
+            .chain([env.log().as_str()])
+        {
+            assert!(
+                !text.contains(&format!("management-pipe-handle {value}"))
+                    && !text.contains(&format!("\"{value}\"")),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stop_request_on_the_management_pipe_stops_the_server_through_the_normal_shutdown() {
+        let env = Env::new();
+        env.seed();
+        let ended = ended_by(&env, |mut write| {
+            write.write_all(b"S").unwrap();
+            Some(write)
+        });
+        assert_ended_gracefully(&env, ended, "management_stop");
+    }
+
+    #[test]
+    fn losing_the_supervisor_stops_the_server_too() {
+        let env = Env::new();
+        env.seed();
+        // The write end closes with nothing written: the supervisor is gone.
+        let ended = ended_by(&env, |write| {
+            drop(write);
+            None
+        });
+        assert_ended_gracefully(&env, ended, "management_closed");
+    }
+
+    #[test]
+    fn anything_but_the_stop_byte_stops_the_server_as_invalid() {
+        for byte in [b"X", b"s", b"\n"] {
+            let env = Env::new();
+            env.seed();
+            let ended = ended_by(&env, |mut write| {
+                write.write_all(byte).unwrap();
+                Some(write)
+            });
+            assert_ended_gracefully(&env, ended, "management_invalid");
+        }
+    }
+
+    #[test]
+    fn a_handle_that_is_not_a_readable_management_pipe_refuses_the_start() {
+        let env = Env::new();
+        env.seed();
+        // A value that is no handle of the server's, and the write end of a real pipe.
+        let (_, write_value, _keep) = pipe(true);
+        for value in ["99996", &write_value.to_string()] {
+            let out = env
+                .command(&[
+                    "--transport",
+                    "streamable-http",
+                    "--listen",
+                    "127.0.0.1:0",
+                    "--management-pipe-handle",
+                    value,
+                ])
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(2), "{value}");
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                stderr.contains("cannot start: management_not_a_pipe"),
+                "{stderr}"
+            );
+            assert!(!stderr.contains("listening"), "nothing was bound: {stderr}");
+            assert!(!stderr.contains(value), "the value is not echoed");
+            assert!(out.stdout.is_empty());
+        }
+        assert!(env.log().contains("\"stage\":\"management\""));
+    }
+
+    #[test]
+    fn the_management_flag_is_refused_without_http_and_when_malformed() {
+        let env = Env::new();
+        for (args, text) in [
+            (
+                vec!["--management-pipe-handle", "8"],
+                "--management-pipe-handle needs --transport streamable-http",
+            ),
+            (
+                vec!["--transport", "stdio", "--management-pipe-handle", "8"],
+                "--management-pipe-handle needs --transport streamable-http",
+            ),
+            (
+                vec![
+                    "--transport",
+                    "streamable-http",
+                    "--management-pipe-handle",
+                    "0x8",
+                ],
+                "--management-pipe-handle must be one decimal handle value",
+            ),
+        ] {
+            let out = env.command(&args).output().unwrap();
+            assert_eq!(out.status.code(), Some(2), "{args:?}");
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(stderr.contains(text), "{stderr}");
+            assert!(out.stdout.is_empty(), "stdout stays free for the protocol");
+        }
+    }
+
+    #[test]
+    fn a_managed_server_has_no_stop_tool_and_no_stop_endpoint() {
+        let env = Env::new();
+        env.seed();
+        let (read, _, mut write) = pipe(false);
+        let server = managed(&env, read);
+        let token = env.token();
+        let listed = post(
+            &server,
+            &token,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        )
+        .json();
+        let mut names: Vec<String> = listed["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "memocampus_get_domain_stats",
+                "memocampus_get_image_thumbnail",
+                "memocampus_get_visits_by_day",
+                "memocampus_search_images",
+                "memocampus_search_visits"
+            ]
+        );
+        for tool in ["memocampus_stop", "stop", "shutdown", "management_stop"] {
+            let reply = post(&server, &token, &call_body(2, tool, &json!({}))).json();
+            assert!(
+                reply.get("error").is_some() || reply["result"]["isError"] == true,
+                "{tool}: {reply}"
+            );
+        }
+        let auth = format!("Bearer {token}");
+        for path in ["/stop", "/shutdown", "/management", "/mcp/stop", "/quit"] {
+            let reply = raw(server.port, "POST", path, &[("Authorization", &auth)], "S");
+            assert_eq!(reply.status, 404, "{path}");
+            let reply = raw(server.port, "GET", path, &[("Authorization", &auth)], "");
+            assert_eq!(reply.status, 404, "{path}");
+        }
+        let mut server = server;
+        assert!(
+            server.child.try_wait().unwrap().is_none(),
+            "none of that stopped it"
+        );
+        let ok = post(
+            &server,
+            &token,
+            &call_body(3, "memocampus_get_domain_stats", &json!({"limit": 1})),
+        );
+        assert_eq!(ok.status, 200);
+        write.write_all(b"S").unwrap();
+        let (status, _) = server.finish();
+        assert!(status.success());
+    }
+
+    #[test]
+    fn without_the_flag_the_server_stops_as_before_and_ignores_pipes_it_was_not_given() {
+        let env = Env::new();
+        env.seed();
+        // A pipe exists in this process and is inheritable, but the server was not told about it.
+        let (_read, _, mut write) = pipe(false);
+        let server = Server::start(&env, "127.0.0.1:0");
+        write.write_all(b"S").unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        let mut server = server;
+        assert!(
+            server.child.try_wait().unwrap().is_none(),
+            "no flag, no management"
+        );
+        let (status, stderr) = server.stop();
+        assert!(status.success());
+        assert_eq!(
+            stderr.last().map(String::as_str),
+            Some("memocampus-mcp: stopped (ctrl_break)")
+        );
+        assert!(!env.log().contains("management_ipc_ready"));
+    }
+
+    // ---- The tray's supervisor against the real server ----
+
+    fn free_port() -> u16 {
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    fn launcher(env: &Env) -> WinLauncher {
+        let mut launcher = WinLauncher::new(PathBuf::from(EXE));
+        launcher.env = vec![
+            ("MEMOCAMPUS_APP_DIR".into(), Some(env.app.clone().into())),
+            (
+                "LOCALAPPDATA".into(),
+                Some(env.dir.join("localappdata").into()),
+            ),
+            ("MEMOCAMPUS_DB".into(), None),
+        ];
+        launcher
+    }
+
+    fn supervise(env: &Env, settings: Settings) -> Supervisor {
+        Supervisor::spawn(
+            Box::new(launcher(env)),
+            Box::new(move || Ok(settings.clone())),
+            Timings::standard(),
+            RestartPolicy::standard(),
+            Box::new(|_| {}),
+        )
+    }
+
+    fn wait_for(
+        supervisor: &Supervisor,
+        what: &str,
+        condition: impl Fn(&Snapshot) -> bool,
+    ) -> Snapshot {
+        let mut last = supervisor.snapshot();
+        wait_until(what, || {
+            last = supervisor.snapshot();
+            condition(&last)
+        });
+        last
+    }
+
+    fn settings_on(port: u16) -> Settings {
+        Settings {
+            listen_port: port,
+            ..Settings::default()
+        }
+    }
+
+    #[test]
+    fn the_supervisor_runs_the_real_server_and_stops_it_over_the_channel() {
+        let env = Env::new();
+        env.seed();
+        let port = free_port();
+        let supervisor = supervise(&env, settings_on(port));
+        supervisor.send(Order::Start);
+        let up = wait_for(&supervisor, "running", |s| s.state == ServerState::Running);
+        assert_eq!(up.port, Some(port));
+        // Up is all the tray knows: it does not claim the vault is readable.
+        assert_eq!(up.vault, VaultStatus::Unknown);
+        let pid = up.pid.unwrap();
+        let ok = raw(
+            port,
+            "POST",
+            "/mcp",
+            &[
+                ("Authorization", &format!("Bearer {}", env.token())),
+                ("MCP-Protocol-Version", LEGACY),
+            ],
+            &call_body(1, "memocampus_get_domain_stats", &json!({"limit": 1})).to_string(),
+        );
+        assert_eq!(ok.status, 200, "the managed server serves as any other");
+
+        supervisor.send(Order::Stop);
+        let stopped = wait_for(&supervisor, "stopped", |s| s.state == ServerState::Stopped);
+        assert_eq!(
+            stopped.last_exit,
+            Some(LastExit::Graceful),
+            "left by itself, not terminated"
+        );
+        wait_until("the process to be gone", || !alive(pid));
+        assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
+        let events = events_of(&env, pid);
+        let shutdown = events
+            .iter()
+            .find(|e| e["event"] == "http_shutdown")
+            .unwrap();
+        assert_eq!(shutdown["reason"], "management_stop");
+        // The server's own record of how it was started: no console window and not attached to any
+        // console, so there is nothing that could be shown.
+        let started = events
+            .iter()
+            .find(|e| e["event"] == "startup_context")
+            .unwrap();
+        println!("startup_context of the supervised server: {started}");
+        assert_eq!(started["console_window"], false, "{started}");
+        assert_eq!(started["console_processes"], 0, "{started}");
+
+        // And it starts again on the same port.
+        supervisor.send(Order::Start);
+        wait_for(&supervisor, "running again", |s| {
+            s.state == ServerState::Running
+        });
+        supervisor.shutdown();
+        wait_until("the second server to be gone", || {
+            TcpStream::connect(("127.0.0.1", port)).is_err()
+        });
+    }
+
+    #[test]
+    fn an_unpublished_or_missing_vault_is_an_error_not_a_running_server() {
+        for (state, code) in [
+            (Some("pending"), "vault_publication_pending"),
+            (None, "vault_publication_pending"),
+        ] {
+            let env = Env::new();
+            env.seed();
+            publish(&env.app, &env.vault, state);
+            let supervisor = supervise(&env, settings_on(free_port()));
+            supervisor.send(Order::Start);
+            let end = wait_for(&supervisor, "error", |s| {
+                matches!(s.state, ServerState::Error(_))
+            });
+            assert_eq!(
+                end.state,
+                ServerState::Error(ErrorKind::VaultRefused(code.into()))
+            );
+            assert_eq!(end.vault, VaultStatus::Refused(code.into()));
+            assert_eq!(end.pid, None);
+        }
+        // No config.json at all: nothing is created for it.
+        let env = Env::new();
+        fs::remove_file(env.app.join("config.json")).unwrap();
+        let before: Vec<_> = fs::read_dir(&env.app)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        let supervisor = supervise(&env, settings_on(free_port()));
+        supervisor.send(Order::Start);
+        let end = wait_for(&supervisor, "error", |s| {
+            matches!(s.state, ServerState::Error(_))
+        });
+        assert_eq!(
+            end.state,
+            ServerState::Error(ErrorKind::VaultRefused("vault_not_configured".into()))
+        );
+        let mut after: Vec<_> = fs::read_dir(&env.app)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        let mut before = before;
+        before.sort();
+        after.sort();
+        // Only the diagnostic log directory may appear; no config, no vault, no token.
+        after.retain(|name| name != "logs");
+        before.retain(|name| name != "logs");
+        assert_eq!(before, after);
+        assert!(!env.app.join("config.json").exists());
+    }
+
+    #[test]
+    fn a_pinned_vault_does_not_widen_what_the_server_may_read() {
+        let env = Env::new();
+        env.seed();
+        // The pinned file is the active, confirmed vault: it runs.
+        let port = free_port();
+        let supervisor = supervise(
+            &env,
+            Settings {
+                listen_port: port,
+                vault_mode: VaultMode::Pinned,
+                pinned_vault_path: Some(env.vault.to_string_lossy().into_owned()),
+                ..Settings::default()
+            },
+        );
+        supervisor.send(Order::Start);
+        wait_for(&supervisor, "running", |s| s.state == ServerState::Running);
+        supervisor.shutdown();
+
+        // Another file that is not the active vault is refused, however it is pinned.
+        let other = env.dir.join("other.sqlite3");
+        fs::copy(&env.vault, &other).unwrap();
+        let supervisor = supervise(
+            &env,
+            Settings {
+                listen_port: free_port(),
+                vault_mode: VaultMode::Pinned,
+                pinned_vault_path: Some(other.to_string_lossy().into_owned()),
+                ..Settings::default()
+            },
+        );
+        supervisor.send(Order::Start);
+        let end = wait_for(&supervisor, "error", |s| {
+            matches!(s.state, ServerState::Error(_))
+        });
+        assert_eq!(
+            end.state,
+            ServerState::Error(ErrorKind::VaultRefused("vault_not_active".into()))
+        );
+    }
+
+    #[test]
+    fn a_taken_port_is_an_error_and_the_holder_is_left_alone() {
+        let env = Env::new();
+        env.seed();
+        let holder = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = holder.local_addr().unwrap().port();
+        let supervisor = supervise(&env, settings_on(port));
+        supervisor.send(Order::Start);
+        let end = wait_for(&supervisor, "error", |s| {
+            matches!(s.state, ServerState::Error(_))
+        });
+        assert_eq!(end.state, ServerState::Error(ErrorKind::PortInUse));
+        assert_eq!(
+            end.vault,
+            VaultStatus::Unknown,
+            "a port problem says nothing about the vault"
+        );
+        // Whoever held the port still holds it, untouched; no other port was taken.
+        let probe = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        drop(probe);
+        assert!(holder.accept().is_ok());
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(
+            matches!(
+                supervisor.snapshot().state,
+                ServerState::Error(ErrorKind::PortInUse)
+            ),
+            "no retry"
+        );
+    }
+
+    #[test]
+    fn a_server_started_by_someone_else_on_the_port_is_not_stopped_by_the_supervisor() {
+        let env = Env::new();
+        env.seed();
+        // Another server of the same program holds the port (this is "the user's own" server).
+        let outsider = Server::start(&env, "127.0.0.1:0");
+        let port = outsider.port;
+        let supervisor = supervise(&env, settings_on(port));
+        supervisor.send(Order::Start);
+        let end = wait_for(&supervisor, "error", |s| {
+            matches!(s.state, ServerState::Error(_))
+        });
+        assert_eq!(end.state, ServerState::Error(ErrorKind::PortInUse));
+        supervisor.send(Order::Stop);
+        supervisor.shutdown();
+        let mut outsider = outsider;
+        assert!(
+            outsider.child.try_wait().unwrap().is_none(),
+            "the other server was not touched"
+        );
+        let ok = post(
+            &outsider,
+            &env.token(),
+            &call_body(1, "memocampus_get_domain_stats", &json!({"limit": 1})),
+        );
+        assert_eq!(ok.status, 200);
+        let (status, _) = outsider.stop();
+        assert!(status.success());
+    }
+
+    /// The tray side of the orphan test: a separate process that runs the supervisor and then waits
+    /// to be killed. It does nothing unless the parent test sets its variables.
+    #[test]
+    fn the_stand_in_tray_process_for_the_orphan_test() {
+        let (Ok(app), Ok(local), Ok(port), Ok(info)) = (
+            std::env::var("MEMOCAMPUS_TEST_TRAY_APP"),
+            std::env::var("MEMOCAMPUS_TEST_TRAY_LOCAL"),
+            std::env::var("MEMOCAMPUS_TEST_TRAY_PORT"),
+            std::env::var("MEMOCAMPUS_TEST_TRAY_INFO"),
+        ) else {
+            return;
+        };
+        let mut launcher = WinLauncher::new(PathBuf::from(EXE));
+        launcher.env = vec![
+            ("MEMOCAMPUS_APP_DIR".into(), Some(app.into())),
+            ("LOCALAPPDATA".into(), Some(local.into())),
+            ("MEMOCAMPUS_DB".into(), None),
+        ];
+        let settings = settings_on(port.parse().unwrap());
+        let supervisor = Supervisor::spawn(
+            Box::new(launcher),
+            Box::new(move || Ok(settings.clone())),
+            Timings::standard(),
+            RestartPolicy::standard(),
+            Box::new(|_| {}),
+        );
+        supervisor.send(Order::Start);
+        let up = wait_for(&supervisor, "running", |s| s.state == ServerState::Running);
+        fs::write(info, up.pid.unwrap().to_string()).unwrap();
+        std::thread::sleep(Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn killing_the_tray_process_leaves_no_server_behind() {
+        let env = Env::new();
+        env.seed();
+        let port = free_port();
+        let info = env.dir.join("tray-info.txt");
+        let mut tray = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "management::the_stand_in_tray_process_for_the_orphan_test",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("MEMOCAMPUS_TEST_TRAY_APP", &env.app)
+            .env("MEMOCAMPUS_TEST_TRAY_LOCAL", env.dir.join("localappdata"))
+            .env("MEMOCAMPUS_TEST_TRAY_PORT", port.to_string())
+            .env("MEMOCAMPUS_TEST_TRAY_INFO", &info)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        wait_until("the tray's server", || {
+            info.exists() && !fs::read_to_string(&info).unwrap_or_default().is_empty()
+        });
+        let pid: u32 = fs::read_to_string(&info).unwrap().trim().parse().unwrap();
+        assert!(alive(pid));
+        assert!(TcpStream::connect(("127.0.0.1", port)).is_ok());
+        // As a crash or "End task" would: no cleanup runs.
+        tray.kill().unwrap();
+        let _ = tray.wait();
+        wait_until("the server to be gone", || !alive(pid));
+        wait_until("the port to be free", || {
+            TcpStream::connect(("127.0.0.1", port)).is_err()
+        });
+    }
 }

@@ -2,6 +2,7 @@
 /native-host/target/
 /visible-store/target/
 /mcp-server/target/
+/tray/target/
 
 # Node
 node_modules/

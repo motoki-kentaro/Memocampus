@@ -857,6 +857,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "memocampus-native-host",
+ "memocampus-tray",
  "memocampus-visible-store",
  "rmcp",
  "rusqlite",
@@ -893,6 +894,15 @@ dependencies = [
  "uuid",
  "windows-sys",
  "zeroize",
+]
+
+[[package]]
+name = "memocampus-tray"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "windows-sys",
 ]
 
 [[package]]

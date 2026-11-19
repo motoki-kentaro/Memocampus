@@ -221,7 +221,7 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 GitHub Actions (`.github/workflows/ci.yml`) runs on pull requests targeting `main`, on pushes to `main`, and on manual runs. It only has read access to the repository contents, uses no secrets, and uploads no artifacts.
 
 - **JavaScript** (`ubuntu-latest`, Node.js 24): `npm ci`, `npm test`. The extension tests use fake Chrome APIs and need no Windows.
-- **Rust** (`windows-latest`, stable MSVC toolchain): format check, tests, Clippy and a release build, for `native-host`, `visible-store` and `mcp-server` in turn. The host calls Windows APIs (DPAPI among them), embeds its icon through the MSVC linker, and has tests that only run on Windows/MSVC, so a Linux run would not verify it. SQLCipher's OpenSSL is built with the runner's Strawberry Perl (`PERL`), and the three crates share one target directory so it is built once per profile.
+- **Rust** (`windows-latest`, stable MSVC toolchain): format check, tests, Clippy and a release build, for `native-host`, `visible-store`, `mcp-server` and `tray` in turn. The host calls Windows APIs (DPAPI among them), embeds its icon through the MSVC linker, and has tests that only run on Windows/MSVC, so a Linux run would not verify it. SQLCipher's OpenSSL is built with the runner's Strawberry Perl (`PERL`), and the three crates share one target directory so it is built once per profile.
 
 Run the same checks locally:
 
@@ -263,6 +263,7 @@ The **Require lockfile** policy is not enabled, and enabling it is a separate de
 - `native-host/` — Rust Native Messaging host and SQLite persistence
 - `visible-store/` — the only read path from a vault to MCP, with the privacy gate
 - `mcp-server/` — `memocampus-mcp`, the read-only stdio MCP server over VisibleStore
+- `tray/` — `memocampus-tray`, the Windows tray that runs and manages the MCP server over Streamable HTTP (Issue #67, in progress: see [docs/issue-067-tray-slice1.md](docs/issue-067-tray-slice1.md))
 - `docs/` — issue and slice acceptance criteria
 - `assets/icon.png` — master of the app icon; `scripts/generate-icons.py` — regenerates the icons from it
 

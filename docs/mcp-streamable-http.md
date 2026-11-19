@@ -64,6 +64,12 @@ memocampus-mcp.exe --transport streamable-http --listen 127.0.0.1:8765
   `… read from …`, then `memocampus-mcp: listening on http://127.0.0.1:8765/mcp`. stdout is unused in HTTP mode.
 - Stop: Ctrl+C, Ctrl+Break or closing its console. It stops accepting, cancels rmcp's work, gives open connections 5 s, exits 0
   and prints `memocampus-mcp: stopped (<reason>)`. The port can be reused at once [verified with Ctrl+Break].
+- Management channel (Issue #67, Windows, HTTP only): `--management-pipe-handle <n>` names the inherited read end of an
+  anonymous pipe held by a supervisor (the tray). Without it nothing changes. With it, the byte `S` stops the server through
+  the same shutdown (`stopped (management_stop)`); the pipe closing means the supervisor is gone (`management_closed`); any
+  other byte stops it too (`management_invalid`). A value that is not a readable pipe, or is a standard handle, refuses the
+  start (exit 2, `cannot start: management_not_a_pipe`); with stdio the flag is an error. It is not a tool and not an HTTP
+  endpoint. See [issue-067-tray-slice1.md](issue-067-tray-slice1.md).
 
 ## 4. Authentication
 
