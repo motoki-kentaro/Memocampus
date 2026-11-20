@@ -53,3 +53,6 @@ desktop.ini
 # Local security research PoCs (not for repository)
 /poc/mcp-prompt-injection/
 /poc/release-projection/
+# Installer (Issue #67 Slice 3B-1): the staged copies and the built setup are never committed.
+/installer/stage/
+/installer/out/
