@@ -170,6 +170,9 @@ jobs:
       - name: Stage exactly the three release executables
         shell: pwsh
         run: ./installer/stage.ps1 -BuildDir $env:CARGO_TARGET_DIR -NotOlderThan ([datetime]::Parse($env:BUILD_START, [cultureinfo]::InvariantCulture, 'RoundtripKind'))
+      - name: Installer static checks incl. the stage (after staging)
+        shell: pwsh
+        run: ./installer/verify-static.ps1
       - name: Build the setup program
         shell: pwsh
         run: |

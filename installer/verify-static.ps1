@@ -173,7 +173,7 @@ function Invoke-Checks([string]$dir, [bool]$quiet) {
   if (Test-Path -LiteralPath $stage) {
     $names = @(Get-ChildItem -LiteralPath $stage -Force -Recurse | ForEach-Object Name | Sort-Object)
     Check 'stage holds exactly the three executables' (($names -join '|') -eq 'memocampus-mcp.exe|memocampus-native-host.exe|memocampus-tray.exe')
-  } elseif (-not $quiet) { 'SKIP  stage folder absent (run stage.ps1)' }
+  } elseif (-not $quiet) { Write-Host 'SKIP  stage folder absent (run stage.ps1; the stage is a build output, not source)' }
   return ,$failed
 }
 
@@ -311,5 +311,9 @@ if ($Compile) {
     } finally { Remove-Item -LiteralPath $out -Recurse -Force -ErrorAction SilentlyContinue }
   }
 }
-if ($bad) { "$bad check(s) failed"; exit 1 }
+if ($bad) {
+  "$bad check(s) failed"
+  foreach ($n in $result) { Write-Host "FAILED  $n" }
+  exit 1
+}
 'all checks passed'
