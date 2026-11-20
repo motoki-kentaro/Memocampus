@@ -1,3 +1,4 @@
+import { HOST_NAME } from "./host-config.js";
 import { describeErrorCode } from "./search-client.js";
 import { QueueError, createEventQueue } from "./event-queue.js";
 import { createPolicyGate } from "./policy-gate.js";
@@ -10,7 +11,6 @@ import { checkHostCapabilities } from "./host-capabilities.js";
 import { SAVE_IMAGE_MENU_ID, describeImageSaveResult, registerImageMenu, saveImageFromClick } from "./image-save.js";
 import { SAVE_PAGE_MENU_ID, createPageSaver, describePageSaveResult, registerPageMenu } from "./page-save.js";
 
-const HOST_NAME = "com.memocampus.vault";
 const EXCLUDED_SCHEMES = new Set(["chrome:", "edge:", "about:", "chrome-extension:", "file:", "devtools:"]);
 
 function isRecordableUrl(rawUrl) {

@@ -1,0 +1,210 @@
+name: Windows distribution
+
+# Issue #67, Slice 3B-4. Builds and verifies the Windows setup program and the Chrome Web Store ZIP.
+# It never publishes: no tag, no GitHub Release, no Web Store upload, no signing. Its outputs are
+# workflow artifacts, a test build and a release candidate kept apart by name and by job.
+#
+# Pull requests that touch the installer or the extension run only the cheap `checks` job. A person
+# starts the `build` job by hand (Run workflow) and chooses the channel:
+#   test     INSTALLER TEST build (synthetic extension id, test keys, no Web Store link). Never to be given
+#            to anyone. Needs nothing from the Web Store.
+#   product  the release candidate. It cannot be made until installer/release-gate.json holds the real
+#            Chrome Web Store extension id; until then this job stops at build.ps1 by design.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "installer/**"
+      - "extension/**"
+      - "scripts/set-host-profile.mjs"
+      - "scripts/package-extension.mjs"
+      - "tests/installer/**"
+      - ".github/workflows/windows-dist.yml"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Windows app version x.y.z (no default on purpose)"
+        required: true
+        type: string
+      channel:
+        description: "test = INSTALLER TEST build (never distribute); product = release candidate (needs the release gate)"
+        required: true
+        type: choice
+        options: [test, product]
+        default: test
+      tag:
+        description: "Optional. If set it must be exactly v<version>; nothing is tagged by this workflow"
+        required: false
+        type: string
+      extension_version:
+        description: "Optional. If set, extension/manifest.json must carry exactly this version"
+        required: false
+        type: string
+
+# Read-only. Nothing here writes to the repository, creates releases or reads secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-dist-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Checks (static, negative, compile contract, self-tests, extension package)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      INNO_SETUP_URL: ${{ vars.INNO_SETUP_URL }}
+      INNO_SETUP_SHA256: ${{ vars.INNO_SETUP_SHA256 }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Inno Setup 7
+        shell: pwsh
+        run: ./installer/ci-setup-inno.ps1
+      - run: npm ci
+      - name: JavaScript tests (includes the extension packaging tests)
+        run: npm test
+      - name: Installer static checks
+        shell: pwsh
+        run: ./installer/verify-static.ps1
+      - name: Installer negative (mutation) checks
+        shell: pwsh
+        run: ./installer/verify-static.ps1 -Negative
+      - name: Inno Setup compile contract (extension id, Web Store link)
+        shell: pwsh
+        run: ./installer/verify-static.ps1 -Compile -Iscc $env:ISCC_PATH
+      - name: Distribution contract checks (workflow, build script, gate)
+        shell: pwsh
+        run: |
+          ./installer/verify-dist.ps1
+          ./installer/verify-dist.ps1 -Negative
+      - name: Native messaging Pascal self-test
+        shell: pwsh
+        run: ./installer/run-selftest.ps1 -Iscc $env:ISCC_PATH
+      # The registry-level lifecycle checks run on private keys. The checks that start real tray
+      # processes are NOT run on a hosted runner: they are reported NOT_RUN, never as passed.
+      - name: Lifecycle Pascal self-test (registry only; tray-process checks NOT_RUN)
+        shell: pwsh
+        run: ./installer/run-lifecycle-test.ps1 -Iscc $env:ISCC_PATH -SkipTrays
+      - name: Chrome extension package (product profile, isolated copy)
+        shell: pwsh
+        env:
+          EXTENSION_VERSION: ${{ inputs.extension_version }}
+        run: |
+          $argsList = @('scripts/package-extension.mjs', '--out', 'dist/extension')
+          if ($env:EXTENSION_VERSION) { $argsList += @('--expect-version', $env:EXTENSION_VERSION) }
+          node @argsList
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: chrome-extension-store-package
+          path: dist/extension/
+          if-no-files-found: error
+          retention-days: 30
+
+  build:
+    name: Build setup (${{ inputs.channel }})
+    if: github.event_name == 'workflow_dispatch'
+    needs: checks
+    runs-on: windows-latest
+    # Issue #51 Slice B: SQLCipher with OpenSSL built from source; see ci.yml.
+    timeout-minutes: 120
+    env:
+      PERL: C:\Strawberry\perl\bin\perl.exe
+      CARGO_TARGET_DIR: ${{ github.workspace }}\target-dist
+      INNO_SETUP_URL: ${{ vars.INNO_SETUP_URL }}
+      INNO_SETUP_SHA256: ${{ vars.INNO_SETUP_SHA256 }}
+      # Values from the dispatch form reach scripts only through the environment, never spliced into
+      # script text.
+      APP_VERSION: ${{ inputs.version }}
+      CHANNEL: ${{ inputs.channel }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build start time (an executable older than this is never staged)
+        shell: pwsh
+        run: '"BUILD_START=$([datetime]::UtcNow.ToString(''o''))" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8'
+      - name: Inno Setup 7
+        shell: pwsh
+        run: ./installer/ci-setup-inno.ps1
+      - run: rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal --component rustfmt,clippy --no-self-update
+      - run: rustup default stable-x86_64-pc-windows-msvc
+      - name: Native Perl for the OpenSSL build
+        shell: pwsh
+        run: |
+          $os = & $env:PERL -e 'print $^O'
+          if ($os -ne 'MSWin32') { throw "PERL is not a native Windows Perl ($os)" }
+      # No cache of any kind is restored: every executable below is built by this job, from this commit.
+      - name: native-host (fmt, test, clippy, release)
+        working-directory: native-host
+        run: |
+          cargo fmt --all -- --check
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo build --release --locked
+      - name: mcp-server (fmt, test, clippy, release)
+        working-directory: mcp-server
+        run: |
+          cargo fmt --all -- --check
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo build --release --locked
+      # A hosted runner may have no notification area: `no-desktop` reports the tray-window tests as
+      # ignored (counted, never passed). They stay a gate for the real-machine acceptance.
+      - name: tray (fmt, test without desktop, clippy, release)
+        working-directory: tray
+        run: |
+          cargo fmt --all -- --check
+          cargo test --locked --features no-desktop
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo build --release --locked
+      - name: Stage exactly the three release executables
+        shell: pwsh
+        run: ./installer/stage.ps1 -BuildDir $env:CARGO_TARGET_DIR -NotOlderThan ([datetime]::Parse($env:BUILD_START, [cultureinfo]::InvariantCulture, 'RoundtripKind'))
+      - name: Installer static checks incl. the stage (after staging)
+        shell: pwsh
+        run: ./installer/verify-static.ps1
+      - name: Build the setup program
+        shell: pwsh
+        run: |
+          $params = @{ Version = $env:APP_VERSION; Channel = $env:CHANNEL; Iscc = $env:ISCC_PATH; Commit = $env:GITHUB_SHA; OutDir = 'dist' }
+          if ($env:TAG) { $params.Tag = $env:TAG }
+          ./installer/build.ps1 @params
+      - name: Summary (what this run did and did not prove)
+        if: always()
+        shell: pwsh
+        run: |
+          @(
+            "## Windows distribution ($env:CHANNEL $env:APP_VERSION)",
+            '- Setup program: UNSIGNED (no code-signing certificate yet); Windows SmartScreen will warn.',
+            '- Tray-window tests: reported ignored on this runner (no-desktop); they are NOT_RUN here.',
+            '- Real installer install / update / uninstall: NOT_RUN (needs an isolated Windows user or VM). See installer/E2E-ACCEPTANCE.md.',
+            '- Nothing was tagged, released, uploaded to the Chrome Web Store or signed.'
+          ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+      # The two channels are different artifacts with different names, so a test build cannot be
+      # taken for the release candidate.
+      - name: Upload the INSTALLER TEST build (not for distribution)
+        if: ${{ inputs.channel == 'test' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: INSTALLER-TEST-NOT-FOR-DISTRIBUTION
+          path: dist/test/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload the release candidate
+        if: ${{ inputs.channel == 'product' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: memocampus-windows-release-candidate
+          path: dist/product/
+          if-no-files-found: error
+          retention-days: 30

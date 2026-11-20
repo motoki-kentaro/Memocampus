@@ -3,9 +3,16 @@
   Registers the Memocampus native messaging host for the current Windows user.
 
 .DESCRIPTION
-  Generates com.memocampus.vault.json from com.memocampus.vault.template.json, filling in this
-  machine's host executable path and your extension ID, and points
-  HKCU\Software\Google\Chrome\NativeMessagingHosts\com.memocampus.vault at it.
+  Generates <HostName>.json from com.memocampus.vault.template.json, filling in this machine's host
+  executable path and your extension ID, and points
+  HKCU\Software\Google\Chrome\NativeMessagingHosts\<HostName> at it.
+
+  This is the DEVELOPMENT registration. -HostName is one of:
+    com.memocampus.vault              (default, the name development setups have always used)
+    io.github.memocampus.vault.dev    (the new development name; the extension must use the same
+                                       profile, see extension/host-config.js)
+  The product name io.github.memocampus.vault belongs to the Windows installer and is refused here.
+  Registrations under other names are never read, changed or removed.
 
   - Current user only (HKCU); no administrator rights; HKLM is never touched.
   - Your vault and settings (%LOCALAPPDATA%\Memocampus) are never read, changed or deleted.
@@ -17,7 +24,13 @@
   The 32-character ID that chrome://extensions shows for the loaded Memocampus extension.
 
 .PARAMETER Replace
-  Allow re-pointing an existing com.memocampus.vault registration at this manifest.
+  Allow re-pointing an existing registration of the chosen host name at this manifest.
+
+.PARAMETER HostName
+  The development host name to register (see above). Default: com.memocampus.vault.
+
+.PARAMETER RegistryBase
+  The registry key that holds the host registrations. Only tests change it (to a private key).
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File .\native-host\install-native-host.ps1 -ExtensionId abcdefghijklmnopabcdefghijklmnop
@@ -27,16 +40,25 @@ param(
   [Parameter(Mandatory = $true)]
   [ValidatePattern('^[a-pA-P]{32}$')]
   [string]$ExtensionId,
-  [string]$BinaryPath = (Join-Path $PSScriptRoot 'target\release\memocampus-native-host.exe'),
-  [string]$ManifestPath = (Join-Path $PSScriptRoot 'com.memocampus.vault.json'),
-  [string]$TemplatePath = (Join-Path $PSScriptRoot 'com.memocampus.vault.template.json'),
-  [switch]$Replace
+  [ValidateSet('com.memocampus.vault', 'io.github.memocampus.vault.dev')]
+  [string]$HostName = 'com.memocampus.vault',
+  [string]$BinaryPath,
+  [string]$ManifestPath,
+  [string]$TemplatePath,
+  [switch]$Replace,
+  [string]$RegistryBase = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts'
 )
 
 Set-StrictMode -Version 3
 $ErrorActionPreference = 'Stop'
-$hostName = 'com.memocampus.vault'
-$registryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+# Defaults are worked out here, not in the param block: Windows PowerShell 5.1 leaves $PSScriptRoot
+# empty there when the script is started with -File.
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+if (-not $BinaryPath) { $BinaryPath = Join-Path $here 'target\release\memocampus-native-host.exe' }
+if (-not $ManifestPath) { $ManifestPath = Join-Path $here "$HostName.json" }
+if (-not $TemplatePath) { $TemplatePath = Join-Path $here 'com.memocampus.vault.template.json' }
+# $HostName is a parameter (PowerShell variable names are not case sensitive).
+$registryPath = "$RegistryBase\$HostName"
 
 function Resolve-FullPath([string]$Path) {
   # Relative paths resolve against the current PowerShell location, without wildcard expansion.
@@ -59,12 +81,12 @@ if (-not (Test-Path -LiteralPath $manifestDir -PathType Container)) {
 }
 
 $template = Get-Content -LiteralPath (Resolve-FullPath $TemplatePath) -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($template.name -ne $hostName -or $template.type -ne 'stdio') {
-  throw "Unexpected template: name must be '$hostName' and type 'stdio'."
+if ($template.name -ne 'com.memocampus.vault' -or $template.type -ne 'stdio') {
+  throw "Unexpected template: name must be 'com.memocampus.vault' and type 'stdio'."
 }
 
 $manifest = [ordered]@{
-  name            = $hostName
+  name            = $HostName
   description     = [string]$template.description
   path            = $binary
   type            = 'stdio'

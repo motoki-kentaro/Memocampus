@@ -18,6 +18,7 @@
 mod dates;
 mod diag;
 mod http;
+mod mgmt;
 mod observed;
 mod server;
 mod token;
@@ -96,6 +97,8 @@ struct Options {
     transport: Transport,
     /// `--allow-host`, HTTP only; empty unless given.
     allow_hosts: Vec<http::AllowedHost>,
+    /// `--management-pipe-handle`, HTTP only: the inherited read end of a supervisor's pipe.
+    management: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +110,8 @@ enum ArgError {
     ListenWithoutHttp,
     AllowHost,
     AllowHostWithoutHttp,
+    Management,
+    ManagementWithoutHttp,
 }
 
 impl ArgError {
@@ -119,6 +124,8 @@ impl ArgError {
             Self::ListenWithoutHttp => "listen_without_http",
             Self::AllowHost => "allow_host",
             Self::AllowHostWithoutHttp => "allow_host_without_http",
+            Self::Management => "management",
+            Self::ManagementWithoutHttp => "management_without_http",
         }
     }
 
@@ -134,6 +141,11 @@ impl ArgError {
                  each at most once, at most 8"
             }
             Self::AllowHostWithoutHttp => "--allow-host needs --transport streamable-http",
+            // Never echoes the value.
+            Self::Management => "--management-pipe-handle must be one decimal handle value",
+            Self::ManagementWithoutHttp => {
+                "--management-pipe-handle needs --transport streamable-http"
+            }
         }
     }
 }
@@ -143,7 +155,7 @@ impl ArgError {
 /// different values, in any order. Anything else refuses the start: a setting that is not
 /// understood is never guessed at.
 fn options(mut args: impl Iterator<Item = OsString>) -> Result<Options, ArgError> {
-    let (mut vault, mut transport, mut listen) = (None, None, None);
+    let (mut vault, mut transport, mut listen, mut management) = (None, None, None, None);
     let mut allow_hosts: Vec<http::AllowedHost> = Vec::new();
     while let Some(name) = args.next() {
         if name.to_str() == Some("--allow-host") {
@@ -163,6 +175,7 @@ fn options(mut args: impl Iterator<Item = OsString>) -> Result<Options, ArgError
             Some("--vault") => &mut vault,
             Some("--transport") => &mut transport,
             Some("--listen") => &mut listen,
+            Some(mgmt::FLAG) => &mut management,
             _ => return Err(ArgError::Usage),
         };
         let value = args.next().ok_or(ArgError::Usage)?;
@@ -193,10 +206,21 @@ fn options(mut args: impl Iterator<Item = OsString>) -> Result<Options, ArgError
     if !http && !allow_hosts.is_empty() {
         return Err(ArgError::AllowHostWithoutHttp);
     }
+    let management = match management {
+        None => None,
+        Some(_) if !http => return Err(ArgError::ManagementWithoutHttp),
+        Some(value) => Some(
+            value
+                .to_str()
+                .and_then(mgmt::parse_handle)
+                .ok_or(ArgError::Management)?,
+        ),
+    };
     Ok(Options {
         vault,
         transport,
         allow_hosts,
+        management,
     })
 }
 
@@ -234,6 +258,7 @@ fn run() -> (ExitCode, Option<&'static str>) {
         vault,
         transport,
         allow_hosts,
+        management,
     } = match options(args) {
         Ok(options) => options,
         Err(error) => {
@@ -282,7 +307,7 @@ fn run() -> (ExitCode, Option<&'static str>) {
     let handler = server::Memocampus::new(store);
     match transport {
         Transport::Stdio => run_stdio(handler),
-        Transport::Http(listen) => run_http(handler, listen, allow_hosts),
+        Transport::Http(listen) => run_http(handler, listen, allow_hosts, management),
     }
 }
 
@@ -331,7 +356,22 @@ fn run_http(
     handler: server::Memocampus,
     listen: SocketAddr,
     allow_hosts: Vec<http::AllowedHost>,
+    management: Option<usize>,
 ) -> (ExitCode, Option<&'static str>) {
+    // Before anything is bound: a channel that is not what it claims to be refuses the start.
+    let stop_from_supervisor = match management.map(mgmt::open).transpose() {
+        Ok(channel) => channel.map(mgmt::watch),
+        Err(error) => {
+            let message = format!("cannot start: {}", error.code());
+            return (
+                fail_logged("management", json!({"error": error.code()}), &message),
+                None,
+            );
+        }
+    };
+    if stop_from_supervisor.is_some() {
+        diag::event("management_ipc_ready", true, json!({}));
+    }
     let token_failed = |error: token::TokenError| {
         let message = format!("cannot start: {}", error.code());
         (
@@ -382,7 +422,7 @@ fn run_http(
             );
         }
         eprintln!("memocampus-mcp: listening on http://{shown}{}", http::PATH);
-        Ok(http::serve(handler, listener, token, allow_hosts).await)
+        Ok(http::serve(handler, listener, token, allow_hosts, stop_from_supervisor).await)
     });
     runtime.shutdown_background();
     match served {
@@ -448,6 +488,7 @@ mod tests {
                 vault: Some(PathBuf::from(absolute)),
                 transport: Transport::Stdio,
                 allow_hosts: Vec::new(),
+                management: None,
             }
         );
         // No path: the active vault is followed (Issue #51).
@@ -457,6 +498,7 @@ mod tests {
                 vault: None,
                 transport: Transport::Stdio,
                 allow_hosts: Vec::new(),
+                management: None,
             }
         );
         assert_eq!(
@@ -667,5 +709,62 @@ mod tests {
         ] {
             assert_eq!(parse(&args).unwrap_err(), error, "{args:?}");
         }
+    }
+
+    #[test]
+    fn the_management_handle_is_http_only_canonical_and_given_once() {
+        let sh = "streamable-http";
+        let ok = parse(&["--transport", sh, "--management-pipe-handle", "484"]).unwrap();
+        assert_eq!(ok.management, Some(484));
+        assert_eq!(parse(&["--transport", sh]).unwrap().management, None);
+        // The order of the options does not matter.
+        assert_eq!(
+            parse(&["--management-pipe-handle", "8", "--transport", sh])
+                .unwrap()
+                .management,
+            Some(8)
+        );
+        for (args, expected) in [
+            (
+                vec!["--transport", sh, "--management-pipe-handle", "0x10"],
+                ArgError::Management,
+            ),
+            (
+                vec!["--transport", sh, "--management-pipe-handle", "012"],
+                ArgError::Management,
+            ),
+            (
+                vec!["--transport", sh, "--management-pipe-handle", "-4"],
+                ArgError::Management,
+            ),
+            (
+                vec![
+                    "--transport",
+                    sh,
+                    "--management-pipe-handle",
+                    "4",
+                    "--management-pipe-handle",
+                    "8",
+                ],
+                ArgError::Usage,
+            ),
+            (
+                vec!["--transport", sh, "--management-pipe-handle"],
+                ArgError::Usage,
+            ),
+            // stdio is never managed: the flag is refused there, not ignored.
+            (
+                vec!["--management-pipe-handle", "4"],
+                ArgError::ManagementWithoutHttp,
+            ),
+            (
+                vec!["--transport", "stdio", "--management-pipe-handle", "4"],
+                ArgError::ManagementWithoutHttp,
+            ),
+        ] {
+            assert_eq!(parse(&args).unwrap_err(), expected, "{args:?}");
+        }
+        // The message never echoes the value.
+        assert!(!ArgError::Management.message().contains("0x10"));
     }
 }

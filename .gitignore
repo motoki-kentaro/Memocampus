@@ -2,6 +2,7 @@
 /native-host/target/
 /visible-store/target/
 /mcp-server/target/
+/tray/target/
 
 # Node
 node_modules/
@@ -52,3 +53,10 @@ desktop.ini
 # Local security research PoCs (not for repository)
 /poc/mcp-prompt-injection/
 /poc/release-projection/
+# Installer (Issue #67 Slice 3B-1): the staged copies and the built setup are never committed.
+/installer/stage/
+/installer/out/
+/native-host/io.github.memocampus.vault.dev.json
+/installer/out-test/
+# Slice 3B-4: build.ps1 and the extension packager write their results here (never committed).
+/dist/

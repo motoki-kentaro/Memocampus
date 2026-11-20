@@ -201,6 +201,7 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 ### About the extension ID
 
 - With *Load unpacked*, Chrome derives the ID from the folder's absolute path, so it differs per machine and changes if you move the folder. Re-run step 4 with the new ID (the old registration is updated in place).
+- **Host names.** This registration is the *development* one. The extension's host name is chosen in one place (`extension/host-config.js`, default `com.memocampus.vault`, the name used here), and the Windows installer registers the separate product name `io.github.memocampus.vault`. To use the new development name `io.github.memocampus.vault.dev`, run `node scripts/set-host-profile.mjs dev`, reload the extension and pass `-HostName io.github.memocampus.vault.dev` to both scripts. See `installer/README.md`.
 - A future Chrome Web Store release has one fixed ID; the install script would then be run with that ID (or ship with it as a default). Nothing in this repository hard-codes an ID.
 
 ### Updating and uninstalling
@@ -221,7 +222,7 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 GitHub Actions (`.github/workflows/ci.yml`) runs on pull requests targeting `main`, on pushes to `main`, and on manual runs. It only has read access to the repository contents, uses no secrets, and uploads no artifacts.
 
 - **JavaScript** (`ubuntu-latest`, Node.js 24): `npm ci`, `npm test`. The extension tests use fake Chrome APIs and need no Windows.
-- **Rust** (`windows-latest`, stable MSVC toolchain): format check, tests, Clippy and a release build, for `native-host`, `visible-store` and `mcp-server` in turn. The host calls Windows APIs (DPAPI among them), embeds its icon through the MSVC linker, and has tests that only run on Windows/MSVC, so a Linux run would not verify it. SQLCipher's OpenSSL is built with the runner's Strawberry Perl (`PERL`), and the three crates share one target directory so it is built once per profile.
+- **Rust** (`windows-latest`, stable MSVC toolchain): format check, tests, Clippy and a release build, for `native-host`, `visible-store`, `mcp-server` and `tray` in turn. The host calls Windows APIs (DPAPI among them), embeds its icon through the MSVC linker, and has tests that only run on Windows/MSVC, so a Linux run would not verify it. SQLCipher's OpenSSL is built with the runner's Strawberry Perl (`PERL`), and the three crates share one target directory so it is built once per profile.
 
 Run the same checks locally:
 
@@ -263,6 +264,7 @@ The **Require lockfile** policy is not enabled, and enabling it is a separate de
 - `native-host/` — Rust Native Messaging host and SQLite persistence
 - `visible-store/` — the only read path from a vault to MCP, with the privacy gate
 - `mcp-server/` — `memocampus-mcp`, the read-only stdio MCP server over VisibleStore
+- `tray/` — `memocampus-tray`, the Windows tray that runs and manages the MCP server over Streamable HTTP (Issue #67, in progress: [Slice 1](docs/issue-067-tray-slice1.md), [Slice 2](docs/issue-067-tray-slice2.md))
 - `docs/` — issue and slice acceptance criteria
 - `assets/icon.png` — master of the app icon; `scripts/generate-icons.py` — regenerates the icons from it
 
