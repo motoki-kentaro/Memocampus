@@ -278,35 +278,53 @@ if ($Compile) {
   else {
     $out = Join-Path ([IO.Path]::GetTempPath()) ("memocampus-verify-compile-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $out | Out-Null
-    $iss = Join-Path $here 'memocampus.iss'
+    # The contract is about the sources, so it is compiled from an ISOLATED copy of the installer sources
+    # next to three throw-away placeholder files in a scratch stage\. Nothing here is a product input: the
+    # scratch copy and its output live under the temp folder and are deleted, and installer\stage and
+    # installer\out are never touched. (The real three executables are used only by build.ps1.)
+    $src = Join-Path $out 'src'
+    New-Item -ItemType Directory -Path (Join-Path $src 'stage') | Out-Null
+    foreach ($f in 'memocampus.iss', 'nmh.pas', 'lifecycle.pas') { Copy-Item -LiteralPath (Join-Path $here $f) -Destination $src }
+    foreach ($f in 'memocampus-native-host.exe', 'memocampus-mcp.exe', 'memocampus-tray.exe') { [IO.File]::WriteAllBytes((Join-Path $src "stage\$f"), [byte[]](0x4D, 0x5A)) }
+    $iss = Join-Path $src 'memocampus.iss'
     $good = 'abcdefghijklmnopabcdefghijklmnop'
     function Compile-With([string[]]$defs) {
-      # The compiler reports its errors on stderr; here only its exit code matters.
+      # The compiler reports its errors on stderr: capture both streams, keep the text for the reason check.
       $ErrorActionPreference = 'Continue'
-      & $Iscc /Q "/O$out" /Fverify $defs $iss *> $null
-      return $LASTEXITCODE
+      $text = (& $Iscc /Q "/O$out" /Fverify $defs $iss 2>&1 | ForEach-Object { "$_" }) -join "`n"
+      return @{ code = $LASTEXITCODE; text = $text }
     }
     $cases = @(
-      @{ n = 'no extension id'; d = @('/DAppVersion=0.0.1'); fail = $true },
-      @{ n = 'no version'; d = @("/DChromeExtensionId=$good"); fail = $true },
-      @{ n = 'empty id'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId='); fail = $true },
-      @{ n = '31 characters'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=abcdefghijklmnopabcdefghijklmno'); fail = $true },
-      @{ n = '33 characters'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=abcdefghijklmnopabcdefghijklmnopa'); fail = $true },
-      @{ n = 'upper case'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=Abcdefghijklmnopabcdefghijklmnop'); fail = $true },
-      @{ n = 'letter q'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=abcdefghijklmnopabcdefghijklmnoq'); fail = $true },
-      @{ n = 'digit'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=abcdefghijklmnopabcdefghijklmno1'); fail = $true },
-      @{ n = 'wildcard'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=*bcdefghijklmnopabcdefghijklmnop'); fail = $true },
-      @{ n = 'Web Store link in an installer test build'; d = @('/DAppVersion=0.0.1', "/DChromeExtensionId=$good", '/DInstallerTestMode', '/DStoreListing'); fail = $true },
+      @{ n = 'no extension id'; d = @('/DAppVersion=0.0.1'); fail = $true; why = 'ChromeExtensionId is required' },
+      @{ n = 'no version'; d = @("/DChromeExtensionId=$good"); fail = $true; why = 'AppVersion is required' },
+      @{ n = 'empty id'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId='); fail = $true; why = 'ChromeExtensionId is required|exactly 32' },
+      @{ n = '31 characters'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=abcdefghijklmnopabcdefghijklmno'); fail = $true; why = 'exactly 32 characters' },
+      @{ n = '33 characters'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=abcdefghijklmnopabcdefghijklmnopa'); fail = $true; why = 'exactly 32 characters' },
+      @{ n = 'upper case'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=Abcdefghijklmnopabcdefghijklmnop'); fail = $true; why = 'lower case letters a to p' },
+      @{ n = 'letter q'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=abcdefghijklmnopabcdefghijklmnoq'); fail = $true; why = 'lower case letters a to p' },
+      @{ n = 'digit'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=abcdefghijklmnopabcdefghijklmno1'); fail = $true; why = 'lower case letters a to p' },
+      @{ n = 'wildcard'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=*bcdefghijklmnopabcdefghijklmnop'); fail = $true; why = 'lower case letters a to p' },
+      @{ n = 'Web Store link in an installer test build'; d = @('/DAppVersion=0.0.1', "/DChromeExtensionId=$good", '/DInstallerTestMode', '/DStoreListing'); fail = $true; why = 'StoreListing is for the product installer only' },
       @{ n = 'well-formed id with the Web Store link (product build)'; d = @('/DAppVersion=0.0.1', "/DChromeExtensionId=$good", '/DStoreListing'); fail = $false },
       @{ n = 'well-formed id (product build)'; d = @('/DAppVersion=0.0.1', "/DChromeExtensionId=$good"); fail = $false },
       @{ n = 'well-formed id (isolated test build)'; d = @('/DAppVersion=0.0.1', "/DChromeExtensionId=$good", '/DInstallerTestMode'); fail = $false }
     )
     try {
       foreach ($c in $cases) {
-        $code = Compile-With $c.d
-        $ok = if ($c.fail) { $code -ne 0 } else { $code -eq 0 }
+        $r = Compile-With $c.d
+        $why = ''
+        if ($c.fail) {
+          # Refused AND for the stated reason: a compiler that fails for another reason (a missing input,
+          # a broken script) must not pass as "the rule works".
+          $ok = ($r.code -ne 0) -and ($r.text -match $c.why)
+          if (-not $ok) { $why = "expected a refusal matching '$($c.why)'" }
+        } else {
+          $ok = ($r.code -eq 0)
+          if (-not $ok) { $why = 'expected the compile to succeed' }
+        }
         if (-not $ok) { $bad++ }
-        "{0}  compile: {1} (exit {2})" -f ($(if ($ok) { 'PASS' } else { 'FAIL' })), $c.n, $code
+        "{0}  compile: {1} (exit {2})" -f ($(if ($ok) { 'PASS' } else { 'FAIL' })), $c.n, $r.code
+        if (-not $ok) { "      $why"; "      case: $($c.d -join ' ')"; "      compiler output:"; ($r.text -split "`n" | ForEach-Object { "        $_" }) }
       }
     } finally { Remove-Item -LiteralPath $out -Recurse -Force -ErrorAction SilentlyContinue }
   }
