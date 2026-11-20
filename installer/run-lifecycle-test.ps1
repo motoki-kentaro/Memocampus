@@ -188,4 +188,5 @@ finally {
   Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
 }
 if ($script:bad) { "$script:bad check(s) failed"; exit 1 }
+$global:LASTEXITCODE = 0  # success is established above; a native command's old exit code must not leak out
 'lifecycle tests passed'

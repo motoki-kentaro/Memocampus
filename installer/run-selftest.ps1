@@ -59,4 +59,5 @@ finally {
   Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
 }
 if ($failed) { "$failed group(s) failed"; exit 1 }
+$global:LASTEXITCODE = 0  # success is established above; a native command's old exit code must not leak out
 'self-test passed'

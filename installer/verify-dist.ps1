@@ -212,10 +212,12 @@ if ($Negative) {
     }
   } finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
   if ($missed) { "$missed mutation(s) not caught"; exit 1 }
+  $global:LASTEXITCODE = 0  # success is established above; a native command's old exit code must not leak out
   "all $($m.Count) mutations caught"
   return
 }
 
 $result = Invoke-DistChecks $repo $false
 if ($result.Count) { "$($result.Count) check(s) failed"; exit 1 }
+$global:LASTEXITCODE = 0  # success is established above; a native command's old exit code must not leak out
 'all checks passed'

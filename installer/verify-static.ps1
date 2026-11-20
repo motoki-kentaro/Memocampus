@@ -265,6 +265,7 @@ if ($Negative) {
     }
   } finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
   if ($missed) { "$missed mutation(s) not caught"; exit 1 }
+  $global:LASTEXITCODE = 0  # success is established above; a native command's old exit code must not leak out
   "all $($mutations.Count) mutations caught"
   return
 }
@@ -334,4 +335,5 @@ if ($bad) {
   foreach ($n in $result) { Write-Host "FAILED  $n" }
   exit 1
 }
+$global:LASTEXITCODE = 0  # success is established above; a native command's old exit code must not leak out
 'all checks passed'
