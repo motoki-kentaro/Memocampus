@@ -9,8 +9,12 @@
 ; another AppId, another install folder, another output name and a private registry key instead of
 ; Chrome's, so it cannot touch a real registration.
 ;
-; Not done here on purpose (later slices): the Run key, starting or closing the tray, removing the
-; Native Messaging registration at uninstall (3B-3), the Chrome extension itself.
+; Slice 3B-3 adds the lifecycle: before an update or an uninstall a running PRODUCT tray (verified by
+; its executable path) is asked to quit and awaited for a bounded time; at uninstall only this
+; installation's own Native Messaging registration, Run value and manifest are removed. Nothing is ever
+; killed, nothing in the data folder is touched, StartupApproved is never read or written, and the
+; installer never starts the tray (that is slice 3B-4).
+; Not done here on purpose: the Chrome extension itself.
 ; Written for Inno Setup 7.1.1.
 
 #ifndef AppVersion
@@ -37,6 +41,7 @@
 
 #ifdef InstallerTestMode
   #define NmhKeyPath "Software\MemocampusInstallerTest\NativeMessagingHosts\" + ProductHostName
+  #define RunKeyPath "Software\MemocampusInstallerTest\Run"
   #define SetupAppId "{{2F6B1C57-6F0E-4D55-9B0D-0C3B8A5E7A41}"
   #define SetupDir "{localappdata}\Programs\MemocampusInstallerTest"
   #define SetupOutputDir "out-test"
@@ -44,6 +49,7 @@
   #define SetupName "Memocampus (installer test)"
 #else
   #define NmhKeyPath "Software\Google\Chrome\NativeMessagingHosts\" + ProductHostName
+  #define RunKeyPath "Software\Microsoft\Windows\CurrentVersion\Run"
   #define SetupAppId "{{63D78D26-D4BF-49ED-B29D-FBFFF1EAF56A}"
   #define SetupDir "{localappdata}\Programs\Memocampus"
   #define SetupOutputDir "out"
@@ -97,26 +103,56 @@ Source: "stage\memocampus-tray.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; Start menu > Memocampus > Memocampus. No parameters, no working directory, no environment.
 Name: "{group}\Memocampus"; Filename: "{app}\memocampus-tray.exe"
 
-[UninstallDelete]
-; The one file this setup generates (not part of [Files]). Removing the Native Messaging registry value
-; is slice 3B-3 and must check that it is still this installation's own.
-Type: files; Name: "{app}\{#ProductHostName}.json"
-
 [Code]
 const
   HostName = '{#ProductHostName}';
   HostKeyPath = '{#NmhKeyPath}';
+  RunKeyPath = '{#RunKeyPath}';
   BuiltInExtensionId = '{#ChromeExtensionId}';
 
 #include "nmh.pas"
+#include "lifecycle.pas"
+
+var
+  PreSnap: TNmhSnapshot;
+  Registered, InstallCompleted, DirCreated: Boolean;
 
 function ManifestFile: String;
 begin
   Result := ExpandConstant('{app}\' + HostName + '.json');
 end;
 
-// Before anything is installed: a registration that is not ours stops the installation here, with the
-// reason, instead of installing without a working Chrome connection and reporting success.
+function TrayExe: String;
+begin
+  Result := ExpandConstant('{app}\memocampus-tray.exe');
+end;
+
+// Stops here, before anything is changed, when a product tray does not end or something else still holds
+// an installed executable. Returns '' when the way is clear.
+function Quiesce: String;
+var
+  R: TLcResult;
+  Locked: String;
+begin
+  Result := '';
+  R := LcCloseTrays(TrayExe, LcTrayWaitMs);
+  Log('lifecycle: trays seen ' + IntToStr(R.Found) + ', ours ' + IntToStr(R.Verified) + ', left alone ' + IntToStr(R.LeftAlone) +
+    ', ended ' + IntToStr(R.Closed) + ', still running ' + IntToStr(R.TimedOut) + ', not asked ' + IntToStr(R.Unclosable));
+  Log(R.Report);
+  if (R.TimedOut > 0) or (R.Unclosable > 0) then begin
+    Result := 'Memocampus is still running and did not quit in time. Nothing was changed.'#13#10#13#10 +
+      'Quit Memocampus from its tray icon (right-click, Quit), wait a moment, and run this again.';
+    Exit;
+  end;
+  Locked := LcLockedFiles(ExpandConstant('{app}'), 20);
+  if Locked <> '' then
+    Result := 'These Memocampus files are still in use by another program:'#13#10#13#10 + Locked + #13#10 +
+      'Setup does not close other programs. Close AI clients that use Memocampus (for example an MCP ' +
+      'client) and Chrome windows that use the Memocampus extension, then run this again. Nothing was changed.';
+end;
+
+// Before anything is installed: a registration that is not ours, a tray that will not quit and files
+// held by other programs each stop the installation here, with the reason.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Why: String;
@@ -125,15 +161,79 @@ begin
   if not NmhIsValidExtensionId(BuiltInExtensionId) then
     Result := 'This installer was built with an invalid Chrome extension id.'
   else if not NmhCheckRegistration(HostKeyPath, ManifestFile, Why) then
-    Result := Why;
+    Result := Why
+  else
+    Result := Quiesce;
 end;
 
+// The registration is made BEFORE the files are copied: Abort is honoured in ssInstall (and not in
+// ssPostInstall), so a failure here ends Setup with nothing installed, and a failure of the file copy
+// afterwards is undone in DeinitializeSetup.
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Err, App: String;
+begin
+  if CurStep = ssInstall then begin
+    App := ExpandConstant('{app}');
+    if not DirExists(App) then
+      if ForceDirectories(App) then DirCreated := True;
+    PreSnap := NmhTake(HostKeyPath, ManifestFile);
+    NmhExeMayBeMissing := True;
+    Registered := NmhRegister(HostKeyPath, ManifestFile, HostName, App + '\memocampus-native-host.exe', BuiltInExtensionId, Err);
+    NmhExeMayBeMissing := False;
+    if not Registered then begin
+      if DirCreated then RemoveDir(App);
+      SuppressibleMsgBox('Memocampus could not register its connection to Chrome (native messaging host ' + HostName +
+        '). Setup stops and nothing was installed unless this message says ROLLBACK_FAILED.'#13#10#13#10 + Err, mbCriticalError, MB_OK, IDOK);
+      Abort;
+    end;
+  end else if CurStep = ssPostInstall then
+    InstallCompleted := True;
+end;
+
+// Setup ended without completing after the registration was made (the file copy failed or was
+// cancelled): put the registration and the manifest back as they were.
+procedure DeinitializeSetup;
 var
   Err: String;
 begin
-  if CurStep = ssPostInstall then
-    if not NmhRegister(HostKeyPath, ManifestFile, HostName, ExpandConstant('{app}\memocampus-native-host.exe'), BuiltInExtensionId, Err) then
-      RaiseException('Memocampus could not register its connection to Chrome (native messaging host ' + HostName +
-        '). Nothing was left registered unless this message says ROLLBACK_FAILED.'#13#10#13#10 + Err);
+  if Registered and not InstallCompleted then begin
+    if NmhRollback(HostKeyPath, ManifestFile, PreSnap, Err) then
+      Log('setup incomplete: the native messaging registration was restored')
+    else
+      SuppressibleMsgBox('Setup did not finish and could not fully restore the Chrome registration: ' + Err + ' ' +
+        'Running Setup again repairs it.', mbError, MB_OK, IDOK);
+    if DirCreated then RemoveDir(ExpandConstant('{app}'));
+  end;
+end;
+
+// Uninstall, step 1: a product tray must quit and nothing may hold the files, before anything is removed.
+function InitializeUninstall: Boolean;
+var
+  Why: String;
+begin
+  Why := Quiesce;
+  Result := Why = '';
+  if not Result then
+    SuppressibleMsgBox(Why, mbError, MB_OK, IDOK);
+end;
+
+// Uninstall, step 2: only what this installation registered, in a retryable order; the files follow.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Report: String;
+begin
+  if CurUninstallStep = usUninstall then begin
+    if not LcUninstallCleanup(HostKeyPath, ManifestFile, HostName, ExpandConstant('{app}\memocampus-native-host.exe'),
+        BuiltInExtensionId, RunKeyPath, TrayExe, Report) then begin
+      Log(Report);
+      SuppressibleMsgBox('Memocampus could not remove one of its registrations, so the uninstall stopped before ' +
+        'removing any file. Run the uninstall again.'#13#10#13#10 + Report, mbError, MB_OK, IDOK);
+      Abort;
+    end;
+    Log(Report);
+    if (Pos('KEPT', Report) > 0) or (Pos('FAILED', Report) > 0) then
+      SuppressibleMsgBox('Memocampus was uninstalled. Some entries were kept because they are not Memocampus''s own:'#13#10#13#10 +
+        Report, mbInformation, MB_OK, IDOK);
+  end;
 end;

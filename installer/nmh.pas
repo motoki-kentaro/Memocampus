@@ -29,8 +29,12 @@ var
   // Test hooks. Always 0 / False in the product: only nmh-selftest.iss sets them.
   //   1 fail after the temporary manifest is written   2 fail after the manifest is in place
   //   3 fail after the registry value is written       4 treat the registry read-back as a mismatch
+  //   5 deleting the registration's default value fails (NmhUnregister)
   NmhFailAt: Integer;
   NmhFailRollback: Boolean;
+  // Set by the installer only around the registration that runs before the files are copied (the host
+  // executable is not in place yet then). Always False otherwise: the default requires the executable.
+  NmhExeMayBeMissing: Boolean;
 
 function NmhIsValidExtensionId(const Id: String): Boolean;
 var
@@ -318,7 +322,7 @@ begin
     Err := 'the host path is not an absolute local .exe path';
     Exit;
   end;
-  if not FileExists(ExePath) then begin
+  if not NmhExeMayBeMissing and not FileExists(ExePath) then begin
     Err := 'the host executable is not in the install folder';
     Exit;
   end;
@@ -356,4 +360,73 @@ begin
     if not NmhRollback(KeyPath, ManifestPath, Snap, RollbackErr) then
       Err := Err + ' ROLLBACK_FAILED: ' + RollbackErr;
   end;
+end;
+
+// ---- Removal at uninstall (Slice 3B-3) ----------------------------------------------------------------
+// Result codes of the removal functions: 0 removed, 1 kept (not ours, or nothing to remove), 2 failed
+// and still ours (the caller must not go on as if it were gone). Report gets one line about it.
+
+// Removes this installation's own registration: only a default value that is a string equal to this
+// installation's manifest path, checked again immediately before the delete. The registry has no
+// compare-and-delete, so a change by another program in that instant is not excluded. Only the default
+// value is deleted; the key itself only when it is then empty (RegDeleteKeyIfEmpty never removes a key
+// that still has other values or subkeys). No key is ever deleted with its subkeys.
+function NmhUnregister(const KeyPath, ManifestPath: String; var Report: String): Integer;
+var
+  Current: String;
+begin
+  Result := 1;
+  Report := 'native messaging registration: nothing to remove (key absent)';
+  if not RegKeyExists(HKCU, KeyPath) then Exit;
+  if not RegQueryStringValue(HKCU, KeyPath, '', Current) then begin
+    Report := 'native messaging registration: KEPT (the key has no string default value, so it is not ours)';
+    Exit;
+  end;
+  if not NmhSamePath(Current, ManifestPath) then begin
+    Report := 'native messaging registration: KEPT (it belongs to another program: ' + Current + ')';
+    Exit;
+  end;
+  // Immediately before the delete: still ours?
+  if not NmhOwnsRegistration(KeyPath, ManifestPath) then begin
+    Report := 'native messaging registration: KEPT (it changed just before removal)';
+    Exit;
+  end;
+  if (NmhFailAt = 5) or not RegDeleteValue(HKCU, KeyPath, '') then begin
+    Result := 2;
+    Report := 'native messaging registration: FAILED to remove our default value (still registered)';
+    Exit;
+  end;
+  Result := 0;
+  Report := 'native messaging registration: removed our default value';
+  if RegKeyExists(HKCU, KeyPath) then
+    if RegDeleteKeyIfEmpty(HKCU, KeyPath) then
+      Report := Report + ' and the empty key'
+    else
+      Report := Report + '; the key was kept (it still holds other values or subkeys)';
+end;
+
+// Removes the manifest file only when its bytes are exactly what this installer writes (built again
+// from the same constants), so a file someone else put or changed there is never treated as ours just
+// because it sits in the install folder. Call it only when the registration is no longer ours.
+function NmhRemoveOwnManifest(const ManifestPath, HostName, ExePath, ExtensionId: String; var Report: String): Integer;
+var
+  Expected: String;
+begin
+  Result := 1;
+  if not FileExists(ManifestPath) then begin
+    Report := 'manifest: nothing to remove (file absent)';
+    Exit;
+  end;
+  Expected := NmhManifestText(NmhManifestLines(HostName, ExePath, ExtensionId));
+  if NmhUtf8Decode(NmhRawOf(ManifestPath)) <> Expected then begin
+    Report := 'manifest: KEPT (its content is not what this installer wrote: ' + ManifestPath + ')';
+    Exit;
+  end;
+  if not DeleteFile(ManifestPath) then begin
+    Result := 2;
+    Report := 'manifest: FAILED to delete our manifest ' + ManifestPath;
+    Exit;
+  end;
+  Result := 0;
+  Report := 'manifest: removed our manifest';
 end;
