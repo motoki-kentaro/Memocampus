@@ -1,0 +1,4 @@
+{
+  "_comment": "The release gate for the PRODUCT installer. extensionId is the Chrome Web Store id of the published Memocampus extension (32 letters a-p). It stays null until the Web Store item exists and the product owner records its id here; while it is null, `build.ps1 -Channel product` refuses to build, so no product installer (and no Web Store link) can be made with a made-up id.",
+  "extensionId": null
+}

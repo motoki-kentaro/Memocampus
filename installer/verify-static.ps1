@@ -50,8 +50,8 @@ function Invoke-Checks([string]$dir, [bool]$quiet) {
 
   # --- Slice 3B-1 contract (unchanged) -------------------------------------------------------------
   $sections = @([regex]::Matches($iss, '(?m)^\[(\w+)\]') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
-  Check 'sections are only Setup, Languages, Files, Icons, Code' (($sections -join ',') -eq 'Code,Files,Icons,Languages,Setup')
-  Check 'no [Registry], [Run], [UninstallRun], [InstallDelete], [Dirs] section' ($iss -notmatch '(?im)^\[(Registry|Run|UninstallRun|InstallDelete|Dirs)\]')
+  Check 'sections are only Setup, Languages, Files, Icons, Messages, Run, Code' (($sections -join ',') -eq 'Code,Files,Icons,Languages,Messages,Run,Setup')
+  Check 'no [Registry], [UninstallRun], [InstallDelete], [Dirs] section' ($iss -notmatch '(?im)^\[(Registry|UninstallRun|InstallDelete|Dirs)\]')
   Check 'product AppId is the fixed GUID' ($iss -match '(?m)^\s*#define SetupAppId "\{\{63D78D26-D4BF-49ED-B29D-FBFFF1EAF56A\}"')
   Check 'AppId comes from SetupAppId' ($iss -match '(?m)^AppId=\{#SetupAppId\}\s*$')
   Check 'test AppId differs from the product AppId' (($iss -match '#define SetupAppId "\{\{([0-9A-F-]+)\}"[\s\S]*?#define SetupAppId "\{\{([0-9A-F-]+)\}"') -and ($Matches[1] -ne $Matches[2]))
@@ -67,7 +67,7 @@ function Invoke-Checks([string]$dir, [bool]$quiet) {
   $icons = @([regex]::Matches($iss, '(?m)^Name:\s*"\{group\}[^"]*".*$') | ForEach-Object { $_.Value })
   Check 'one Start menu icon, to the tray, no parameters' (($icons.Count -eq 1) -and ($icons[0] -match 'Filename:\s*"\{app\}\\memocampus-tray\.exe"') -and ($icons[0] -notmatch 'Parameters|WorkingDir'))
   Check 'no tray options or environment in the installer' ($all -notmatch 'MEMOCAMPUS_APP_DIR|ChangesEnvironment|--selftest|--headless|--run-seconds|--mcp-exe|--registry-root')
-  Check 'the installer neither starts programs nor reads or writes StartupApproved' ($all -notmatch '(?i)StartupApproved|\bExec\s*\(|\bShellExec\s*\(|\bExecAsOriginalUser|\[Run\]|\[UninstallRun\]')
+  Check 'the installer neither starts programs nor reads or writes StartupApproved' ($all -notmatch '(?i)StartupApproved|\bExec\s*\(|\bShellExec\s*\(|\bExecAsOriginalUser|\[UninstallRun\]')
   Check 'the Run key path appears once, as RunKeyPath in the script header' ((@([regex]::Matches($all, '(?i)CurrentVersion\\Run')).Count -eq 1) -and ($iss -match '(?s)#else\s+#define NmhKeyPath[^\n]*\n\s*#define RunKeyPath "Software\\Microsoft\\Windows\\CurrentVersion\\Run"'))
   Check 'the Run value is only read, or deleted by name after an ownership check; never written' (($lc -notmatch 'RegWrite|RegCreate|RegDeleteKey') -and (@([regex]::Matches($lc, 'RegDeleteValue\(')).Count -eq 1) -and (([regex]::Match($lc, '(?s)function LcRemoveRunValue.*?\nend;')).Value -match 'RegDeleteValue\(HKCU, RunKeyPath, ValueName\)') -and ((([regex]::Match($lc, '(?s)function LcRemoveRunValue.*?\nend;')).Value -split 'LcRunValueIsOurs\(RunKeyPath, ValueName, TrayExe, Why\)').Count -ge 3))
 
@@ -88,7 +88,7 @@ function Invoke-Checks([string]$dir, [bool]$quiet) {
   Check 'default values only: writes and deletes use the empty value name' ((@([regex]::Matches($pas, "RegWriteStringValue\(HKCU, KeyPath, '[^']")).Count -eq 0) -and (@([regex]::Matches($pas, "RegDeleteValue\(HKCU, KeyPath, '[^']")).Count -eq 0))
   Check 'no key is deleted with its subkeys' ($all -notmatch 'IncludingSubkeys')
   Check 'no other host, no Enterprise Policy, no force-install' ($all -notmatch '(?i)Policies|ExtensionInstallForcelist|ExtensionSettings|ExternalExtensions|Software\\Google\\Chrome\\(?!NativeMessagingHosts\\)|Microsoft\\Edge')
-  Check 'the installer does not run the extension or Chrome' ($all -notmatch '(?i)chrome\.exe|webstore|chromewebstore')
+  Check 'the installer does not run the extension or Chrome (the one Web Store address is a [Run] link, not code)' (($pas + $lc + ($iss -replace '(?m)^Filename: "https://chromewebstore\.google\.com/detail/\{#ChromeExtensionId\}"[^\n]*$', '')) -notmatch '(?i)chrome\.exe|webstore')
 
   # --- Extension id contract (build time) -----------------------------------------------------------
   Check 'ChromeExtensionId is required, never defaulted' (($issText -match '#ifndef ChromeExtensionId\s+#error') -and ($issText -notmatch '(?m)^\s*#define\s+ChromeExtensionId\b'))
@@ -129,8 +129,22 @@ function Invoke-Checks([string]$dir, [bool]$quiet) {
   Check 'uninstall: the cleanup runs in usUninstall and a failure aborts before files are removed' (($iss -match '(?s)if CurUninstallStep = usUninstall then begin\s+if not LcUninstallCleanup\(HostKeyPath, ManifestFile, HostName, ExpandConstant\(''\{app\}\\memocampus-native-host\.exe''\),\s+BuiltInExtensionId, RunKeyPath, TrayExe, Report\) then begin.*?Abort;'))
   Check 'cleanup order: registration, Run value, then the manifest; the manifest only when no longer registered' ((@([regex]::Matches($lc, 'NmhRemoveOwnManifest\(')).Count -eq 1) -and (Test-CleanupOrder $lc))
   Check 'a Run value is ours only if the command names exactly this tray path' ((([regex]::Match($lc, '(?s)function LcRunValueIsOurs.*?\nend;')).Value -match "(?s)if not NmhSamePath\(V, TrayExe\) then begin.*?Exit;\s*end;\s*Result := True;") -and (([regex]::Match($lc, '(?s)function LcRunValueIsOurs.*?\nend;')).Value -match "RegQueryStringValue\(HKCU, RunKeyPath, ValueName, V\)"))
-  Check 'the installer never starts the tray or the server after install or update' (($iss -notmatch '(?i)Flags:[^
-]*(postinstall|nowait)|shellexec|Exec\(|runasoriginaluser') -and ($all -notmatch '(?i)CreateProcess|WinExec|ShellExecute'))
+  # --- Slice 3B-4: what the last page offers -----------------------------------------------------------------
+  $runBody = [regex]::Match($iss, '(?s)\[Run\](.*?)(?=\n\[|\z)').Groups[1].Value
+  $runLines = @($runBody -split "`n" | Where-Object { $_ -match '^Filename:' })
+  $trayLine = @($runLines | Where-Object { $_ -match '^Filename:\s*"\{app\}\\memocampus-tray\.exe"' })
+  $storeLine = @($runLines | Where-Object { $_ -match '^Filename:\s*"https://' })
+  $flagsOf = { param($l) ((([regex]::Match($l, 'Flags:\s*([^;]*)$').Groups[1].Value).Trim() -split '\s+') | Sort-Object) -join ' ' }
+  Check 'the last page offers exactly two things: the tray and the Web Store page' (($runLines.Count -eq 2) -and ($trayLine.Count -eq 1) -and ($storeLine.Count -eq 1))
+  Check 'the tray is started only by an unticked, post-install, non-silent choice: nowait postinstall skipifsilent unchecked' (($trayLine.Count -eq 1) -and ((& $flagsOf $trayLine[0]) -ceq 'nowait postinstall skipifsilent unchecked'))
+  Check 'the tray is started with no parameters, working directory, verb or environment, and not as another user' (($trayLine.Count -eq 1) -and ($trayLine[0] -notmatch '(?i)Parameters|WorkingDir|Verb|runasoriginaluser|runascurrentuser|waituntil') -and ($all -notmatch 'MEMOCAMPUS_APP_DIR'))
+  Check 'the Web Store page is opened only by an unticked, post-install, non-silent shellexec choice' (($storeLine.Count -eq 1) -and ((& $flagsOf $storeLine[0]) -ceq 'postinstall shellexec skipifsilent unchecked'))
+  Check 'the Web Store address is https, on chromewebstore.google.com, built from the build-time extension id only' (($storeLine.Count -eq 1) -and ($storeLine[0] -match '^Filename:\s*"https://chromewebstore\.google\.com/detail/\{#ChromeExtensionId\}";') -and ($iss -notmatch '(?i)http://') -and ($iss -notmatch '(?i)https://(?!chromewebstore\.google\.com/detail/\{#ChromeExtensionId\}")'))
+  Check 'the whole [Run] section is absent from an installer test build' ($iss -match '(?s)#ifndef InstallerTestMode\s+\[Run\].*?#endif\s+#endif\s+\[Code\]')
+  Check 'the Web Store link exists only in a build with /DStoreListing' ($iss -match '(?s)#ifdef StoreListing\s+(;[^\n]*\n)*Filename: "https://chromewebstore\.google\.com/detail/\{#ChromeExtensionId\}"[^\n]*\n#endif\s+#endif')
+  Check 'StoreListing together with InstallerTestMode stops the compile' ($issText -match '(?s)#ifdef StoreListing\s+#ifdef InstallerTestMode\s+#error')
+  Check 'the finished page says only what Setup did, and that the extension, vault and remembering are separate' (($iss -match '(?m)^FinishedLabel=.*is added by you in Chrome.*only when you approve') -and ($iss -match '(?m)^FinishedLabelNoIcons=.*is added by you in Chrome.*only when you approve'))
+  Check 'no code path starts programs, shells out or creates processes' (($pas -notmatch '(?i)\bExec\(|ShellExec') -and ($lc -notmatch '(?i)\bExec\(|ShellExec') -and ($all -notmatch '(?i)CreateProcess|WinExec|ShellExecute'))
   Check 'the Run value name is the tray''s own: MemocampusTray' ($lc -match "LcRunValueName = 'MemocampusTray';")
   Check 'test hooks are not used by the installer' ($iss -notmatch 'NmhFailAt|NmhFailRollback|LcFailAt')
 
@@ -219,6 +233,20 @@ if ($Negative) {
     @{ n = 'no rollback of an incomplete setup'; f = 'memocampus.iss'; a = 'if Registered and not InstallCompleted then begin'; b = 'if False then begin' },
     @{ n = 'tray started after setup'; f = 'memocampus.iss'; a = 'procedure DeinitializeSetup;'; b = "procedure Start; var C: Integer; begin Exec(ExpandConstant('{app}\memocampus-tray.exe'), '', '', 1, ewNoWait, C); end;`nprocedure DeinitializeSetup;" },
     @{ n = 'cleanup order swapped (manifest before registration)'; f = 'lifecycle.pas'; a = 'Code := NmhUnregister(NmhKeyPath, ManifestPath, Line);'; b = "Code := NmhRemoveOwnManifest(ManifestPath, HostName, ExePath, ExtensionId, Line);`n  Code := NmhUnregister(NmhKeyPath, ManifestPath, Line);" },
+    @{ n = 'tray start ticked by default'; f = 'memocampus.iss'; a = 'Flags: nowait postinstall skipifsilent unchecked'; b = 'Flags: nowait postinstall skipifsilent' },
+    @{ n = 'tray start also in a silent install'; f = 'memocampus.iss'; a = 'Flags: nowait postinstall skipifsilent unchecked'; b = 'Flags: nowait postinstall unchecked' },
+    @{ n = 'tray started with an argument'; f = 'memocampus.iss'; a = 'memocampus-tray.exe"; Description: "Start'; b = 'memocampus-tray.exe"; Parameters: "--headless"; Description: "Start' },
+    @{ n = 'tray started with the app dir variable'; f = 'memocampus.iss'; a = 'memocampus-tray.exe"; Description: "Start'; b = 'memocampus-tray.exe"; Description: "MEMOCAMPUS_APP_DIR Start' },
+    @{ n = 'tray start offered in the installer test build'; f = 'memocampus.iss'; a = "#ifndef InstallerTestMode`n[Run]"; b = "#if 1`n[Run]" },
+    @{ n = 'tray start waits for the tray to end'; f = 'memocampus.iss'; a = 'Flags: nowait postinstall skipifsilent unchecked'; b = 'Flags: postinstall skipifsilent unchecked' },
+    @{ n = 'a third thing offered on the last page'; f = 'memocampus.iss'; a = "#ifdef StoreListing`n; Opens"; b = "Filename: ""{app}\memocampus-mcp.exe""; Flags: postinstall nowait skipifsilent unchecked`n#ifdef StoreListing`n; Opens" },
+    @{ n = 'Web Store link over plain http'; f = 'memocampus.iss'; a = 'Filename: "https://chromewebstore.google.com/detail/'; b = 'Filename: "http://chromewebstore.google.com/detail/' },
+    @{ n = 'Web Store link to another site'; f = 'memocampus.iss'; a = 'Filename: "https://chromewebstore.google.com/detail/'; b = 'Filename: "https://example.com/detail/' },
+    @{ n = 'Web Store link with a fixed extension id'; f = 'memocampus.iss'; a = 'chromewebstore.google.com/detail/{#ChromeExtensionId}"; Description'; b = 'chromewebstore.google.com/detail/bcdefghijklmnopabcdefghijklmnopa"; Description' },
+    @{ n = 'Web Store link ticked by default'; f = 'memocampus.iss'; a = 'Flags: shellexec postinstall skipifsilent unchecked'; b = 'Flags: shellexec postinstall skipifsilent' },
+    @{ n = 'Web Store link without the StoreListing guard'; f = 'memocampus.iss'; a = "#ifdef StoreListing`n; Opens"; b = "#if 1`n; Opens" },
+    @{ n = 'StoreListing allowed in the installer test build'; f = 'memocampus.iss'; a = '#error StoreListing is for the product installer only'; b = '#pragma message StoreListing is for the product installer only' },
+    @{ n = 'finished page claims the extension is installed'; f = 'memocampus.iss'; a = 'FinishedLabel=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is added by you in Chrome'; b = 'FinishedLabel=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is installed (and vaults chosen) in Chrome' },
     @{ n = 'a fake extension id literal'; f = 'nmh.pas'; a = 'function NmhOwnsRegistration'; b = "const Fake = 'abcdefghijklmnopabcdefghijklmnop';`nfunction NmhOwnsRegistration" }
   )
   $scratch = Join-Path ([IO.Path]::GetTempPath()) ("memocampus-verify-neg-" + [guid]::NewGuid().ToString('N'))
@@ -268,6 +296,8 @@ if ($Compile) {
       @{ n = 'letter q'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=abcdefghijklmnopabcdefghijklmnoq'); fail = $true },
       @{ n = 'digit'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=abcdefghijklmnopabcdefghijklmno1'); fail = $true },
       @{ n = 'wildcard'; d = @('/DAppVersion=0.0.1', '/DChromeExtensionId=*bcdefghijklmnopabcdefghijklmnop'); fail = $true },
+      @{ n = 'Web Store link in an installer test build'; d = @('/DAppVersion=0.0.1', "/DChromeExtensionId=$good", '/DInstallerTestMode', '/DStoreListing'); fail = $true },
+      @{ n = 'well-formed id with the Web Store link (product build)'; d = @('/DAppVersion=0.0.1', "/DChromeExtensionId=$good", '/DStoreListing'); fail = $false },
       @{ n = 'well-formed id (product build)'; d = @('/DAppVersion=0.0.1', "/DChromeExtensionId=$good"); fail = $false },
       @{ n = 'well-formed id (isolated test build)'; d = @('/DAppVersion=0.0.1', "/DChromeExtensionId=$good", '/DInstallerTestMode'); fail = $false }
     )

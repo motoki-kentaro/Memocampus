@@ -58,3 +58,5 @@ desktop.ini
 /installer/out/
 /native-host/io.github.memocampus.vault.dev.json
 /installer/out-test/
+# Slice 3B-4: build.ps1 and the extension packager write their results here (never committed).
+/dist/

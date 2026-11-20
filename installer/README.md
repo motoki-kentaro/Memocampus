@@ -1,16 +1,18 @@
-# Memocampus Windows installer (Issue #67, Slices 3B-1 to 3B-3)
+# Memocampus Windows installer (Issue #67, Slices 3B-1 to 3B-4)
 
 Installs the three Memocampus executables for the **current Windows user**, adds one Start menu entry
 (3B-1), registers the product Native Messaging host for Chrome (3B-2), and manages the update and uninstall
 lifecycle: a running product tray is asked to quit first, and only this installation's own registrations are
-removed (3B-3).
+removed (3B-3). The last page offers, unticked, to start the tray and to open the Chrome Web Store page, and a
+release pipeline builds and checks it (3B-4).
 
 ## Status
 
 Compiled with Inno Setup 7.1.1. The registration and lifecycle code is exercised by self-tests (below) against
 private registry keys and, for the tray routine, against real scratch tray processes. **The installer itself has not
 been run** (no isolated Windows user or VM was available), and no Chrome Web Store extension id exists yet, so no
-installer built here is a release build.
+installer built here is a release build. `installer\E2E-ACCEPTANCE.md` lists every case that must be run, in an
+isolated environment, before v0.8.0 is made public; all of them are NOT RUN.
 
 ## What the installer does
 
@@ -200,8 +202,8 @@ earlier choice (shown by the tray as "disabled in Windows"). That preserves the 
 
 Update changes only the three executables, the manifest and the registration. It never writes `tray-settings.json`,
 the Run value or `StartupApproved`, and never starts the tray or the server: the tray that was closed stays closed until
-the user starts it (Start menu) or the next logon starts it through the user's own Run value. Starting after setup is
-slice 3B-4 (explicit user choice on the last page).
+the user starts it (Start menu) or the next logon starts it through the user's own Run value. The last page offers to
+start it (3B-4, below): unticked, so an update never restarts it unasked.
 
 ### New install versus update
 
@@ -248,20 +250,119 @@ powershell -NoProfile -ExecutionPolicy Bypass -File installer\verify-static.ps1 
 & "C:\Program Files\Inno Setup 7\ISCC.exe" /DAppVersion=0.1.0 /DChromeExtensionId=<id> installer\memocampus.iss
 ```
 
-`installer\stage\`, `installer\out\` and `installer\out-test\` are git-ignored. `target\release` is never
+`build.ps1` (below) does the compile with all its checks; the raw `ISCC.exe` line above is for experiments. `installer\stage\`, `installer\out\`, `installer\out-test\` and `dist\` are git-ignored. `target\release` is never
 packaged as a folder (it may hold an old database, keys, settings or logs). Needs Inno Setup 7.1.1 (`ISCC.exe`).
 
 ## Checks that exist
 
 | Command | What it checks |
 |---|---|
-| `installer\verify-static.ps1` | the sources `memocampus.iss`, `nmh.pas`, `lifecycle.pas` (74 rules): AppId, per-user, fixed folder, x64, exactly three files, one icon, the Run key path appears once and is only read or deleted by name after an ownership check, no `StartupApproved`, only HKCU and the two keys, no HKLM, no other host, no policy, no forced extension, no key deletion with subkeys, the id contract, one origin, escaping, ownership checks, WM_CLOSE only (never ENDSESSION/kill/taskkill), owner verification before any message, every wait finite, cleanup order, the registration in `ssInstall`, rollback in `DeinitializeSetup`, nothing started after setup, no data-folder reference, agreement with `extension\host-config.js` and the development scripts. **Limits: it is regular expressions over the text. It cannot prove behaviour, and a determined rewrite that keeps the matched text can pass; the logic and process tests below exist for that** |
-| `... -Negative` | 54 deliberate wrong changes to a scratch copy, each of which must be reported: the 31 of 3B-2 (one of them, "unregistering at uninstall", now reads "uninstall cleanup call removed" because unregistering is the intended behaviour) plus 23 for 3B-3: Run value deleted by name only, foreign Run value accepted, native messaging deleted without ownership, recursive delete, StartupApproved touched, `TerminateProcess` imported, kill by name, unbounded and INFINITE waits, owner path / session check removed, WM_ENDSESSION as the request, another folder's tray asked, continuing after a tray did not quit, locked files ignored, uninstall without the tray wait, cleanup order swapped, manifest deleted without content check, registration back in `ssPostInstall`, no rollback of an incomplete setup, tray started after setup, ... |
+| `installer\verify-static.ps1` | the sources `memocampus.iss`, `nmh.pas`, `lifecycle.pas` (83 rules): AppId, per-user, fixed folder, x64, exactly three files, one icon, the Run key path appears once and is only read or deleted by name after an ownership check, no `StartupApproved`, only HKCU and the two keys, no HKLM, no other host, no policy, no forced extension, no key deletion with subkeys, the id contract, one origin, escaping, ownership checks, WM_CLOSE only (never ENDSESSION/kill/taskkill), owner verification before any message, every wait finite, cleanup order, the registration in `ssInstall`, rollback in `DeinitializeSetup`, nothing started after setup, no data-folder reference, agreement with `extension\host-config.js` and the development scripts. **Limits: it is regular expressions over the text. It cannot prove behaviour, and a determined rewrite that keeps the matched text can pass; the logic and process tests below exist for that** |
+| `... -Negative` | 68 deliberate wrong changes to a scratch copy, each of which must be reported: the 31 of 3B-2 (one of them, "unregistering at uninstall", now reads "uninstall cleanup call removed" because unregistering is the intended behaviour) plus 23 for 3B-3 and 14 for 3B-4 (tray start ticked by default or in a silent install, with an argument, offered in the test build; a third item on the last page; the Store link over http, to another site, with a fixed id, ticked, without the `StoreListing` guard; the finished page claiming the extension is installed; ...); the 3B-3 ones: Run value deleted by name only, foreign Run value accepted, native messaging deleted without ownership, recursive delete, StartupApproved touched, `TerminateProcess` imported, kill by name, unbounded and INFINITE waits, owner path / session check removed, WM_ENDSESSION as the request, another folder's tray asked, continuing after a tray did not quit, locked files ignored, uninstall without the tray wait, cleanup order swapped, manifest deleted without content check, registration back in `ssPostInstall`, no rollback of an incomplete setup, tray started after setup, ... |
 | `... -Compile` | the real compiler: missing, empty, 31, 33 characters, upper case, `q`, digit, wildcard must fail; a well-formed id must compile (product and test mode); output goes to a scratch folder, never to `installer\out` |
 | `installer\run-selftest.ps1` | compiles `nmh-selftest.iss` (the real `nmh.pas`) and runs it against a private key `HKCU\Software\MemocampusInstallerTest\<random>` and a scratch folder: id and path validation, JSON text and escaping, UTF-8 without BOM, a path with Japanese characters parsed back by `ConvertFrom-Json`, fresh registration, update, conflicts, a key without a default value, a failure injected at each of four steps on a fresh and on an existing registration, a failing rollback reported, an unrelated registration unchanged, and rollback refusing to remove a foreign value. It is not the installer: it installs nothing, makes no uninstall record, never touches Chrome's keys, and removes its key and folder. |
 | `installer\run-lifecycle-test.ps1` | compiles `lifecycle-selftest.iss` (the real `nmh.pas` and `lifecycle.pas`). **Registry part (76 checks, private keys only):** removal of a registration (own, own with other values or subkeys, foreign, no default value, non-string default, spelling), manifest removal (own bytes, foreign bytes, another id), Run value ownership (own quoted/unquoted/capitals/trailing blanks; development exe, same name in another folder, arguments, odd quoting, another program, empty, REG_DWORD, another value name; neighbours untouched), the whole cleanup, a failure in each of its two steps and the retry, running it twice. **Tray part, against real `memocampus-tray.exe` copies** started from scratch folders in the tray's isolated mode: T0/T1 no tray of ours (others "left alone"), T2 quit through the tray's own path with exit code 0 and `quit_done ... controller=completed`, T3 same-named tray at another path left running, T4 two candidates at the same path, T5 a suspended (unresponsive) tray: reported after a bounded wait, **not terminated**, then quits normally once resumed, T6 a file held open by another process is reported and unchanged. The trays already running on the machine are recorded first and must still run at the end |
 | mutations of the above | the registry part was run against 10 deliberate breaks (unregister ownership, recursive key delete, Run path check, string check, manifest content check, cleanup order and error handling, wrong value name): 8 are caught; 2 survive and are equivalent (the quote check is redundant with the path comparison, and the "still registered" guard in the cleanup is unreachable without a race). The process mutations were **not** run: a broken owner check would act on a real tray |
-| `npm test` | includes `tests/extension/host-config.test.js` |
+| `installer\verify-dist.ps1` | the pipeline (44 rules): workflow permissions, triggers, no secret, no release/tag/upload, exact action versions and the lock file, no cache, inputs only through env, job order, channel-specific upload names, `build.ps1` rules (version, tag, release gate, synthetic id, exact Inno version, channel defines, output names, failure cleanup, `signed: false`), `stage.ps1` staleness guard, the Inno download pinning, the gate and manifest values, no key material. `-Negative`: 33 deliberate breaks, all caught. Limit: text only, it cannot show that GitHub runs the workflow as written |
+| `npm test` | includes `tests/extension/host-config.test.js` and `tests/installer/package-extension.test.js` (15 tests: the product profile, the untouched working copy, reproducibility, and 12 refusals that must leave no ZIP) |
+| `installer\e2e-snapshot.ps1` | read-only evidence tool for the acceptance file: `-Take` / `-Compare` of the registrations, Run and StartupApproved, install and data folders (hashes) and processes |
+
+## Release build and distribution (3B-4)
+
+Distribution: the user takes `Memocampus-Setup-x64.exe` from GitHub Releases; Setup installs the three programs and
+the Chrome connection; the user then adds the extension from the Chrome Web Store themselves and approves the vault
+and remembering in the extension's first-run onboarding. No extension is installed, forced or registered by Setup, and
+no Chrome policy or registry entry for extensions is written. Per-user, no administrator.
+
+### The last page
+
+Two choices, both **unticked** by default, both absent in a silent install (`skipifsilent`) and in a failed one
+(`postinstall` entries run only after a successful install):
+
+| Choice | What it does | Notes |
+|---|---|---|
+| Start Memocampus now | starts `{app}\memocampus-tray.exe`, no arguments, no environment, as the user (`nowait`, `postinstall`) | A tray already running refuses a second start by itself (single instance, exits quietly). **Starting the tray is not starting to remember**: the tray's first start only creates its own settings, and the default there is "start at logon" (`controller.rs first_run`), which the page says in so many words; the vault, the policy and the MCP publication are not touched. That side effect is why the box is unticked, also after an update: an update that closed the tray never restarts it unasked |
+| Open the Memocampus page in the Chrome Web Store | opens `https://chromewebstore.google.com/detail/<extension id>` in the default browser (`shellexec`) | The address is built from the same `/DChromeExtensionId` the manifest trusts. Only in a build with `/DStoreListing`; no such entry in any test build; `StoreListing` together with `InstallerTestMode` stops the compile |
+
+The page text says what "finished" means: the programs and the Chrome connection are installed, **nothing more**. The
+Chrome extension, choosing a vault and starting to remember are separate steps, done in Chrome, only on the user's approval.
+
+### Versions
+
+`build.ps1 -Version x.y.z` is the one build input for the Windows app (`AppVersion`, the Setup file's version resource).
+No default; each part a plain number up to 65535, no suffix; `-Tag` (when given) must be exactly `v<Version>`; the
+Setup file's `FileVersion` is read back and must start with the version. The Inno AppId is untouched. The Chrome
+extension's version is its own `manifest.json` `version`: `scripts/package-extension.mjs --expect-version x.y.z` fails
+unless it matches, so a release run can demand the two agree, and a later extension-only release can leave the app
+version alone. **The repository's manifest says 0.1.0 today**; raising it to 0.8.0 is part of cutting the release.
+
+### The two channels
+
+| | `test` | `product` |
+|---|---|---|
+| Purpose | exercise the installer in CI / a VM | the release candidate |
+| Extension id | synthetic, always the same, refused for `product` | only from `installer\release-gate.json` |
+| Compile | `/DInstallerTestMode` (own AppId, own folder, private registry keys, no Run section, no Store link) | `/DStoreListing`, real AppId and keys |
+| Output | `dist\test\Memocampus-Setup-x64-INSTALLER-TEST.exe` + `NOT-FOR-DISTRIBUTION.txt` | `dist\product\Memocampus-Setup-x64.exe` |
+| CI artifact | `INSTALLER-TEST-NOT-FOR-DISTRIBUTION` (7 days) | `memocampus-windows-release-candidate` (30 days) |
+
+**The release gate** (`installer\release-gate.json`): `extensionId` is `null` until the Web Store item exists and the
+product owner records its real id there. While it is null `build.ps1 -Channel product` refuses to build ("the release
+gate is closed"), so no product installer and no Web Store link can be made with a made-up id. Both channels also write
+`SHA256SUMS.txt` and `build-info.json` (version, channel, git commit, whether the working tree was modified, Inno
+version, `"signed": false`). A failed check or compile removes the output folder: nothing half-made is left to be picked up.
+
+### Chrome extension package
+
+`node scripts/package-extension.mjs --out <dir> [--expect-version x.y.z]` copies `extension\` to a temporary folder,
+switches **that copy** to the `product` profile, and zips only the copy. The working tree is never rewritten (a test
+compares the file's hash before and after). It refuses, and leaves no ZIP: Manifest V2, a non-numeric version, a
+version other than the expected one, a manifest `key`, any `.env`, key/certificate, `.map`, `.log`, `.test.` file or
+nested ZIP, another file naming the dev or legacy host, a changed product host name. The ZIP is reproducible (sorted,
+fixed time stamps) and `memocampus-extension-<version>.zip.sha256` is written next to it. The Windows installer does not
+contain the extension.
+
+### CI: `.github/workflows/windows-dist.yml`
+
+Triggers: pull requests that touch the installer or the extension (the cheap job only) and a manual "Run workflow".
+Permissions: `contents: read`, nothing else; no secret is read; no tag, release or upload to the Web Store anywhere.
+
+| Job | What it does |
+|---|---|
+| `checks` | Inno Setup 7 bootstrap; `npm test`; `verify-static.ps1` (+ `-Negative`, `-Compile`); `verify-dist.ps1` (+ `-Negative`); the Native Messaging and lifecycle Pascal self-tests (the lifecycle one with `-SkipTrays`: the real-tray checks are not run on a hosted runner); the extension package, uploaded as `chrome-extension-store-package` |
+| `build` (manual only, needs `checks`) | fmt, tests, clippy, release build of `native-host`, `mcp-server`, `tray` into one fresh target dir (**no cache**); `stage.ps1 -BuildDir ... -NotOlderThan <job start>` (a stale executable is refused); `build.ps1` with the dispatch inputs (passed through the environment, never spliced into script text); upload by channel |
+
+Tray window tests need a desktop; the workflow runs the tray's tests with `--features no-desktop`, which reports them as
+*ignored* (counted, never passed), the same as `ci.yml`. The job summary says so, and says that the real installer
+install/update/uninstall is NOT_RUN. Actions are pinned to exact versions and listed in `actions.lock` (the
+`upload-artifact` entry was added by hand from the tag's commit: run `gh actions-lock` to regenerate it).
+No hard-coded owner: nothing refers to the repository's owner, so it keeps working after a move to an organisation.
+
+**Inno Setup on the runner**: an existing `C:\Program Files\Inno Setup 7` is used (and `build.ps1` still insists on exactly
+7.1.1, read from the compiler's own output). If it is absent the job downloads the installer named by the repository
+variables `INNO_SETUP_URL` (https, `jrsoftware.org` only) and `INNO_SETUP_SHA256`, compares the hash and only then runs
+it. Without those variables the job stops. **Neither the runner's contents nor those two values have been confirmed**:
+until the workflow has run once on GitHub, the build job is unproven. (Inno Setup's licence is "non-commercial use
+only" unless a commercial licence is bought: the compiler prints it. Check that this fits before a public release.)
+
+### Code signing and SmartScreen
+
+The Setup program is **not signed** (no certificate), and `build-info.json` and the job summary say so. Windows
+SmartScreen will show "Windows protected your PC / unknown publisher" until the file builds reputation or is signed:
+tell testers to use "More info", then "Run anyway", only for a file whose SHA-256 matches `SHA256SUMS.txt`. Where signing
+goes later: in `build.ps1`, after the compile and before the hash and `build-info.json` (sign, verify the signature,
+then hash the signed file), with the certificate coming from a protected store or secret in a separate, approved job.
+No key, certificate or signing service is referenced anywhere now, and no secret may be added to this repository.
+
+### Before v0.8.0 is made public (blockers)
+
+1. The real Chrome Web Store extension id, recorded in `installer\release-gate.json`.
+2. Every case of `installer\E2E-ACCEPTANCE.md` run in an isolated environment, with evidence (all NOT RUN today).
+3. `extension\manifest.json` version raised to the release (0.1.0 today) if the extension is released with the app.
+4. The workflow run once on GitHub (Inno Setup bootstrap, the Rust build in CI, the artifacts), and its result read.
+5. A decision on code signing, or an explicit decision to ship unsigned; and on the Inno Setup licence.
+6. Independent review (Codex) and the product owner's approval. Tag, GitHub Release and Web Store submission happen
+   only after that, by hand.
 
 ## Isolated installer test (not done yet)
 
@@ -294,8 +395,8 @@ named above (Abort in `ssInstall`, `DeinitializeSetup` after a failed copy, `usU
 
 ## Not in these slices (later)
 
-- The setup page that offers to start the tray (an explicit choice), the Web Store link, and CI building (3B-4). Restarting a tray that an update closed is part of that choice: nothing restarts it unasked.
-- Code signing.
+- Code signing (see "Code signing and SmartScreen" below).
+- Publishing anything: a tag, a GitHub Release, the Chrome Web Store upload. The pipeline below builds artifacts only.
 - Changing the committed `HOST_PROFILE` from `legacyDev` (a decision after the development setups have moved).
 
 ## User data is kept

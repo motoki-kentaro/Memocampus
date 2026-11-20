@@ -29,6 +29,11 @@
 #if Len(ChromeExtensionId) != 32
   #error ChromeExtensionId must be exactly 32 characters (the Chrome Web Store extension id)
 #endif
+#ifdef StoreListing
+  #ifdef InstallerTestMode
+    #error StoreListing is for the product installer only; an installer test build never shows a Web Store link
+  #endif
+#endif
 #define ExtIdPos 1
 #sub CheckExtIdChar
   #if Pos(Copy(ChromeExtensionId, ExtIdPos, 1), "abcdefghijklmnop") == 0
@@ -102,6 +107,30 @@ Source: "stage\memocampus-tray.exe"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 ; Start menu > Memocampus > Memocampus. No parameters, no working directory, no environment.
 Name: "{group}\Memocampus"; Filename: "{app}\memocampus-tray.exe"
+
+[Messages]
+; What "finished" means here: the Windows side only. The Chrome extension, choosing a vault and starting
+; to remember are separate steps the user takes in Chrome; Setup never reports them as done.
+FinishedLabel=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is added by you in Chrome, and choosing a vault and starting to remember happen in the extension, only when you approve them there.
+FinishedLabelNoIcons=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is added by you in Chrome, and choosing a vault and starting to remember happen in the extension, only when you approve them there.
+
+#ifndef InstallerTestMode
+[Run]
+; Offered on the last page, never run unless the user ticks it (unchecked), never in a silent install
+; (skipifsilent), never when the installation failed (postinstall runs only after success). No
+; arguments, no environment, the user's own rights (runasoriginaluser is the postinstall default).
+; Starting the tray is not starting to remember: the tray's first start only creates its own settings
+; (including start at logon, changeable in its menu); the vault, the policy and the MCP publication
+; are not touched. A second start is refused by the tray itself (single instance), so ticking it with
+; a tray already running does nothing.
+Filename: "{app}\memocampus-tray.exe"; Description: "Start Memocampus now (its first start also turns on starting at logon; you can change that in the tray menu)"; Flags: nowait postinstall skipifsilent unchecked
+#ifdef StoreListing
+; Opens the Chrome Web Store page in the default browser, only when ticked. Nothing is installed in
+; Chrome by Setup. The address is built from the same extension id the manifest trusts; a build
+; without /DStoreListing (every test build) has no such entry.
+Filename: "https://chromewebstore.google.com/detail/{#ChromeExtensionId}"; Description: "Open the Memocampus page in the Chrome Web Store (you add the extension yourself, in Chrome)"; Flags: shellexec postinstall skipifsilent unchecked
+#endif
+#endif
 
 [Code]
 const
