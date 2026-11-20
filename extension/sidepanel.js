@@ -1,3 +1,4 @@
+import { HOST_NAME } from "./host-config.js";
 import { PAGE_SIZE, MAX_QUERY_CHARS, SearchError, VAULT_UNAVAILABLE_CODES, chromeNativeTransport, createLatestGate, isWebUrl, searchPages } from "./search-client.js";
 import { displayUrl, formatFullDate, formatShortDate } from "./format.js";
 import { createVaultPanel } from "./vault-panel.js";
@@ -57,7 +58,7 @@ let calendarSupported = null;
 let deleteSupported = null;
 const itemDialog = createItemDialog({ send, openPrivacySettings, onVaultUnavailable: () => void vaultPanel.refresh() });
 const deleteClient = createDeleteClient({
-  connect: () => chrome.runtime.connectNative("com.memocampus.vault"),
+  connect: () => chrome.runtime.connectNative(HOST_NAME),
   runtime: chrome.runtime,
   // The port ended or the Vault selection changed: everything shown from the old one is withdrawn.
   onInvalidated: (code) => {
@@ -130,7 +131,7 @@ const gallery = createImageGallery({
 
 // Saves finish in the service worker; refresh the Image tab only when that does not disturb the user.
 const pagePanel = createPagePanel({
-  connect: () => chrome.runtime.connectNative("com.memocampus.vault"), runtime: chrome.runtime,
+  connect: () => chrome.runtime.connectNative(HOST_NAME), runtime: chrome.runtime,
   isActive: () => tabs.current === "page",
   openUrl: (url) => { if (isWebUrl(url)) chrome.tabs.create({ url }).catch(() => {}); },
 });

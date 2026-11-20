@@ -56,3 +56,5 @@ desktop.ini
 # Installer (Issue #67 Slice 3B-1): the staged copies and the built setup are never committed.
 /installer/stage/
 /installer/out/
+/native-host/io.github.memocampus.vault.dev.json
+/installer/out-test/

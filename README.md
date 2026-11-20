@@ -201,6 +201,7 @@ Node.js 18+ is only needed to run the extension tests. No administrator rights a
 ### About the extension ID
 
 - With *Load unpacked*, Chrome derives the ID from the folder's absolute path, so it differs per machine and changes if you move the folder. Re-run step 4 with the new ID (the old registration is updated in place).
+- **Host names.** This registration is the *development* one. The extension's host name is chosen in one place (`extension/host-config.js`, default `com.memocampus.vault`, the name used here), and the Windows installer registers the separate product name `io.github.memocampus.vault`. To use the new development name `io.github.memocampus.vault.dev`, run `node scripts/set-host-profile.mjs dev`, reload the extension and pass `-HostName io.github.memocampus.vault.dev` to both scripts. See `installer/README.md`.
 - A future Chrome Web Store release has one fixed ID; the install script would then be run with that ID (or ship with it as a default). Nothing in this repository hard-codes an ID.
 
 ### Updating and uninstalling

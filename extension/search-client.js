@@ -1,6 +1,8 @@
 // Native Messaging client. Transport is injected so this module stays testable.
 
-export const HOST_NAME = "com.memocampus.vault";
+import { HOST_NAME } from "./host-config.js";
+
+export { HOST_NAME };
 export const PAGE_SIZE = 50;
 export const MAX_QUERY_CHARS = 200;
 export const SEARCH_TIMEOUT_MS = 10_000;
