@@ -111,6 +111,37 @@ function Invoke-DistChecks([string]$root, [bool]$quiet) {
 
   # --- Inno Setup bootstrap ---------------------------------------------------------------------------------------
   Check 'ci-setup-inno.ps1: downloads only from jrsoftware.org over https, only with a pinned SHA-256, and runs nothing that failed the hash' (($inno -match "\^https://\(files\\\.\)\?jrsoftware\\\.org/") -and ($inno -match 'Get-FileHash') -and ($inno -match '-ne \$sha\.ToUpperInvariant\(\)') -and ($inno -match '(?s)ToUpperInvariant\(\)\) \{.*?throw') -and ($inno.IndexOf('Get-FileHash') -lt $inno.IndexOf('Start-Process')))
+  # Behavioural: the allow-list is exercised through the script's own -CheckUrl hook (nothing is downloaded).
+  $innoScript = Join-Path $root 'installer/ci-setup-inno.ps1'
+  function Test-InnoUrl([string]$u) {
+    $ErrorActionPreference = 'Continue'
+    $null = & powershell -NoProfile -ExecutionPolicy Bypass -File $innoScript -CheckUrl $u 2>&1
+    $LASTEXITCODE -eq 0
+  }
+  $okUrls = @('https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe', 'https://jrsoftware.org/download.php/is.exe', 'https://files.jrsoftware.org/is/7/innosetup-7.1.1.exe')
+  $badUrls = @(
+    'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe?x=1',
+    'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe/',
+    'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe',
+    'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/other.exe',
+    'https://github.com/evil/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe',
+    'https://github.com/jrsoftware/issrc/archive/refs/heads/main.zip',
+    'https://github.com/jrsoftware/innosetup-7.1.1-x64.exe',
+    'https://GITHUB.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe',
+    'http://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe',
+    'https://github.com.evil.example/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe',
+    'https://evil.example/https://jrsoftware.org/x.exe',
+    'https://jrsoftware.org.evil.example/x.exe',
+    'https://github.com/')
+  # Static twin (also runs in the mutation pass): exactly one GitHub address, compared whole, no GitHub pattern.
+  Check 'ci-setup-inno.ps1: the GitHub source is one exact address (-ceq), never a pattern' (($inno -match "-ceq 'https://github\.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7\.1\.1-x64\.exe'") -and ($inno -notmatch "-c?match '\^?https://github"))
+  # The runs spawn a process per address, so they run in the normal pass only (the mutation pass uses the static twin).
+  if (-not $quiet) {
+  $okAll = $true; foreach ($u in $okUrls) { if (-not (Test-InnoUrl $u)) { $okAll = $false } }
+  Check 'ci-setup-inno.ps1 (run): accepts jrsoftware.org and the one official GitHub 7.1.1 release file' $okAll
+  $badAll = $true; foreach ($u in $badUrls) { if (Test-InnoUrl $u) { $badAll = $false } }
+  Check 'ci-setup-inno.ps1 (run): refuses any other GitHub repository, release, file, query, scheme or host' $badAll
+  }
 
   # --- Release gate and versions --------------------------------------------------------------------------------
   $gate = $gateText | ConvertFrom-Json
@@ -157,6 +188,7 @@ if ($Negative) {
     @{ n = 'stage guard removed'; f = 'installer/stage.ps1'; a = 'Stale build output'; b = 'Old build output' },
     @{ n = 'Inno download hash check removed'; f = 'installer/ci-setup-inno.ps1'; a = 'if ($got -ne $sha.ToUpperInvariant()) {'; b = 'if ($false) {' },
     @{ n = 'Inno download from another host'; f = 'installer/ci-setup-inno.ps1'; a = "'^https://(files\.)?jrsoftware\.org/'"; b = "'^https://'" },
+    @{ n = 'Inno download from any GitHub repository'; f = 'installer/ci-setup-inno.ps1'; a = "'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe') { return }"; b = "'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe' -or `$u -cmatch '^https://github\.com/') { return }" },
     @{ n = 'made-up release gate id'; f = 'installer/release-gate.json'; a = '"extensionId": null'; b = '"extensionId": "abcdefghijklmnopabcdefghijklmnop"' },
     @{ n = 'manifest key added'; f = 'extension/manifest.json'; a = '"manifest_version": 3,'; b = '"manifest_version": 3, "key": "AAAA",' },
     @{ n = 'private key material in a script'; f = 'installer/build.ps1'; a = '# --- version:'; b = "# -----BEGIN PRIVATE KEY-----`n# --- version:" }

@@ -340,7 +340,7 @@ No hard-coded owner: nothing refers to the repository's owner, so it keeps worki
 
 **Inno Setup on the runner**: an existing `C:\Program Files\Inno Setup 7` is used (and `build.ps1` still insists on exactly
 7.1.1, read from the compiler's own output). If it is absent the job downloads the installer named by the repository
-variables `INNO_SETUP_URL` (https, `jrsoftware.org` only) and `INNO_SETUP_SHA256`, compares the hash and only then runs
+variables `INNO_SETUP_URL` (https; `jrsoftware.org`, or the one exact official GitHub release file `https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe`, nothing else on GitHub) and `INNO_SETUP_SHA256`, compares the hash and only then runs
 it. Without those variables the job stops. **Neither the runner's contents nor those two values have been confirmed**:
 until the workflow has run once on GitHub, the build job is unproven. (Inno Setup's licence is "non-commercial use
 only" unless a commercial licence is bought: the compiler prints it. Check that this fits before a public release.)

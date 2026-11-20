@@ -11,9 +11,21 @@
   No certificate, token or secret is involved.
 #>
 [CmdletBinding()]
-param()
+param(
+  # Test hook: only checks this address against the allow-list, then stops. Downloads nothing.
+  [string]$CheckUrl
+)
 Set-StrictMode -Version 3
 $ErrorActionPreference = 'Stop'
+
+# Allowed sources, nothing else: https on jrsoftware.org, or the ONE official GitHub Releases file of
+# Inno Setup 7.1.1 (exact address, case-sensitive, no query, no other repository or release).
+function Assert-AllowedUrl([string]$u) {
+  if ($u -cmatch '^https://(files\.)?jrsoftware\.org/') { return }
+  if ($u -ceq 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe') { return }
+  throw "INNO_SETUP_URL must be an https address on jrsoftware.org or the official Inno Setup 7.1.1 GitHub release file: $u"
+}
+if ($PSBoundParameters.ContainsKey('CheckUrl')) { Assert-AllowedUrl $CheckUrl; 'URL allowed'; return }
 
 function Publish([string]$iscc) {
   if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) { throw "ISCC.exe not found at $iscc" }
@@ -29,7 +41,7 @@ $sha = $env:INNO_SETUP_SHA256
 if (-not $url -or -not $sha) {
   throw 'Inno Setup 7 is not on this runner and INNO_SETUP_URL / INNO_SETUP_SHA256 are not set. Record the pinned download address and its SHA-256 as repository variables (see installer\README.md). Nothing was downloaded.'
 }
-if ($url -notmatch '^https://(files\.)?jrsoftware\.org/') { throw "INNO_SETUP_URL must be an https address on jrsoftware.org: $url" }
+Assert-AllowedUrl $url
 if ($sha -notmatch '^[0-9a-fA-F]{64}$') { throw 'INNO_SETUP_SHA256 must be 64 hex digits' }
 $tmp = Join-Path $env:RUNNER_TEMP 'innosetup'
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
