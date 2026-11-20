@@ -435,9 +435,18 @@ mod tests {
         /// Ends by itself with this code after this many ms.
         exit: Option<(u64, i32)>,
         honors_stop: bool,
+        /// When set, no line is sent until the test sets it to true: the child exists and says
+        /// nothing for exactly as long as the test wants, with no timing involved.
+        hold: Option<Arc<AtomicBool>>,
     }
 
     impl Script {
+        fn held_until(self, release: &Arc<AtomicBool>) -> Self {
+            Self {
+                hold: Some(Arc::clone(release)),
+                ..self
+            }
+        }
         fn listening(port: u16) -> Self {
             Self {
                 lines: vec![(
@@ -449,6 +458,7 @@ mod tests {
                 )],
                 exit: None,
                 honors_stop: true,
+                hold: None,
             }
         }
         fn refused(line: &'static str) -> Self {
@@ -456,6 +466,7 @@ mod tests {
                 lines: vec![(5, line)],
                 exit: Some((15, 2)),
                 honors_stop: true,
+                hold: None,
             }
         }
         fn crashing() -> Self {
@@ -532,7 +543,13 @@ mod tests {
                 .expect("a script for this launch")?;
             let (send, lines) = mpsc::channel();
             let to_send = script.lines.clone();
+            let hold = script.hold.clone();
             thread::spawn(move || {
+                if let Some(hold) = hold {
+                    while !hold.load(Ordering::SeqCst) {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                }
                 let mut last = 0;
                 for (at, line) in to_send {
                     thread::sleep(Duration::from_millis(at.saturating_sub(last)));
@@ -574,6 +591,15 @@ mod tests {
         settings: SettingsSource,
         policy: RestartPolicy,
     ) -> Rig {
+        rig_timed(scripts, settings, policy, fast())
+    }
+
+    fn rig_timed(
+        scripts: Vec<Result<Script, LaunchError>>,
+        settings: SettingsSource,
+        policy: RestartPolicy,
+        timings: Timings,
+    ) -> Rig {
         let flags = Arc::new(Flags::default());
         let args = Arc::new(Mutex::new(Vec::new()));
         let history = Arc::new(Mutex::new(Vec::new()));
@@ -585,7 +611,7 @@ mod tests {
                 args: Arc::clone(&args),
             }),
             settings,
-            fast(),
+            timings,
             policy,
             Box::new(move |snapshot| {
                 let mut history = recorded.lock().unwrap();
@@ -631,11 +657,30 @@ mod tests {
 
     #[test]
     fn running_is_reached_only_after_the_server_says_it_is_listening() {
-        let rig = rig(vec![Ok(Script::listening(8765))]);
+        // The child is held back until the test lets it speak, so "it has said nothing yet" does
+        // not depend on how fast this machine is (it used to be a fixed 8 ms sleep).
+        let release = Arc::new(AtomicBool::new(false));
+        // A start timeout far beyond the test's own pauses: a starved machine must not turn the
+        // held silence into a timeout.
+        let rig = rig_timed(
+            vec![Ok(Script::listening(8765).held_until(&release))],
+            Box::new(|| Ok(Settings::default())),
+            RestartPolicy::new(3, Duration::from_secs(60), vec![Duration::from_millis(10)]),
+            Timings {
+                start_timeout: Duration::from_secs(20),
+                ..fast()
+            },
+        );
         rig.supervisor.send(Command::Start);
-        thread::sleep(Duration::from_millis(8));
-        // The child exists and has said nothing yet.
+        // `Starting` is reported before the child's pid is known: wait for both.
+        let starting = wait_for(&rig, "a started child", |s| {
+            s.state == ServerState::Starting && s.pid.is_some()
+        });
+        assert_eq!(starting.pid, Some(4242), "the child exists");
+        // Silence for a while (longer than the 20 ms the line would take) changes nothing.
+        thread::sleep(Duration::from_millis(100));
         assert_eq!(rig.supervisor.snapshot().state, ServerState::Starting);
+        release.store(true, Ordering::SeqCst);
         let up = wait_for(&rig, "running", |s| s.state == ServerState::Running);
         assert_eq!(up.port, Some(8765));
         assert_eq!(up.pid, Some(4242));
@@ -812,6 +857,7 @@ mod tests {
             lines: vec![],
             exit: None,
             honors_stop: true,
+            hold: None,
         })]);
         rig.supervisor.send(Command::Start);
         let error = wait_for(&rig, "start timeout", is_error);

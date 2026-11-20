@@ -330,6 +330,8 @@ fn tray_mode(mode: &str, extra: &[&str], app: Option<&Path>) -> TrayProcess {
     fs::create_dir_all(&app_dir).unwrap();
     let (log, info) = (dir.file("tray.log"), dir.file("starts.txt"));
     let child = Process::new(TRAY)
+        // Slice 1's host: no icon, no menu, no logon registration. (Slice 2 made the tray the default.)
+        .arg("--headless")
         .arg("--log")
         .arg(&log)
         .arg("--mcp-exe")

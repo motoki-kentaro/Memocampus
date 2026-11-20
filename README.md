@@ -263,7 +263,7 @@ The **Require lockfile** policy is not enabled, and enabling it is a separate de
 - `native-host/` — Rust Native Messaging host and SQLite persistence
 - `visible-store/` — the only read path from a vault to MCP, with the privacy gate
 - `mcp-server/` — `memocampus-mcp`, the read-only stdio MCP server over VisibleStore
-- `tray/` — `memocampus-tray`, the Windows tray that runs and manages the MCP server over Streamable HTTP (Issue #67, in progress: see [docs/issue-067-tray-slice1.md](docs/issue-067-tray-slice1.md))
+- `tray/` — `memocampus-tray`, the Windows tray that runs and manages the MCP server over Streamable HTTP (Issue #67, in progress: [Slice 1](docs/issue-067-tray-slice1.md), [Slice 2](docs/issue-067-tray-slice2.md))
 - `docs/` — issue and slice acceptance criteria
 - `assets/icon.png` — master of the app icon; `scripts/generate-icons.py` — regenerates the icons from it
 
