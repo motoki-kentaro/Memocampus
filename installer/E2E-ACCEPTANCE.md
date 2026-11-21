@@ -1,7 +1,7 @@
 # Memocampus for Windows: real-installer acceptance gate (Issue #67, Slice 3B-4)
 
-**Status of every item below: NOT RUN.** No real installer has been executed on any machine for
-Slices 3B-1 to 3B-4. The code has been compiled, unit-tested against private registry keys and real
+**Status: NOT RUN unless the row says otherwise** (A3 is BLOCKED, A10 is PASS for the C runtime start
+only; see the rows). No product installer has been executed on any machine for Slices 3B-1 to 3B-4. The code has been compiled, unit-tested against private registry keys and real
 scratch trays, and statically checked, but the Inno Setup engine's own behaviour (what runs when,
 exit codes, what `Abort` does in each event) has not been observed. **This gate must be passed before a
 public release of v0.8.0.** Nothing here may be written up as PASS until someone has run it and kept the
@@ -18,6 +18,48 @@ it would start writes the real Run key. Use the VM.
 
 Needed in the VM: Chrome (so the native messaging registration can be exercised), the release candidate
 `Memocampus-Setup-x64.exe` **and** the previous one for the update cases, and `installer\e2e-snapshot.ps1`.
+
+## Which build proves what (read before A3 and A10)
+
+| Build | Native Messaging registration it writes | Can Chrome see it? | Proves |
+|---|---|---|---|
+| Product `Memocampus-Setup-x64.exe` | `HKCU\Software\Google\Chrome\NativeMessagingHosts\io.github.memocampus.vault`, `allowed_origins` = the Web Store id from `installer\release-gate.json` | yes, for the Web Store extension only | the installer's own product registration path (A3) |
+| Test `...-INSTALLER-TEST.exe` | `HKCU\Software\MemocampusInstallerTest\NativeMessagingHosts\io.github.memocampus.vault`, `allowed_origins` = the synthetic id `abcdefghijklmnopabcdefghijklmnop` | **no, by design** | the installer's behaviour on private keys (A9 and the lifecycle cases) |
+
+The test build's registration is isolated on purpose (`installer\README.md`, "Isolated installer test"): Chrome
+never reads `Software\MemocampusInstallerTest`, the synthetic id belongs to no extension, and an unpacked
+extension from this repository asks for `com.memocampus.vault` (`extension\host-config.js`, committed profile
+`legacyDev`), not the product name. A Chrome log line `Can't find manifest for native messaging host
+com.memocampus.vault` after installing only the test build is therefore expected, not a product defect. The
+isolation is not relaxed for the acceptance run.
+
+### Temporary development registration (disposable clean VM only, for A10)
+
+To let Chrome start the **installed test-build executable** before a Web Store id exists, the existing
+development script registers it under the legacy development name. This is allowed only in a disposable clean VM
+that is reverted afterwards, never on a development machine or a real profile. It writes one key,
+`HKCU\Software\Google\Chrome\NativeMessagingHosts\com.memocampus.vault`; the script refuses the product name
+`io.github.memocampus.vault`, so the product key is never written. It does **not** exercise or prove the
+installer's product registration (that is A3).
+
+1. Install the test build (`...-INSTALLER-TEST.exe`).
+2. In Chrome, `chrome://extensions` > Developer mode > Load unpacked > this repository's `extension` folder,
+   unchanged (profile `legacyDev`). Copy the id Chrome shows: it is derived from the folder path, so use the real
+   one, never the synthetic test id.
+3. Create a work folder in the VM (for example `C:\e2e\nmh`) and register:
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\native-host\install-native-host.ps1 `
+     -ExtensionId <id from step 2> `
+     -BinaryPath "$env:LOCALAPPDATA\Programs\MemocampusInstallerTest\memocampus-native-host.exe" `
+     -ManifestPath C:\e2e\nmh\com.memocampus.vault.json
+   ```
+4. Reload the extension and open the side panel's **Vault** section: a status other than "Native Hostに接続できません"
+   means Chrome started the installed executable. Record the host name, id, manifest path and registry value used.
+5. When done, remove the registration (it is removed only if it still names that manifest), then revert the VM:
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\native-host\uninstall-native-host.ps1 `
+     -ManifestPath C:\e2e\nmh\com.memocampus.vault.json
+   ```
 
 ## Evidence for each case
 
@@ -37,13 +79,14 @@ The result column is filled in by whoever ran the case: `PASS (date, who, eviden
 |---|-------|----------|--------|
 | A1 | Run the setup as a standard user (no administrator prompt) | Succeeds, no UAC prompt | NOT RUN |
 | A2 | Files | `%LOCALAPPDATA%\Programs\Memocampus` holds the three executables, the generated `io.github.memocampus.vault.json`, and the uninstaller; nothing under Program Files | NOT RUN |
-| A3 | Native Messaging | `HKCU\Software\Google\Chrome\NativeMessagingHosts\io.github.memocampus.vault` default value = the manifest path; manifest `path` = `memocampus-native-host.exe` in the install folder; `allowed_origins` = exactly `chrome-extension://<release id>/`; no dev / legacy key changed | NOT RUN |
+| A3 | Native Messaging | `HKCU\Software\Google\Chrome\NativeMessagingHosts\io.github.memocampus.vault` default value = the manifest path; manifest `path` = `memocampus-native-host.exe` in the install folder; `allowed_origins` = exactly `chrome-extension://<release id>/`; no dev / legacy key changed. Purpose: the installer's own product registration path, with the product build and the Web Store extension. Not provable with the test build or with the temporary development registration | BLOCKED (the Chrome Web Store id is not recorded yet: `installer\release-gate.json` `extensionId` is null, so no product build can be made; the release gate is not relaxed) |
 | A4 | Last page | Says Setup installed the programs and the Chrome connection, and that the extension, the vault and remembering are separate and approved in Chrome. Offers two **unticked** boxes: start Memocampus, open the Web Store page | NOT RUN |
 | A5 | Tray box ticked | Tray starts once, as the user, no arguments; a second start (Start menu) exits quietly (already running) | NOT RUN |
 | A6 | Store box ticked | Default browser opens `https://chromewebstore.google.com/detail/<release id>`; nothing is installed in Chrome | NOT RUN |
 | A7 | Silent install (`/VERYSILENT`) | Neither the tray nor the browser is started | NOT RUN |
 | A8 | Data | `Vault`, `config.json`, `policy.json`, `tray-settings.json` (other than created by a ticked tray start), token and keys: unchanged / absent as before; MCP publication not approved | NOT RUN |
 | A9 | The test installer (`...-INSTALLER-TEST.exe`) | Has no Run section and no Store link; uses its own AppId, folder and private keys; real Chrome and Run keys untouched | NOT RUN |
+| A10 | Clean Windows with no Visual C++ Redistributable | Purpose: the installed executables start without the Visual C++ runtime (C runtime linked statically). The tray starts from the Start menu with no `VCRUNTIME140.dll` error; Chrome launches the installed `memocampus-native-host.exe` and an MCP client launches `memocampus-mcp.exe` without a missing-DLL error. `node scripts\pe-imports.mjs --check` on the installed files reports no Visual C++ runtime DLL. With the test build, Chrome reaches the executable only through the temporary development registration above; that proves the executable starts, not the installer's product registration (A3, out of scope here) | PASS for the C runtime start (clean-VM run reported to the PO; Chrome connection made through the manual temporary development registration `com.memocampus.vault`; the product registration path is out of scope and stays with A3). Date, who and evidence file: to be entered from the PO's release record |
 
 ## B. Update (old setup installed, then the new one)
 

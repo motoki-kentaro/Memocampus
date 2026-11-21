@@ -1,0 +1,5 @@
+# Release executables must run on a clean Windows without the Visual C++ Redistributable:
+# link the C runtime statically (no VCRUNTIME140.dll). The Universal CRT (api-ms-win-crt-*) is part of
+# Windows itself and stays a normal dependency. Checked on the built files by scripts/pe-imports.mjs.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

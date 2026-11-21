@@ -345,6 +345,29 @@ it. Without those variables the job stops. **Neither the runner's contents nor t
 until the workflow has run once on GitHub, the build job is unproven. (Inno Setup's licence is "non-commercial use
 only" unless a commercial licence is bought: the compiler prints it. Check that this fits before a public release.)
 
+### C runtime: no Visual C++ Redistributable (release blocker found on a clean VM)
+
+A clean Windows has no `VCRUNTIME140.dll`; the first clean-VM run showed the tray refusing to start. The dynamic C
+runtime was the cause: all three executables imported `VCRUNTIME140.dll` (plus the `api-ms-win-crt-*` Universal CRT,
+which is part of Windows 10/11 and not a problem). Each crate now has `.cargo\config.toml` with
+`rustflags = ["-C", "target-feature=+crt-static"]` for `x86_64-pc-windows-msvc`, so dev, test, clippy and release builds
+all link the same way (there is no separate "distribution" flag to forget; do not set `RUSTFLAGS`, it would replace the
+file's setting, and `verify-dist.ps1` rejects it in the workflow). Nothing is bundled or downloaded; no administrator
+rights are needed. `scripts\pe-imports.mjs --check <exe>...` reads the real import table; `build.ps1` runs it on the staged
+files and refuses the build if any Visual C++ runtime DLL (`vcruntime*`, `msvcp*`, `concrt*`, `vcomp*`, ...) is imported.
+
+Imports before / after (the three files): `vcruntime140.dll` plus 8 to 12 `api-ms-win-crt-*` DLLs in each before; after, only
+Windows system DLLs (`kernel32`, `user32`, `advapi32`, `ws2_32`, `crypt32`, `ntdll`, `bcryptprimitives`,
+`api-ms-win-core-synch`, and for tray/native-host `ole32`, `shell32`, `comctl32`, `gdi32`, `combase`). Static linking
+makes each file about 2 to 10 percent larger. Fallback if it ever has to be undone: the Microsoft Visual C++
+Redistributable would have to be shipped as Microsoft's own installer, which needs administrator rights, so it is not
+used.
+
+On the clean VM (`E2E-ACCEPTANCE.md` A10): install the new setup, start the tray from the Start menu (it must start, no
+VCRUNTIME error); `memocampus-native-host.exe` and `memocampus-mcp.exe` are started by Chrome and an MCP client, not by
+hand. With the test build, Chrome reaches the executable only through the temporary development registration described
+under "Isolated installer test".
+
 ### Code signing and SmartScreen
 
 The Setup program is **not signed** (no certificate), and `build-info.json` and the job summary say so. Windows
@@ -371,6 +394,20 @@ program from the product installer: another AppId, folder `%LOCALAPPDATA%\Progra
 output `installer\out-test\Memocampus-Setup-x64-INSTALLER-TEST.exe`, and the private registry key
 `HKCU\Software\MemocampusInstallerTest\NativeMessagingHosts\io.github.memocampus.vault` instead of Chrome's. Chrome
 cannot see that registration; the test verifies the installer's behaviour, not a Chrome connection.
+
+This is intended, and it is not relaxed. Three things differ from what an unpacked extension asks for, each on
+purpose: the registry location (the private key above), the extension id (`allowed_origins` holds the synthetic
+`abcdefghijklmnopabcdefghijklmnop`, while an unpacked extension's id comes from its folder path) and the host name
+(the repository's extension uses `com.memocampus.vault`, profile `legacyDev`). So Chrome logs
+`Can't find manifest for native messaging host com.memocampus.vault` after only the test build is installed.
+
+To check that Chrome can start the installed executable in a disposable clean VM (E2E A10), register it temporarily
+with the existing development script under `com.memocampus.vault`, using the unpacked extension's real id,
+`-BinaryPath` set to the test build's installed `memocampus-native-host.exe` and `-ManifestPath` in a VM work folder,
+and remove it afterwards with `uninstall-native-host.ps1 -ManifestPath <same path>`. The exact steps are in
+`E2E-ACCEPTANCE.md` ("Temporary development registration"). That registration is a development one: it does not
+verify the installer's product registration, which needs the product build and the real Web Store id (A3, blocked
+until `release-gate.json` has the id).
 
 ```powershell
 ISCC.exe /DAppVersion=0.0.0 /DChromeExtensionId=<a test id> /DInstallerTestMode installer\memocampus.iss

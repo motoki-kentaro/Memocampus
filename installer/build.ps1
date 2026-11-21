@@ -70,6 +70,14 @@ $want = @('memocampus-mcp.exe', 'memocampus-native-host.exe', 'memocampus-tray.e
 $have = @(if (Test-Path -LiteralPath $stage) { Get-ChildItem -LiteralPath $stage -Force | ForEach-Object Name | Sort-Object })
 if (($have -join '|') -ne ($want -join '|')) { Fail "installer\stage must hold exactly the three executables (found: $($have -join ', '))" }
 
+# --- no Visual C++ runtime dependency ---------------------------------------------------------------------
+# A clean Windows has no VCRUNTIME140.dll: the executables must link the C runtime statically
+# (.cargo\config.toml of each crate). The import table of the real files is read; a dependency stops the build.
+$node = Get-Command node -ErrorAction SilentlyContinue
+if (-not $node) { Fail 'node is needed to read the executables'' import tables (scripts\pe-imports.mjs); not found' }
+$peCheck = & node (Join-Path (Split-Path -Parent $here) 'scripts\pe-imports.mjs') --check (Get-ChildItem -LiteralPath $stage -File | ForEach-Object FullName) 2>&1
+if ($LASTEXITCODE -ne 0) { Fail ("an executable needs the Visual C++ runtime (build with the crates' .cargo\config.toml, crt-static):`n" + ($peCheck -join "`n")) }
+
 if (-not $Commit) { $Commit = (& git -C $root rev-parse HEAD 2>$null); if ($LASTEXITCODE -ne 0) { $Commit = 'unknown' } }
 $dirty = [bool](& git -C $root status --porcelain --untracked-files=no 2>$null)
 

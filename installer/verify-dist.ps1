@@ -22,7 +22,10 @@ $files = @(
   'installer/release-gate.json',
   'installer/ci-setup-inno.ps1',
   'extension/manifest.json',
-  'scripts/package-extension.mjs'
+  'scripts/package-extension.mjs',
+  'native-host/.cargo/config.toml',
+  'mcp-server/.cargo/config.toml',
+  'tray/.cargo/config.toml'
 )
 
 function Get-Text([string]$root, [string]$rel) {
@@ -109,6 +112,16 @@ function Invoke-DistChecks([string]$root, [bool]$quiet) {
   Check 'stage.ps1: refuses an executable older than the build start, and a stage that is not exactly three files' (($stage -match 'Stale build output') -and ($stage -match 'LastWriteTimeUtc -lt \$NotOlderThan'))
   Check 'stage.ps1 copies three named files only' (($stage -match "'memocampus-native-host\.exe'") -and ($stage -match "'memocampus-mcp\.exe'") -and ($stage -match "'memocampus-tray\.exe'") -and ($stage -notmatch '(?i)Copy-Item[^\n]*\*|-Recurse -Force \$from'))
 
+  # --- C runtime: no Visual C++ Redistributable on a clean Windows -------------------------------------------------
+  $crtOk = $true
+  foreach ($c in 'native-host', 'mcp-server', 'tray') {
+    $cfg = Get-Text $root "$c/.cargo/config.toml"
+    if (($cfg -notmatch '(?m)^\[target\.x86_64-pc-windows-msvc\]\s*$') -or ($cfg -notmatch '(?m)^rustflags\s*=\s*\[\s*"-C",\s*"target-feature=\+crt-static"\s*\]\s*$')) { $crtOk = $false }
+  }
+  Check 'each crate links the C runtime statically (.cargo/config.toml: crt-static for x86_64-pc-windows-msvc)' $crtOk
+  Check 'the workflow does not override the rustflags (RUSTFLAGS would replace the static-CRT setting)' ($wfCode -notmatch '(?i)RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_RUSTFLAGS')
+  Check 'build.ps1 reads the import table of the staged executables and stops on a Visual C++ runtime dependency' (($build -match 'pe-imports\.mjs') -and ($build -match '--check') -and ($build -match '(?s)\$LASTEXITCODE -ne 0\) \{ Fail \("an executable needs the Visual C\+\+ runtime') -and ($build.IndexOf('pe-imports.mjs') -lt $build.IndexOf('$defs')))
+
   # --- Inno Setup bootstrap ---------------------------------------------------------------------------------------
   Check 'ci-setup-inno.ps1: downloads only from jrsoftware.org over https, only with a pinned SHA-256, and runs nothing that failed the hash' (($inno -match "\^https://\(files\\\.\)\?jrsoftware\\\.org/") -and ($inno -match 'Get-FileHash') -and ($inno -match '-ne \$sha\.ToUpperInvariant\(\)') -and ($inno -match '(?s)ToUpperInvariant\(\)\) \{.*?throw') -and ($inno.IndexOf('Get-FileHash') -lt $inno.IndexOf('Start-Process')))
   # Behavioural: the allow-list is exercised through the script's own -CheckUrl hook (nothing is downloaded).
@@ -189,6 +202,8 @@ if ($Negative) {
     @{ n = 'Inno download hash check removed'; f = 'installer/ci-setup-inno.ps1'; a = 'if ($got -ne $sha.ToUpperInvariant()) {'; b = 'if ($false) {' },
     @{ n = 'Inno download from another host'; f = 'installer/ci-setup-inno.ps1'; a = "'^https://(files\.)?jrsoftware\.org/'"; b = "'^https://'" },
     @{ n = 'Inno download from any GitHub repository'; f = 'installer/ci-setup-inno.ps1'; a = "'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe') { return }"; b = "'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe' -or `$u -cmatch '^https://github\.com/') { return }" },
+    @{ n = 'static CRT removed from a crate'; f = 'tray/.cargo/config.toml'; a = 'target-feature=+crt-static'; b = 'target-feature=-crt-static' },
+    @{ n = 'import-table check removed from build.ps1'; f = 'installer/build.ps1'; a = "if (`$LASTEXITCODE -ne 0) { Fail (""an executable needs the Visual C++ runtime"; b = "if (`$false) { Fail (""an executable needs the Visual C++ runtime" },
     @{ n = 'made-up release gate id'; f = 'installer/release-gate.json'; a = '"extensionId": null'; b = '"extensionId": "abcdefghijklmnopabcdefghijklmnop"' },
     @{ n = 'manifest key added'; f = 'extension/manifest.json'; a = '"manifest_version": 3,'; b = '"manifest_version": 3, "key": "AAAA",' },
     @{ n = 'private key material in a script'; f = 'installer/build.ps1'; a = '# --- version:'; b = "# -----BEGIN PRIVATE KEY-----`n# --- version:" }
