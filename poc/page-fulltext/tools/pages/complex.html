@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>複雑な構造のページ</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside><ul><li>メニュー1</li><li>メニュー2</li></ul></aside>
+  <section>
+    <h1>入れ子のテーブルとiframe</h1>
+    <table><tr><td>外側<table><tr><td>内側セル</td></tr></table></td><td>右セル</td></tr></table>
+    <iframe src="/frame.html" title="同一オリジンのフレーム"></iframe>
+    <iframe srcdoc="<p>SRCDOC-FRAME-TEXT</p>"></iframe>
+    <details><summary>折りたたみ見出し</summary><p>折りたたみ本文</p></details>
+    <p>段落<br>改行のあと<wbr>続き</p>
+  </section>
+</div>
+<img src="/pixel.png" alt="">
+</body>
+</html>

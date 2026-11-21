@@ -1,0 +1,5 @@
+/target/
+# Real (non-synthetic) MHTML and anything extracted from it never go into Git.
+/real/
+/out/
+*.partial
