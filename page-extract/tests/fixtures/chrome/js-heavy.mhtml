@@ -1,0 +1,35 @@
+From: <Saved by Blink>
+Snapshot-Content-Location: http://127.0.0.1:64962/js-heavy.html
+Subject: =?utf-8?Q?JavaScript=E3=81=A7=E7=94=9F=E6=88=90=E3=81=95=E3=82=8C=E3=82?=
+ =?utf-8?Q?=8B=E3=83=9A=E3=83=BC=E3=82=B8?=
+Date: Sat, 21 Nov 2026 06:32:21 GMT
+MIME-Version: 1.0
+Content-Type: multipart/related;
+	type="text/html";
+	boundary="----MultipartBoundary--xNp8ELSHb9ZyUPFxH6kaj2sTgQx63BnJ3cKtNHsvXl----"
+
+
+------MultipartBoundary--xNp8ELSHb9ZyUPFxH6kaj2sTgQx63BnJ3cKtNHsvXl----
+Content-Type: text/html
+Content-ID: <frame-9FF52402202266FF834165F09F5B51EC@mhtml.blink>
+Content-Transfer-Encoding: quoted-printable
+Content-Location: http://127.0.0.1:64962/js-heavy.html
+
+<!DOCTYPE html><html lang=3D"ja"><head><meta http-equiv=3D"Content-Type" co=
+ntent=3D"text/html; charset=3DUTF-8">
+
+<title>JavaScript=E3=81=A7=E7=94=9F=E6=88=90=E3=81=95=E3=82=8C=E3=82=8B=E3=
+=83=9A=E3=83=BC=E3=82=B8</title>
+
+</head>
+<body>
+<div id=3D"app"><h1>JS=E7=94=9F=E6=88=90=E3=81=AE=E8=A6=8B=E5=87=BA=E3=81=
+=97</h1><ul><li>=E7=94=9F=E6=88=90=E3=81=95=E3=82=8C=E3=81=9F=E9=A0=85=E7=
+=9B=AEA</li><li>=E7=94=9F=E6=88=90=E3=81=95=E3=82=8C=E3=81=9F=E9=A0=85=E7=
+=9B=AEB</li><li>Generated item C</li></ul></div>
+<p>document.write=E6=AE=B5=E8=90=BD0</p><p>document.write=E6=AE=B5=E8=90=BD=
+1</p><p>document.write=E6=AE=B5=E8=90=BD2</p>
+
+
+<div style=3D"display: none;">JS-HIDDEN-CANARY</div></body></html>
+------MultipartBoundary--xNp8ELSHb9ZyUPFxH6kaj2sTgQx63BnJ3cKtNHsvXl------
