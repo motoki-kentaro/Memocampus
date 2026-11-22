@@ -1,0 +1,87 @@
+From: <Saved by Blink>
+Snapshot-Content-Location: http://127.0.0.1:64962/complex.html
+Subject: =?utf-8?Q?=E8=A4=87=E9=9B=91=E3=81=AA=E6=A7=8B=E9=80=A0=E3=81=AE=E3=83=9A?=
+ =?utf-8?Q?=E3=83=BC=E3=82=B8?=
+Date: Sat, 21 Nov 2026 06:32:20 GMT
+MIME-Version: 1.0
+Content-Type: multipart/related;
+	type="text/html";
+	boundary="----MultipartBoundary--9eCDoUSYYbc3FDGa24ZMLBaxhUlZ5c0oK54LIVnytu----"
+
+
+------MultipartBoundary--9eCDoUSYYbc3FDGa24ZMLBaxhUlZ5c0oK54LIVnytu----
+Content-Type: text/html
+Content-ID: <frame-E3E6DDED21AFCA0C3517095CD6BAAE7A@mhtml.blink>
+Content-Transfer-Encoding: quoted-printable
+Content-Location: http://127.0.0.1:64962/complex.html
+
+<!DOCTYPE html><html lang=3D"ja"><head><meta http-equiv=3D"Content-Type" co=
+ntent=3D"text/html; charset=3DUTF-8">
+
+<title>=E8=A4=87=E9=9B=91=E3=81=AA=E6=A7=8B=E9=80=A0=E3=81=AE=E3=83=9A=E3=
+=83=BC=E3=82=B8</title>
+<link rel=3D"stylesheet" href=3D"http://127.0.0.1:64962/style.css">
+</head>
+<body>
+<div class=3D"layout">
+  <aside><ul><li>=E3=83=A1=E3=83=8B=E3=83=A5=E3=83=BC1</li><li>=E3=83=A1=E3=
+=83=8B=E3=83=A5=E3=83=BC2</li></ul></aside>
+  <section>
+    <h1>=E5=85=A5=E3=82=8C=E5=AD=90=E3=81=AE=E3=83=86=E3=83=BC=E3=83=96=E3=
+=83=AB=E3=81=A8iframe</h1>
+    <table><tbody><tr><td>=E5=A4=96=E5=81=B4<table><tbody><tr><td>=E5=86=85=
+=E5=81=B4=E3=82=BB=E3=83=AB</td></tr></tbody></table></td><td>=E5=8F=B3=E3=
+=82=BB=E3=83=AB</td></tr></tbody></table>
+    <iframe src=3D"cid:frame-D799D381F5DAEADEB9771C8CB3A219D1@mhtml.blink" =
+title=3D"=E5=90=8C=E4=B8=80=E3=82=AA=E3=83=AA=E3=82=B8=E3=83=B3=E3=81=AE=E3=
+=83=95=E3=83=AC=E3=83=BC=E3=83=A0"></iframe>
+    <iframe src=3D"cid:frame-DE770635FBF73987812BE35F5C83CD33@mhtml.blink">=
+</iframe>
+    <details><summary>=E6=8A=98=E3=82=8A=E3=81=9F=E3=81=9F=E3=81=BF=E8=A6=
+=8B=E5=87=BA=E3=81=97</summary><p>=E6=8A=98=E3=82=8A=E3=81=9F=E3=81=9F=E3=
+=81=BF=E6=9C=AC=E6=96=87</p></details>
+    <p>=E6=AE=B5=E8=90=BD<br>=E6=94=B9=E8=A1=8C=E3=81=AE=E3=81=82=E3=81=A8<=
+wbr>=E7=B6=9A=E3=81=8D</p>
+  </section>
+</div>
+<img src=3D"http://127.0.0.1:64962/pixel.png" alt=3D"">
+
+
+</body></html>
+------MultipartBoundary--9eCDoUSYYbc3FDGa24ZMLBaxhUlZ5c0oK54LIVnytu----
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Location: http://127.0.0.1:64962/pixel.png
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6
+kgAAAABJRU5ErkJggg==
+
+------MultipartBoundary--9eCDoUSYYbc3FDGa24ZMLBaxhUlZ5c0oK54LIVnytu----
+Content-Type: text/css
+Content-Transfer-Encoding: quoted-printable
+Content-Location: http://127.0.0.1:64962/style.css
+
+@charset "utf-8";
+
+body { font-family: sans-serif; }
+
+.x::after { content: "CSS-CONTENT-CANARY"; }
+------MultipartBoundary--9eCDoUSYYbc3FDGa24ZMLBaxhUlZ5c0oK54LIVnytu----
+Content-Type: text/html
+Content-ID: <frame-D799D381F5DAEADEB9771C8CB3A219D1@mhtml.blink>
+Content-Transfer-Encoding: quoted-printable
+Content-Location: http://127.0.0.1:64962/frame.html
+
+<!DOCTYPE html><html lang=3D"ja"><head><meta http-equiv=3D"Content-Type" co=
+ntent=3D"text/html; charset=3DUTF-8"><title>FRAME-TITLE</title></head>
+<body><p>FRAME-BODY-TEXT =E3=83=95=E3=83=AC=E3=83=BC=E3=83=A0=E5=86=85=E3=
+=81=AE=E6=9C=AC=E6=96=87</p>
+</body></html>
+------MultipartBoundary--9eCDoUSYYbc3FDGa24ZMLBaxhUlZ5c0oK54LIVnytu----
+Content-Type: text/html
+Content-ID: <frame-DE770635FBF73987812BE35F5C83CD33@mhtml.blink>
+Content-Transfer-Encoding: quoted-printable
+
+<html><head><meta http-equiv=3D"Content-Type" content=3D"text/html; charset=
+=3DUTF-8"></head><body><p>SRCDOC-FRAME-TEXT</p></body></html>
+------MultipartBoundary--9eCDoUSYYbc3FDGa24ZMLBaxhUlZ5c0oK54LIVnytu------

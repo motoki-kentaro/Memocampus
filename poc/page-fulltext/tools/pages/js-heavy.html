@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>JavaScriptで生成されるページ</title>
+<script>
+  window.addEventListener("DOMContentLoaded", () => {
+    const root = document.getElementById("app");
+    const items = ["生成された項目A", "生成された項目B", "Generated item C"];
+    root.innerHTML = "<h1>JS生成の見出し</h1><ul>" + items.map((x) => "<li>" + x + "</li>").join("") + "</ul>";
+    const hidden = document.createElement("div");
+    hidden.style.display = "none";
+    hidden.textContent = "JS-HIDDEN-CANARY";
+    document.body.appendChild(hidden);
+  });
+</script>
+</head>
+<body>
+<div id="app">読み込み中…</div>
+<script>for (let i = 0; i < 3; i++) document.write("<p>document.write段落" + i + "</p>");</script>
+</body>
+</html>

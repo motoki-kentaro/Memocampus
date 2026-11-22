@@ -1,0 +1,64 @@
+From: <Saved by Blink>
+Snapshot-Content-Location: http://127.0.0.1:64962/en-article.html
+Subject: Synthetic Article: Parsing MHTML Safely
+Date: Sat, 21 Nov 2026 06:32:20 GMT
+MIME-Version: 1.0
+Content-Type: multipart/related;
+	type="text/html";
+	boundary="----MultipartBoundary--8xVhzlRJY5Daa2zoZsOEH4wyCt6UbcPjoV419Hp6Df----"
+
+
+------MultipartBoundary--8xVhzlRJY5Daa2zoZsOEH4wyCt6UbcPjoV419Hp6Df----
+Content-Type: text/html
+Content-ID: <frame-43FFB2ADF5D871FE49E507568DBA6E4D@mhtml.blink>
+Content-Transfer-Encoding: quoted-printable
+Content-Location: http://127.0.0.1:64962/en-article.html
+
+<!DOCTYPE html><html lang=3D"en"><head><meta http-equiv=3D"Content-Type" co=
+ntent=3D"text/html; charset=3DUTF-8">
+
+<title>Synthetic Article: Parsing MHTML Safely</title>
+<meta name=3D"description" content=3D"A synthetic English article used only=
+ for testing.">
+<meta property=3D"og:title" content=3D"Parsing MHTML Safely">
+<link rel=3D"stylesheet" href=3D"http://127.0.0.1:64962/style.css">
+</head>
+<body>
+<header><h1>Parsing MHTML Safely</h1></header>
+<main>
+<p>MHTML bundles a page and its resources into one <em>multipart/related</e=
+m> message.</p>
+<p>Words&nbsp;separated by&nbsp;non-breaking spaces, <b>bold</b><i>italic</=
+i> neighbours.</p>
+<h2>Limits</h2>
+<ul><li>Input size</li><li>Decoded size</li><li>Text size</li></ul>
+<blockquote>Quoted text with "quotes" &amp; ampersands &lt;tags&gt;.</block=
+quote>
+<p>A long line to force quoted-printable soft line breaks in the generated =
+archive: Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do ei=
+usmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<img src=3D"http://127.0.0.1:64962/pixel.png" alt=3D"pixel">
+</main>
+<footer>Footer text</footer>
+
+
+</body></html>
+------MultipartBoundary--8xVhzlRJY5Daa2zoZsOEH4wyCt6UbcPjoV419Hp6Df----
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Location: http://127.0.0.1:64962/pixel.png
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6
+kgAAAABJRU5ErkJggg==
+
+------MultipartBoundary--8xVhzlRJY5Daa2zoZsOEH4wyCt6UbcPjoV419Hp6Df----
+Content-Type: text/css
+Content-Transfer-Encoding: quoted-printable
+Content-Location: http://127.0.0.1:64962/style.css
+
+@charset "utf-8";
+
+body { font-family: sans-serif; }
+
+.x::after { content: "CSS-CONTENT-CANARY"; }
+------MultipartBoundary--8xVhzlRJY5Daa2zoZsOEH4wyCt6UbcPjoV419Hp6Df------
