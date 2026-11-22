@@ -1,9 +1,14 @@
-# PageVault 全文検索 PoC — Slice 1（MHTML 本文・メタデータ抽出）
+# PageVault 全文検索 PoC — Slice 1（MHTML 本文・メタデータ抽出）/ Slice 2（SQLite FTS5 検索）
 
 **製品コードではありません。** Memocampus の Page（コード上の正式名称。PageVault）に保存される
 Chrome 製 MHTML から、検索用の本文テキストとメタデータを安全に取り出せるかを検証する独立 CLI です。
 製品 crate・拡張・Vault・Native Host には一切リンクせず、何も変更しません。結果は
-[`reports/slice-1-results.md`](reports/slice-1-results.md)。
+[`reports/slice-1-results.md`](reports/slice-1-results.md)（抽出）と
+[`reports/slice-2-results.md`](reports/slice-2-results.md)（検索索引）。
+
+**Slice 2** は、抽出結果を PoC 専用の SQLite データベース（FTS5 trigram）に索引し、「検索文字列が本文または
+タイトルにリテラルな部分文字列として存在するか」を判定します。既存 Vault には接続しません。仕様の要点は
+[検索（Slice 2）](#検索slice-2) の節、詳細はレポート XIV。
 
 **現行の抽出方式は html5ever の tokenizer による逐次抽出です（DOM ツリーは作りません）。** Slice 1 当初の
 DOM 方式（scraper）は廃止しました。経緯と比較はレポート XIII。全文検索の目的は「検索語がページ本文に
@@ -41,6 +46,13 @@ cargo test --release
 | `tests/integration.rs` | 合成 MHTML と Chrome 製 fixture によるテスト（Slice 1 当初からの 31 件） |
 | `tests/tokenizer.rs` | tokenizer 方式で追加したテスト（22 件） |
 | `tests/end_tags.rs` | 独立レビュー指摘（HIGH-1 / HIGH-2 / MEDIUM-1）と同種の状態管理の回帰テスト（12 件） |
+| `src/index.rs` | Slice 2：SQLite スキーマ、登録・更新・削除・再構築・整合性検査、検索（FTS5 候補＋リテラル照合 / 全件走査） |
+| `src/quality.rs` | Slice 2：品質ゲート（置換文字・UTF-8 の誤読・除去された制御文字の計測と判定） |
+| `src/bin/page_index.rs` | Slice 2 の CLI（`page-index`）。登録・検索・削除・再構築・検査・品質計測・ベンチマーク |
+| `tests/search.rs` | Slice 2 のテスト（32 件＋実 MHTML 受入試験 1 件。受入試験は既定では実行しない） |
+| `tests/open_safety.rs` | Slice 2 独立レビュー指摘 HIGH-1 / MEDIUM-2 の回帰テスト（11 件：拒否するファイル、読み取り専用） |
+| `tests/cli_guard.rs` | Slice 2 独立レビュー指摘 MEDIUM-1 / MEDIUM-2 の回帰テスト（7 件：Git 作業ツリー、CLI の副作用） |
+| `tests/journal.rs` | rollback journal の検証（4 件：異常終了・復旧・原子性。子プロセスを異常終了させる） |
 | `tests/fixtures/chrome/` | **合成ページ**を Chrome に保存させた MHTML（実サイトではない） |
 | `tools/pages/` | 上記の元になった合成 HTML（`sjis-news.html` は CP932 バイト列。元テキストは `.utf8.html`） |
 | `tools/chrome-capture.mjs` | 合成ページを 127.0.0.1 で配信し、headless Chrome に MHTML を作らせるスクリプト |
@@ -54,6 +66,11 @@ cargo test --release
 | encoding_rs | 0.8.44 | (Apache-2.0 OR MIT) AND BSD-3-Clause | 文字コード（`Decoder` で逐次変換） | 採用 |
 | html5ever | 0.40.1 | MIT OR Apache-2.0 | `html5ever::tokenizer` のみ（`Tokenizer` / `TokenSink` / `BufferQueue`）。tree builder は使わない | 採用 |
 | serde / serde_json | 1.x | MIT OR Apache-2.0 | JSON 出力 | 採用 |
+| rusqlite（`bundled`） | =0.32.1 | MIT | Slice 2 の SQLite（libsqlite3-sys 0.30.1 同梱の SQLite 3.46.0、`SQLITE_ENABLE_FTS5` 付きでビルド）。製品 crate と同じ版 | 採用（Slice 2） |
+
+Slice 2 で増えた crate（rusqlite / libsqlite3-sys / hashlink / hashbrown / ahash / fallible-iterator /
+fallible-streaming-iterator / bitflags / smallvec、ビルド時の cc / pkg-config / vcpkg / shlex など）も
+MIT / Apache-2.0 系で、MPL-2.0 は 0 個。SQLite 本体はパブリックドメイン。`Cargo.lock` は 62 パッケージ。
 
 scraper・ego-tree と、scraper 経由だった MPL-2.0 の 4 crate（selectors / cssparser / cssparser-macros /
 dtoa-short）は削除した。実行時の推移的依存は 36 crate で、すべて MIT / Apache-2.0 / Unlicense 系
@@ -152,6 +169,46 @@ html5ever の tokenizer は WHATWG HTML の字句解析器（文字参照の解�
 **保証できないもの**（詳細はレポート XIII）：入力全体はメモリに読み込む（最大 128 MiB）。転送復号後の HTML も
 1 個保持する（最大 16 MiB）。tokenizer は 1 個のコメント・属性値・タグをまとめて保持するため、巨大なコメントや属性値は
 その大きさ分のバッファになる（上限は HTML サイズ）。プロセス全体のメモリ上限・CPU 時間上限を強制する仕組みは無い。
+
+## 検索（Slice 2）
+
+```powershell
+# DB は Git 作業ツリーの外に置く（中に置こうとすると拒否。抽出本文を含むため MHTML 原本と同等に扱う）
+# DB を新規作成するのは add だけ（--db に何も無いとき）。search / stats は読み取り専用で開く
+.\target\release\page-index.exe add    --db C:\path\outside\index.sqlite3 --key page-1 --input C:\path\page.mhtml
+.\target\release\page-index.exe search --db C:\path\outside\index.sqlite3 --query 𩸽          # HIT したページ ID とキーだけ
+.\target\release\page-index.exe search --db ... --query 𩸽 --show-titles                       # タイトルと URL も表示
+.\target\release\page-index.exe delete|rebuild|check|stats --db ... [--key page-1]
+.\target\release\page-index.exe quality --input C:\path\page.mhtml   # 品質ゲートの数値だけ（本文は出さない）
+# 実 MHTML 受入試験（既定では実行しない）
+$env:PAGE_FULLTEXT_REAL_HOKKE = 'C:\path\hokke.mhtml'; cargo test --release --test search -- --ignored --nocapture
+```
+
+- **一致規則**：索引したタイトルまたは本文に、検索文字列が**リテラルな部分文字列**として含まれれば HIT。
+  Unicode スカラー値の列としての一致で、大文字小文字・NFC/NFD・全角半角は区別する（変換しない）。
+  ワイルドカードや検索構文はない。空文字列は `empty_query` で拒否、4,096 バイト超は `query_too_large`。
+- **最終判定は常に Rust の `str::contains`**（保存したテキストに対して）。FTS5 は候補の絞り込みにだけ使う。
+- **1〜2 文字**：全ページを走査。**3 文字以上**：FTS5 trigram（`case_sensitive 1`）の `GLOB`（`*` `?` `[` は
+  文字クラスでエスケープ）で候補を出し、候補をリテラル照合。索引の整合性が未確認（検査で不一致）の場合と、
+  検索文字列に制御文字（改行を含む）がある場合は全件走査に切り替える。
+- **利用者の入力は常にバインド引数**。SQL 文にも FTS5 MATCH 構文にも埋め込まない。
+- **スキーマ**：`pages`（本文・タイトル・状態・品質 JSON）、外部コンテンツ型 FTS5 `pages_fts`（トリガーで同期）、
+  `attempts`（登録試行の記録。失敗時も残る）、`meta`。登録・更新・削除・再構築はそれぞれ 1 トランザクション。
+- **品質ゲート**：抽出失敗では既存の索引を変えない。文字化け（置換文字・UTF-8 の誤読・除去された制御文字の
+  割合）と判定した本文は索引せず、既存ページがあればそれを残す。しきい値は暫定（レポート XIV-6）。
+  索引済みの本文があるページは、再抽出の本文が空・文字化け・失敗のいずれでも上書きしない（`kept_previous`、
+  試行は記録する）。新規ページで本文が空ならタイトルだけ登録する（XIV-13）。
+- **開いてよいファイル**：このPoCが作った DB だけ。ヘッダーの `application_id`、スキーマ版、スキーマ全体
+  （表・列・トリガー・FTS5 設定）、`meta` 行を、まず SQLite を使わずにヘッダーを読み、次に `immutable=1` の
+  読み取り専用接続で確かめ、通ってから本来の接続を開いて再確認する。空ファイル・非 SQLite・他アプリの DB は
+  一切変更せずに拒否する。FTS5 は `detail=none` が既定（PO 決定）。
+- **ジャーナル**：常に SQLite 標準の rollback journal（`journal_mode=DELETE`、`synchronous=FULL`）。ジャーナル
+  モードは設定も変更もせず、WAL 形式の DB は拒否する（PO 決定、XIV-14）。異常終了で残った `-journal` は、
+  次に書き込み用に開いたとき（`add`・`delete`・`rebuild`・`check`）に SQLite が巻き戻す。それまでは
+  `search`・`stats` は `needs_recovery` で拒否する（読み取り専用接続では巻き戻せないため）。
+- **Git 作業ツリーの判定**：DB パス（存在しない部分は存在する親）の実パスを解決し（シンボリックリンク・
+  ジャンクション）、そのパス自身を含むすべての祖先に `.git` が無いことを確かめる。判定できなければ拒否。
+  `bench --dir` も同じ（上書き指定なし、既存ファイルは削除せず拒否）。
 
 ## 機密情報の扱い
 

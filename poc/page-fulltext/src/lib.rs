@@ -11,9 +11,11 @@
 
 pub mod charset;
 pub mod html;
+pub mod index;
 pub mod limits;
 pub mod metadata;
 pub mod mime;
+pub mod quality;
 
 use limits::{ErrorCode, Limits};
 use serde::Serialize;

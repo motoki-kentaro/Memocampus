@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2021"
 license = "MIT"
 publish = false
-description = "PoC (Issue: PageVault full-text search, Slice 1): text and metadata extraction from Chrome MHTML. Not product code."
+description = "PoC (Issue: PageVault full-text search): Slice 1 text and metadata extraction from Chrome MHTML, Slice 2 SQLite FTS5 search index. Not product code."
 
 # A standalone crate: not part of any workspace, not linked into the product.
 [workspace]
@@ -17,6 +17,10 @@ path = "src/lib.rs"
 name = "page-fulltext"
 path = "src/main.rs"
 
+[[bin]]
+name = "page-index"
+path = "src/bin/page_index.rs"
+
 [dependencies]
 # MIME structure (lenient parser that reports problems; strict checks are ours, src/mime.rs).
 # Default features only: its own charset conversion is not used (encoding_rs below decides).
@@ -27,3 +31,7 @@ encoding_rs = "0.8"
 html5ever = "0.40"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Slice 2: SQLite with FTS5 (trigram tokenizer). Same rusqlite version as the product crates; the
+# plain "bundled" SQLite here (3.46.0, compiled with SQLITE_ENABLE_FTS5). The product uses the
+# SQLCipher bundle of the same libsqlite3-sys, also compiled with SQLITE_ENABLE_FTS5 (not tested).
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
