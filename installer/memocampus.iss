@@ -95,8 +95,19 @@ UninstallDisplayIcon={app}\memocampus-tray.exe
 CloseApplications=no
 RestartApplications=no
 
+; Languages (Issue #75): English and Japanese, through Inno Setup's own mechanism only. The default is the
+; Windows UI language (uilanguage); a UI language that matches neither falls back to the FIRST entry, so
+; English stays first. The Select Language dialog always lets the user choose (it is skipped only by
+; /LANG= or a silent run). An update preselects the language of the installation it updates
+; (UsePreviousLanguage), and the uninstaller keeps the language that installation used. The language
+; changes the texts only: no code branches on it. All texts are in installer\i18n\*.isl.
+ShowLanguageDialog=yes
+LanguageDetectionMethod=uilanguage
+UsePreviousLanguage=yes
+
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl,i18n\en.isl"
+Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl,i18n\ja.isl"
 
 [Files]
 ; Exactly these three. A missing source file stops the compile; nothing is generated.
@@ -108,11 +119,9 @@ Source: "stage\memocampus-tray.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; Start menu > Memocampus > Memocampus. No parameters, no working directory, no environment.
 Name: "{group}\Memocampus"; Filename: "{app}\memocampus-tray.exe"
 
-[Messages]
-; What "finished" means here: the Windows side only. The Chrome extension, choosing a vault and starting
-; to remember are separate steps the user takes in Chrome; Setup never reports them as done.
-FinishedLabel=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is added by you in Chrome, and choosing a vault and starting to remember happen in the extension, only when you approve them there.
-FinishedLabelNoIcons=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is added by you in Chrome, and choosing a vault and starting to remember happen in the extension, only when you approve them there.
+; The finished page (FinishedLabel, FinishedLabelNoIcons) is in installer\i18n\*.isl: it says what Setup did
+; on Windows only. The Chrome extension, choosing a vault and starting to remember are separate steps the
+; user takes in Chrome; Setup never reports them as done.
 
 #ifndef InstallerTestMode
 [Run]
@@ -123,12 +132,12 @@ FinishedLabelNoIcons=Setup has installed the [name] programs and its connection 
 ; (including start at logon, changeable in its menu); the vault, the policy and the MCP publication
 ; are not touched. A second start is refused by the tray itself (single instance), so ticking it with
 ; a tray already running does nothing.
-Filename: "{app}\memocampus-tray.exe"; Description: "Start Memocampus now (its first start also turns on starting at logon; you can change that in the tray menu)"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\memocampus-tray.exe"; Description: "{cm:McLaunchTray}"; Flags: nowait postinstall skipifsilent unchecked
 #ifdef StoreListing
 ; Opens the Chrome Web Store page in the default browser, only when ticked. Nothing is installed in
 ; Chrome by Setup. The address is built from the same extension id the manifest trusts; a build
 ; without /DStoreListing (every test build) has no such entry.
-Filename: "https://chromewebstore.google.com/detail/{#ChromeExtensionId}"; Description: "Open the Memocampus page in the Chrome Web Store (you add the extension yourself, in Chrome)"; Flags: shellexec postinstall skipifsilent unchecked
+Filename: "https://chromewebstore.google.com/detail/{#ChromeExtensionId}"; Description: "{cm:McOpenStorePage}"; Flags: shellexec postinstall skipifsilent unchecked
 #endif
 #endif
 
@@ -169,15 +178,12 @@ begin
     ', ended ' + IntToStr(R.Closed) + ', still running ' + IntToStr(R.TimedOut) + ', not asked ' + IntToStr(R.Unclosable));
   Log(R.Report);
   if (R.TimedOut > 0) or (R.Unclosable > 0) then begin
-    Result := 'Memocampus is still running and did not quit in time. Nothing was changed.'#13#10#13#10 +
-      'Quit Memocampus from its tray icon (right-click, Quit), wait a moment, and run this again.';
+    Result := MsgText('McTrayStillRunning', []);
     Exit;
   end;
   Locked := LcLockedFiles(ExpandConstant('{app}'), 20);
   if Locked <> '' then
-    Result := 'These Memocampus files are still in use by another program:'#13#10#13#10 + Locked + #13#10 +
-      'Setup does not close other programs. Close AI clients that use Memocampus (for example an MCP ' +
-      'client) and Chrome windows that use the Memocampus extension, then run this again. Nothing was changed.';
+    Result := MsgText('McFilesInUse', [Locked]);
 end;
 
 // Before anything is installed: a registration that is not ours, a tray that will not quit and files
@@ -188,7 +194,7 @@ var
 begin
   Result := '';
   if not NmhIsValidExtensionId(BuiltInExtensionId) then
-    Result := 'This installer was built with an invalid Chrome extension id.'
+    Result := MsgText('McInvalidExtensionId', [])
   else if not NmhCheckRegistration(HostKeyPath, ManifestFile, Why) then
     Result := Why
   else
@@ -212,8 +218,8 @@ begin
     NmhExeMayBeMissing := False;
     if not Registered then begin
       if DirCreated then RemoveDir(App);
-      SuppressibleMsgBox('Memocampus could not register its connection to Chrome (native messaging host ' + HostName +
-        '). Setup stops and nothing was installed unless this message says ROLLBACK_FAILED.'#13#10#13#10 + Err, mbCriticalError, MB_OK, IDOK);
+      // Err keeps ROLLBACK_FAILED: ... verbatim when the restore failed too (nmh.pas).
+      SuppressibleMsgBox(MsgText('McRegisterFailed', [HostName, Err]), mbCriticalError, MB_OK, IDOK);
       Abort;
     end;
   end else if CurStep = ssPostInstall then
@@ -230,8 +236,7 @@ begin
     if NmhRollback(HostKeyPath, ManifestFile, PreSnap, Err) then
       Log('setup incomplete: the native messaging registration was restored')
     else
-      SuppressibleMsgBox('Setup did not finish and could not fully restore the Chrome registration: ' + Err + ' ' +
-        'Running Setup again repairs it.', mbError, MB_OK, IDOK);
+      SuppressibleMsgBox(MsgText('McRollbackIncomplete', [Err]), mbError, MB_OK, IDOK);
     if DirCreated then RemoveDir(ExpandConstant('{app}'));
   end;
 end;
@@ -256,13 +261,12 @@ begin
     if not LcUninstallCleanup(HostKeyPath, ManifestFile, HostName, ExpandConstant('{app}\memocampus-native-host.exe'),
         BuiltInExtensionId, RunKeyPath, TrayExe, Report) then begin
       Log(Report);
-      SuppressibleMsgBox('Memocampus could not remove one of its registrations, so the uninstall stopped before ' +
-        'removing any file. Run the uninstall again.'#13#10#13#10 + Report, mbError, MB_OK, IDOK);
+      SuppressibleMsgBox(MsgText('McUninstallStopped', [Report]), mbError, MB_OK, IDOK);
       Abort;
     end;
     Log(Report);
+    // Report is the English diagnostic text in every language, so this test does not depend on the language.
     if (Pos('KEPT', Report) > 0) or (Pos('FAILED', Report) > 0) then
-      SuppressibleMsgBox('Memocampus was uninstalled. Some entries were kept because they are not Memocampus''s own:'#13#10#13#10 +
-        Report, mbInformation, MB_OK, IDOK);
+      SuppressibleMsgBox(MsgText('McUninstallKept', [Report]), mbInformation, MB_OK, IDOK);
   end;
 end;

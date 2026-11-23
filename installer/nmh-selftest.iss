@@ -20,6 +20,12 @@ DisableReadyPage=yes
 DisableFinishedPage=yes
 OutputBaseFilename=nmh-selftest
 Compression=none
+; The installer's own languages and texts (Issue #75). The runner picks one with /LANG=; never a dialog.
+ShowLanguageDialog=no
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl,i18n\en.isl"
+Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl,i18n\ja.isl"
 
 [Code]
 #include "nmh.pas"
@@ -161,6 +167,7 @@ begin
   RegWriteStringValue(HKCU, KeyOf(Host), '', 'C:\somewhere\else.json');
   Check('conflict: refused by the check', not NmhCheckRegistration(KeyOf(Host), M, Err));
   Check('conflict: reason names the other path', Pos('C:\somewhere\else.json', Err) > 0);
+  Check('conflict: reason is the text of the active language', Err = MsgText('McNmhForeignRegistration', ['C:\somewhere\else.json']));
   Check('conflict: register refuses', not NmhRegister(KeyOf(Host), M, Host, Dir + '\memocampus-native-host.exe', Id, Err));
   Check('conflict: value unchanged', ValueOf(KeyOf(Host)) = 'C:\somewhere\else.json');
   Check('conflict: no manifest written', not FileExists(M));
@@ -170,6 +177,7 @@ begin
   RegWriteStringValue(HKCU, KeyOf(Host), 'Other', 'x');
   Before := ValueOf(KeyOf(Host));
   Check('empty key: refused', not NmhCheckRegistration(KeyOf(Host), M, Err));
+  Check('empty key: reason is the text of the active language, naming the key', (Err = MsgText('McNmhUnknownKey', [KeyOf(Host)])) and (Pos(KeyOf(Host), Err) > 0));
   Check('empty key: register refuses', not NmhRegister(KeyOf(Host), M, Host, Dir + '\memocampus-native-host.exe', Id, Err));
   Check('empty key: untouched', (ValueOf(KeyOf(Host)) = Before) and RegValueExists(HKCU, KeyOf(Host), 'Other'));
   RegDeleteValue(HKCU, KeyOf(Host), 'Other');
@@ -273,6 +281,48 @@ begin
   Say('manifest ' + M + '|' + Exe + '|' + Id2);
 end;
 
+// Issue #75: every custom message named by the runner (/Keys=, taken from i18n\en.isl) resolves in the
+// active language at run time, with its arguments filled in and no %-sequence left over. The rendered texts
+// are logged ("msg <key>=...", line breaks as \n) so that the runner can compare the two languages.
+function Flat(const S: String): String;
+begin
+  Result := S;
+  StringChangeEx(Result, #13#10, '\n', True);
+end;
+
+procedure TestMessages;
+var
+  Keys, Key, Text: String;
+  P, I: Integer;
+  Clean: Boolean;
+begin
+  Say('language ' + ActiveLanguage);
+  Keys := ExpandConstant('{param:Keys}');
+  Check('messages: keys given', Keys <> '');
+  while Keys <> '' do begin
+    P := Pos(',', Keys);
+    if P = 0 then P := Length(Keys) + 1;
+    Key := Copy(Keys, 1, P - 1);
+    Keys := Copy(Keys, P + 1, Length(Keys));
+    Text := '';
+    try
+      Text := MsgText(Key, ['<1>', '<2>', '<3>', '<4>', '<5>', '<6>', '<7>', '<8>', '<9>']);
+    except
+      Say('EXCEPTION message ' + Key + ': ' + GetExceptionMessage);
+    end;
+    Clean := Text <> '';
+    for I := 1 to 9 do
+      if Pos('%' + IntToStr(I), Text) > 0 then Clean := False;
+    if (Pos('%n', Text) > 0) or (Pos('%%', Text) > 0) then Clean := False;
+    Check('message ' + Key + ': resolves, arguments filled', Clean);
+    Say('msg ' + Key + '=' + Flat(Text));
+  end;
+  Say('msg FinishedLabel=' + Flat(SetupMessage(msgFinishedLabel)));
+  // The identifier the user is told to look for is the same in every language, and Err keeps it.
+  Check('message McRegisterFailed keeps ROLLBACK_FAILED and the error', (Pos('ROLLBACK_FAILED', MsgText('McRegisterFailed', ['h', 'e ROLLBACK_FAILED: r'])) > 0) and
+    (Pos('e ROLLBACK_FAILED: r', MsgText('McRegisterFailed', ['h', 'e ROLLBACK_FAILED: r'])) > 0));
+end;
+
 function InitializeSetup: Boolean;
 var
   LogFile: String;
@@ -292,6 +342,7 @@ begin
   SaveStringToFile(Dir + '\memocampus-native-host.exe', 'x', False);
   RegWriteStringValue(HKCU, KeyOf('other.host'), '', 'C:\other\host.json');
   try
+    TestMessages;
     TestIds;
     TestPathsAndJson;
     TestFresh;

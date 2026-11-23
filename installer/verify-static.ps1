@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
-  Static checks of the installer sources (memocampus.iss, nmh.pas) and of the stage folder, and the
-  extension's host-name constants they must agree with. No compiler, no install, no registry access.
+  Static checks of the installer sources (memocampus.iss, nmh.pas, lifecycle.pas, the language files
+  i18n\en.isl and i18n\ja.isl) and of the stage folder, and the extension's host-name constants they must
+  agree with. No compiler, no install, no registry access.
 .DESCRIPTION
   -Negative  applies deliberate wrong changes to a scratch copy of the sources and requires that
              each one is reported as a failure (the checks must not pass an unsafe installer).
@@ -35,6 +36,41 @@ function Test-CleanupOrder([string]$lcText) {
   return (($a -ge 0) -and ($a -lt $b) -and ($b -lt $c) -and ($c -lt $d))
 }
 
+# An installer language file (i18n\*.isl): its sections and key=value entries, in file order. Comment
+# (";") and blank lines are skipped; any other line that is not a section or an entry is listed as bad.
+function Read-Isl([string]$path) {
+  $r = @{ exists = (Test-Path -LiteralPath $path -PathType Leaf); bom = $false; utf8 = $false; sections = @(); entries = @(); bad = @() }
+  if (-not $r.exists) { return $r }
+  $bytes = [IO.File]::ReadAllBytes($path)
+  $r.bom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+  $text = ''
+  try { $text = (New-Object Text.UTF8Encoding($false, $true)).GetString($bytes); $r.utf8 = $true } catch { $r.utf8 = $false }
+  $section = ''
+  foreach ($line in ($text -split "`r?`n")) {
+    if ($line -match '^\s*(;|$)') { continue }
+    if ($line -match '^\[(\w+)\]\s*$') { $section = $Matches[1]; $r.sections += $section; continue }
+    if ($line -match '^([A-Za-z][A-Za-z0-9_]*)=(.*)$') { $r.entries += [pscustomobject]@{ section = $section; key = $Matches[1]; value = $Matches[2] }; continue }
+    $r.bad += $line
+  }
+  return $r
+}
+
+# The %1..%9 arguments a text takes, as a sorted, de-duplicated list ("%%" is a literal percent sign).
+function Get-MessageArgs([string]$text) {
+  (@([regex]::Matches(($text -replace '%%', ''), '%([1-9])') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)) -join ','
+}
+
+# The preprocessor #if nesting depth at the first line that matches $pattern (-1 when no line matches).
+function Get-IfDepth([string]$text, [string]$pattern) {
+  $depth = 0
+  foreach ($line in ($text -split "`r?`n")) {
+    if ($line -match $pattern) { return $depth }
+    if ($line -match '^\s*#\s*if(n?def)?\b') { $depth++ }
+    elseif ($line -match '^\s*#\s*endif\b') { $depth-- }
+  }
+  return -1
+}
+
 # Returns the names of the failed checks (and prints PASS/FAIL lines unless -Quiet).
 function Invoke-Checks([string]$dir, [bool]$quiet) {
   $failed = New-Object System.Collections.Generic.List[string]
@@ -47,10 +83,22 @@ function Invoke-Checks([string]$dir, [bool]$quiet) {
   $pas = Read-Code (Join-Path $dir 'nmh.pas')
   $lc = Read-Code (Join-Path $dir 'lifecycle.pas')
   $all = $iss + "`n" + $pas + "`n" + $lc
+  $en = Read-Isl (Join-Path $dir 'i18n\en.isl')
+  $ja = Read-Isl (Join-Path $dir 'i18n\ja.isl')
+  $enText = @{}; foreach ($e in $en.entries) { $enText[$e.key] = $e.value }
+  $jaText = @{}; foreach ($e in $ja.entries) { $jaText[$e.key] = $e.value }
+  # Japanese phrases the texts must keep (escaped, so that this script stays ASCII):
+  $jaDone = '\u30bb\u30c3\u30c8\u30a2\u30c3\u30d7\u304c\u884c\u3046\u306e\u306f\u3053\u3053\u307e\u3067\u3067\u3059'   # setup does only this much
+  $jaYouAdd = '\u3054\u81ea\u8eab\u3067 Chrome \u306b\u8ffd\u52a0'                                                       # you add it to Chrome yourself
+  $jaOnlyApproved = '\u627f\u8a8d\u3057\u305f\u3068\u304d\u306b\u3060\u3051'                                              # only when you approve
+  $jaNotReplace = '\u7f6e\u304d\u63db\u3048\u307e\u305b\u3093'                                                            # will not replace
+  $jaScript = '[\u3040-\u30ff\u4e00-\u9fff]'
+  # The one Japanese an English text may hold: the tray's Japanese-only menu item, as shown, with its gloss (F-75-01).
+  $trayQuit = '"\u7d42\u4e86" \(Quit\)'
 
-  # --- Slice 3B-1 contract (unchanged) -------------------------------------------------------------
+  # --- Slice 3B-1 contract (the texts moved to i18n\*.isl with Issue #75) ---------------------------------
   $sections = @([regex]::Matches($iss, '(?m)^\[(\w+)\]') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
-  Check 'sections are only Setup, Languages, Files, Icons, Messages, Run, Code' (($sections -join ',') -eq 'Code,Files,Icons,Languages,Messages,Run,Setup')
+  Check 'sections are only Setup, Languages, Files, Icons, Run, Code (the texts are in i18n\*.isl)' (($sections -join ',') -eq 'Code,Files,Icons,Languages,Run,Setup')
   Check 'no [Registry], [UninstallRun], [InstallDelete], [Dirs] section' ($iss -notmatch '(?im)^\[(Registry|UninstallRun|InstallDelete|Dirs)\]')
   Check 'product AppId is the fixed GUID' ($iss -match '(?m)^\s*#define SetupAppId "\{\{63D78D26-D4BF-49ED-B29D-FBFFF1EAF56A\}"')
   Check 'AppId comes from SetupAppId' ($iss -match '(?m)^AppId=\{#SetupAppId\}\s*$')
@@ -110,7 +158,7 @@ function Invoke-Checks([string]$dir, [bool]$quiet) {
 
   # --- Ownership and failure handling ----------------------------------------------------------------
   Check 'an existing registration is checked before install and again before writing' (($iss -match 'NmhCheckRegistration\(HostKeyPath, ManifestFile, Why\)') -and ($pas -match 'if not NmhCheckRegistration\(KeyPath, ManifestPath, Why\) then begin'))
-  Check 'a foreign registration is refused, not overwritten' (($pas -match 'NmhSamePath\(Current, ManifestPath\)') -and ($pas -match 'will not replace it'))
+  Check 'a foreign registration is refused, not overwritten' (($pas -match 'NmhSamePath\(Current, ManifestPath\)') -and ($pas -match "Why := MsgText\('McNmhForeignRegistration', \[Current\]\)") -and ($enText['McNmhForeignRegistration'] -match 'will not replace it') -and ($jaText['McNmhForeignRegistration'] -match $jaNotReplace))
   Check 'rollback re-checks ownership before touching the registry' ($pas -match 'if Has and not NmhSamePath\(Current, ManifestPath\) and not \(Snap\.HadValue and NmhSamePath\(Current, Snap\.Value\)\) then')
   Check 'a failed rollback is reported' ($pas -match "' ROLLBACK_FAILED: ' \+ RollbackErr")
   Check 'registry deletes exist only in the rollback and the ownership-checked removal' ((([regex]::Match($pas, '(?s)function NmhRollback.*?\nend;')).Value -match 'RegDeleteValue') -and (([regex]::Match($pas, '(?s)function NmhUnregister.*?\nend;')).Value -match 'RegDeleteValue') -and (@([regex]::Matches((($pas -replace '(?s)function NmhRollback.*?\nend;', '') -replace '(?s)function NmhUnregister.*?\nend;', ''), 'RegDelete')).Count -eq 0))
@@ -143,10 +191,39 @@ function Invoke-Checks([string]$dir, [bool]$quiet) {
   Check 'the whole [Run] section is absent from an installer test build' ($iss -match '(?s)#ifndef InstallerTestMode\s+\[Run\].*?#endif\s+#endif\s+\[Code\]')
   Check 'the Web Store link exists only in a build with /DStoreListing' ($iss -match '(?s)#ifdef StoreListing\s+(;[^\n]*\n)*Filename: "https://chromewebstore\.google\.com/detail/\{#ChromeExtensionId\}"[^\n]*\n#endif\s+#endif')
   Check 'StoreListing together with InstallerTestMode stops the compile' ($issText -match '(?s)#ifdef StoreListing\s+#ifdef InstallerTestMode\s+#error')
-  Check 'the finished page says only what Setup did, and that the extension, vault and remembering are separate' (($iss -match '(?m)^FinishedLabel=.*is added by you in Chrome.*only when you approve') -and ($iss -match '(?m)^FinishedLabelNoIcons=.*is added by you in Chrome.*only when you approve'))
+  Check 'the finished page says only what Setup did, and that the extension, vault and remembering are separate (English)' (($enText['FinishedLabel'] -match 'is added by you in Chrome.*only when you approve') -and ($enText['FinishedLabelNoIcons'] -match 'is added by you in Chrome.*only when you approve'))
+  Check 'the finished page says only what Setup did, and that the extension, vault and remembering are separate (Japanese)' (($jaText['FinishedLabel'] -match ($jaDone + '.*' + $jaYouAdd + '.*' + $jaOnlyApproved)) -and ($jaText['FinishedLabelNoIcons'] -match ($jaDone + '.*' + $jaYouAdd + '.*' + $jaOnlyApproved)))
+  Check 'the last page''s choices say the extension is added by the user (both languages)' (($enText['McOpenStorePage'] -match 'you add the extension yourself') -and ($jaText['McOpenStorePage'] -match $jaYouAdd))
   Check 'no code path starts programs, shells out or creates processes' (($pas -notmatch '(?i)\bExec\(|ShellExec') -and ($lc -notmatch '(?i)\bExec\(|ShellExec') -and ($all -notmatch '(?i)CreateProcess|WinExec|ShellExecute'))
   Check 'the Run value name is the tray''s own: MemocampusTray' ($lc -match "LcRunValueName = 'MemocampusTray';")
   Check 'test hooks are not used by the installer' ($iss -notmatch 'NmhFailAt|NmhFailRollback|LcFailAt')
+
+  # --- Issue #75: languages ----------------------------------------------------------------------------------
+  $langs = @([regex]::Matches($iss, '(?m)^Name:\s*"(\w+)";\s*MessagesFile:\s*"([^"]+)"\s*$') | ForEach-Object { $_.Groups[1].Value + '=' + $_.Groups[2].Value })
+  Check 'languages: English first (the fallback for any other UI language), then Japanese; official base files, then i18n\*.isl' (($langs -join '|') -ceq 'english=compiler:Default.isl,i18n\en.isl|japanese=compiler:Languages\Japanese.isl,i18n\ja.isl')
+  Check 'language: the Windows UI language by default, the dialog always offered, an update keeps the installed language' (($iss -match '(?m)^ShowLanguageDialog=yes\s*$') -and ($iss -match '(?m)^LanguageDetectionMethod=uilanguage\s*$') -and ($iss -match '(?m)^UsePreviousLanguage=yes\s*$') -and (@([regex]::Matches($iss, '(?m)^(ShowLanguageDialog|LanguageDetectionMethod|UsePreviousLanguage)=')).Count -eq 3))
+  Check 'the test and the product build have the same languages (nothing of it inside #if)' (((Get-IfDepth $issText '^\[Languages\]') -eq 0) -and ((Get-IfDepth $issText '^ShowLanguageDialog=') -eq 0) -and ((Get-IfDepth $issText '^LanguageDetectionMethod=') -eq 0) -and ((Get-IfDepth $issText '^UsePreviousLanguage=') -eq 0) -and ([regex]::Match($issText, '(?s)\[Languages\](.*?)\n\[').Groups[1].Value -notmatch '(?m)^\s*#'))
+  Check 'no code branches on the language (the language changes texts only)' ($all -notmatch '(?i)ActiveLanguage|\{language\}|GetUILanguage|GetUserDefaultUILanguage|GetUserDefaultLangID|LanguageID')
+  Check 'language files: present, valid UTF-8 without a BOM, no preprocessor or unknown lines' ($en.exists -and $ja.exists -and $en.utf8 -and $ja.utf8 -and -not $en.bom -and -not $ja.bom -and ($en.bad.Count -eq 0) -and ($ja.bad.Count -eq 0))
+  Check 'language files hold only [Messages] and [CustomMessages], once each' ((($en.sections -join ',') -ceq 'Messages,CustomMessages') -and (($ja.sections -join ',') -ceq 'Messages,CustomMessages'))
+  $enKeys = @($en.entries | ForEach-Object { $_.section + '.' + $_.key })
+  $jaKeys = @($ja.entries | ForEach-Object { $_.section + '.' + $_.key })
+  Check 'no text is defined twice and none is empty' (($enKeys.Count -gt 0) -and (@($enKeys | Sort-Object -Unique).Count -eq $enKeys.Count) -and (@($jaKeys | Sort-Object -Unique).Count -eq $jaKeys.Count) -and (@($en.entries + $ja.entries | Where-Object { $_.value.Trim() -eq '' }).Count -eq 0))
+  Check 'English and Japanese define exactly the same texts' ((($enKeys | Sort-Object) -join '|') -ceq (($jaKeys | Sort-Object) -join '|'))
+  Check 'every text takes the same arguments (%1..%9) in both languages' (@($en.entries | Where-Object { (Get-MessageArgs $_.value) -cne (Get-MessageArgs $jaText[$_.key]) }).Count -eq 0)
+  Check 'every Japanese text is Japanese, every English text is not (except the tray''s Japanese-only menu item, named as shown with its gloss (Quit))' ((@($ja.entries | Where-Object { $_.value -notmatch $jaScript }).Count -eq 0) -and (@($en.entries | Where-Object { ($_.value -replace $trayQuit, '') -match $jaScript }).Count -eq 0))
+  Check 'identifiers are not translated (ROLLBACK_FAILED and any other upper-case identifier of an English text is in the Japanese one)' (@($en.entries | ForEach-Object { $k = $_.key; [regex]::Matches($_.value, '\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b') | Where-Object { $jaText[$k] -cnotmatch [regex]::Escape($_.Value) } }).Count -eq 0)
+  Check 'the [Messages] the installer overrides are only the finished page' ((@($en.entries | Where-Object { $_.section -eq 'Messages' } | ForEach-Object key | Sort-Object) -join ',') -ceq 'FinishedLabel,FinishedLabelNoIcons')
+  $custom = @($en.entries | Where-Object { $_.section -eq 'CustomMessages' } | ForEach-Object key)
+  $named = @((@([regex]::Matches($all, "MsgText\('(\w+)'")) + @([regex]::Matches($iss, '\{cm:(\w+)'))) | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+  Check 'every text the code names is defined, in both languages' ((@($named | Where-Object { -not $enText.ContainsKey($_) -or -not $jaText.ContainsKey($_) }).Count -eq 0) -and ($named.Count -gt 0))
+  Check 'every custom text is used (no stale text)' (@($custom | Where-Object { $named -notcontains $_ }).Count -eq 0)
+  Check 'custom texts are read only through MsgText (with its arguments) or {cm:...}' ((@([regex]::Matches($all, '\bCustomMessage\(')).Count -eq 1) -and ($pas -match "Result := FmtMessage\(CustomMessage\(Name\), Args\);") -and ($all -notmatch '\bExpandConstant\(''\{cm:'))
+  Check 'no literal text is shown to the user: every message box (a MsgText or a variable holding one), refusal and [Run] description comes from the language files' ((@([regex]::Matches($iss, '\b(Suppressible)?MsgBox\((?!MsgText\(|\w+,)')).Count -eq 0) -and ($iss -notmatch "(?m)^\s*Result := '[^']") -and ($pas -notmatch "Why := '[^']") -and (@($runLines | Where-Object { $_ -notmatch 'Description:\s*"\{cm:\w+\}"' }).Count -eq 0))
+  Check 'the Run descriptions are the two texts for the tray and the Web Store page' (($trayLine.Count -eq 1) -and ($trayLine[0] -match 'Description:\s*"\{cm:McLaunchTray\}"') -and ($storeLine.Count -eq 1) -and ($storeLine[0] -match 'Description:\s*"\{cm:McOpenStorePage\}"'))
+  Check 'the install failure keeps ROLLBACK_FAILED in what it shows (the error, untranslated, and the instruction)' (($iss -match "MsgText\('McRegisterFailed', \[HostName, Err\]\)") -and ($enText['McRegisterFailed'] -cmatch 'ROLLBACK_FAILED') -and ($jaText['McRegisterFailed'] -cmatch 'ROLLBACK_FAILED') -and ((Get-MessageArgs $enText['McRegisterFailed']) -eq '1,2'))
+  Check 'the uninstall decision reads the untranslated report (KEPT / FAILED), not a translated text' ($iss -match "if \(Pos\('KEPT', Report\) > 0\) or \(Pos\('FAILED', Report\) > 0\) then\s+SuppressibleMsgBox\(MsgText\('McUninstallKept', \[Report\]\)")
+  Check 'no extension id literal in the language files' ((@($en.entries + $ja.entries | Where-Object { $_.value -match '[a-p]{32}' }).Count -eq 0))
 
   # --- Data the installer must never touch -----------------------------------------------------------------
   Check 'nothing refers to vault, policy, settings, token or the data folder' ($all -notmatch '(?i)config\.json|policy\.json|tray-settings|mcp-http-token|\.sqlite|\{localappdata\}\\Memocampus\\|\\Memocampus\\logs|DeleteDir|DelTree')
@@ -235,8 +312,8 @@ if ($Negative) {
     @{ n = 'cleanup order swapped (manifest before registration)'; f = 'lifecycle.pas'; a = 'Code := NmhUnregister(NmhKeyPath, ManifestPath, Line);'; b = "Code := NmhRemoveOwnManifest(ManifestPath, HostName, ExePath, ExtensionId, Line);`n  Code := NmhUnregister(NmhKeyPath, ManifestPath, Line);" },
     @{ n = 'tray start ticked by default'; f = 'memocampus.iss'; a = 'Flags: nowait postinstall skipifsilent unchecked'; b = 'Flags: nowait postinstall skipifsilent' },
     @{ n = 'tray start also in a silent install'; f = 'memocampus.iss'; a = 'Flags: nowait postinstall skipifsilent unchecked'; b = 'Flags: nowait postinstall unchecked' },
-    @{ n = 'tray started with an argument'; f = 'memocampus.iss'; a = 'memocampus-tray.exe"; Description: "Start'; b = 'memocampus-tray.exe"; Parameters: "--headless"; Description: "Start' },
-    @{ n = 'tray started with the app dir variable'; f = 'memocampus.iss'; a = 'memocampus-tray.exe"; Description: "Start'; b = 'memocampus-tray.exe"; Description: "MEMOCAMPUS_APP_DIR Start' },
+    @{ n = 'tray started with an argument'; f = 'memocampus.iss'; a = 'memocampus-tray.exe"; Description: "{cm:'; b = 'memocampus-tray.exe"; Parameters: "--headless"; Description: "{cm:' },
+    @{ n = 'tray started with the app dir variable'; f = 'memocampus.iss'; a = 'memocampus-tray.exe"; Description: "{cm:'; b = 'memocampus-tray.exe"; Description: "MEMOCAMPUS_APP_DIR {cm:' },
     @{ n = 'tray start offered in the installer test build'; f = 'memocampus.iss'; a = "#ifndef InstallerTestMode`n[Run]"; b = "#if 1`n[Run]" },
     @{ n = 'tray start waits for the tray to end'; f = 'memocampus.iss'; a = 'Flags: nowait postinstall skipifsilent unchecked'; b = 'Flags: postinstall skipifsilent unchecked' },
     @{ n = 'a third thing offered on the last page'; f = 'memocampus.iss'; a = "#ifdef StoreListing`n; Opens"; b = "Filename: ""{app}\memocampus-mcp.exe""; Flags: postinstall nowait skipifsilent unchecked`n#ifdef StoreListing`n; Opens" },
@@ -246,8 +323,38 @@ if ($Negative) {
     @{ n = 'Web Store link ticked by default'; f = 'memocampus.iss'; a = 'Flags: shellexec postinstall skipifsilent unchecked'; b = 'Flags: shellexec postinstall skipifsilent' },
     @{ n = 'Web Store link without the StoreListing guard'; f = 'memocampus.iss'; a = "#ifdef StoreListing`n; Opens"; b = "#if 1`n; Opens" },
     @{ n = 'StoreListing allowed in the installer test build'; f = 'memocampus.iss'; a = '#error StoreListing is for the product installer only'; b = '#pragma message StoreListing is for the product installer only' },
-    @{ n = 'finished page claims the extension is installed'; f = 'memocampus.iss'; a = 'FinishedLabel=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is added by you in Chrome'; b = 'FinishedLabel=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is installed (and vaults chosen) in Chrome' },
-    @{ n = 'a fake extension id literal'; f = 'nmh.pas'; a = 'function NmhOwnsRegistration'; b = "const Fake = 'abcdefghijklmnopabcdefghijklmnop';`nfunction NmhOwnsRegistration" }
+    @{ n = 'finished page claims the extension is installed'; c = 'separate (English)'; f = 'i18n\en.isl'; a = 'FinishedLabel=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is added by you in Chrome'; b = 'FinishedLabel=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is installed (and vaults chosen) in Chrome' },
+    @{ n = 'a fake extension id literal'; f = 'nmh.pas'; a = 'function NmhOwnsRegistration'; b = "const Fake = 'abcdefghijklmnopabcdefghijklmnop';`nfunction NmhOwnsRegistration" },
+    # Issue #75: languages and texts.
+    @{ n = 'Japanese finished page claims the extension is installed'; c = 'separate (Japanese)'; f = 'i18n\ja.isl'; u = $true; a = 'FinishedLabel=[name] \u306e\u30d7\u30ed\u30b0\u30e9\u30e0\u3068\u3001Chrome \u3068\u306e\u63a5\u7d9a\u3092\u3053\u306e\u30b3\u30f3\u30d4\u30e5\u30fc\u30bf\u30fc\u306b\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u3057\u307e\u3057\u305f\u3002%n%n\u30bb\u30c3\u30c8\u30a2\u30c3\u30d7\u304c\u884c\u3046\u306e\u306f\u3053\u3053\u307e\u3067\u3067\u3059\u3002Chrome \u62e1\u5f35\u6a5f\u80fd\u306f\u3054\u81ea\u8eab\u3067 Chrome \u306b\u8ffd\u52a0\u3057\u3066\u304f\u3060\u3055\u3044\u3002'; b = 'FinishedLabel=[name] \u306e\u30d7\u30ed\u30b0\u30e9\u30e0\u3068\u3001Chrome \u3068\u306e\u63a5\u7d9a\u3092\u3053\u306e\u30b3\u30f3\u30d4\u30e5\u30fc\u30bf\u30fc\u306b\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u3057\u307e\u3057\u305f\u3002%n%n\u30bb\u30c3\u30c8\u30a2\u30c3\u30d7\u304c\u884c\u3046\u306e\u306f\u3053\u3053\u307e\u3067\u3067\u3059\u3002Chrome \u62e1\u5f35\u6a5f\u80fd\u3082\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u3057\u307e\u3057\u305f\u3002' },
+    @{ n = 'Japanese finished page (no icons) says remembering starts without approval'; c = 'separate (Japanese)'; f = 'i18n\ja.isl'; u = $true; a = '\u627f\u8a8d\u3057\u305f\u3068\u304d\u306b\u3060\u3051\u884c\u308f\u308c\u307e\u3059\u3002\n\n[CustomMessages]'; b = '\u627f\u8a8d\u306a\u3057\u3067\u81ea\u52d5\u7684\u306b\u884c\u308f\u308c\u307e\u3059\u3002\n\n[CustomMessages]' },
+    @{ n = 'Japanese Store choice no longer says the user adds the extension'; c = 'added by the user'; f = 'i18n\ja.isl'; u = $true; a = '\uff08\u62e1\u5f35\u6a5f\u80fd\u306f\u3054\u81ea\u8eab\u3067 Chrome \u306b\u8ffd\u52a0\u3057\u3066\u304f\u3060\u3055\u3044\uff09'; b = '' },
+    @{ n = 'a Japanese text missing'; c = 'define exactly the same texts'; f = 'i18n\ja.isl'; a = 'McTrayStillRunning='; b = 'McTrayStillRunningX=' },
+    @{ n = 'an English text missing'; c = 'define exactly the same texts'; f = 'i18n\en.isl'; a = 'McInvalidExtensionId='; b = '; McInvalidExtensionId=' },
+    @{ n = 'a text defined twice'; c = 'defined twice'; f = 'i18n\en.isl'; a = '[CustomMessages]'; b = "[CustomMessages]`nMcLaunchTray=Start" },
+    @{ n = 'an empty Japanese text'; c = 'none is empty'; f = 'i18n\ja.isl'; a = 'McInvalidExtensionId='; b = "McInvalidExtensionId=`nMcInvalidExtensionIdOld=" },
+    @{ n = 'an argument dropped in Japanese'; c = 'same arguments'; f = 'i18n\ja.isl'; a = ':%n%n%1%n'; b = ':%n%n%n' },
+    @{ n = 'ROLLBACK_FAILED translated in Japanese'; c = 'identifiers are not translated'; f = 'i18n\ja.isl'; a = ' ROLLBACK_FAILED '; b = ' ROLLBACK FAILED ' },
+    @{ n = 'Japanese in an English text beyond the tray''s menu item'; c = 'every Japanese text is Japanese'; f = 'i18n\en.isl'; u = $true; a = 'McInvalidExtensionId=This installer was built with an invalid'; b = 'McInvalidExtensionId=This installer was built with an \u7121\u52b9 invalid' },
+    @{ n = 'the tray''s menu item named without its English gloss'; c = 'every Japanese text is Japanese'; f = 'i18n\en.isl'; u = $true; a = '"\u7d42\u4e86" (Quit)'; b = '"\u7d42\u4e86"' },
+    @{ n = 'a Japanese text left in English'; c = 'every Japanese text is Japanese'; f = 'i18n\ja.isl'; u = $true; a = 'McInvalidExtensionId=\u3053\u306e\u30a4\u30f3\u30b9\u30c8\u30fc\u30e9\u30fc\u306f\u3001\u7121\u52b9\u306a Chrome \u62e1\u5f35\u6a5f\u80fd ID \u3067\u30d3\u30eb\u30c9\u3055\u308c\u3066\u3044\u307e\u3059\u3002'; b = 'McInvalidExtensionId=This installer was built with an invalid Chrome extension id.' },
+    @{ n = 'a language file with a preprocessor line'; c = 'no preprocessor'; f = 'i18n\en.isl'; a = '[Messages]'; b = "#define X 1`n[Messages]" },
+    @{ n = 'a language file overrides another standard message'; c = 'only the finished page'; f = 'i18n\en.isl'; a = '[CustomMessages]'; b = "WelcomeLabel1=Hi`n[CustomMessages]" },
+    @{ n = 'a stale text no code uses'; c = 'no stale text'; f = 'i18n\en.isl'; a = '[CustomMessages]'; b = "[CustomMessages]`nMcUnused=x" },
+    @{ n = 'English is no longer the fallback (first)'; c = 'English first'; f = 'memocampus.iss'; a = "Name: ""english""; MessagesFile: ""compiler:Default.isl,i18n\en.isl""`nName: ""japanese""; MessagesFile: ""compiler:Languages\Japanese.isl,i18n\ja.isl"""; b = "Name: ""japanese""; MessagesFile: ""compiler:Languages\Japanese.isl,i18n\ja.isl""`nName: ""english""; MessagesFile: ""compiler:Default.isl,i18n\en.isl""" },
+    @{ n = 'Japanese without the custom texts'; c = 'English first'; f = 'memocampus.iss'; a = 'compiler:Languages\Japanese.isl,i18n\ja.isl'; b = 'compiler:Languages\Japanese.isl' },
+    @{ n = 'language dialog turned off'; c = 'the dialog always offered'; f = 'memocampus.iss'; a = 'ShowLanguageDialog=yes'; b = 'ShowLanguageDialog=no' },
+    @{ n = 'language from the locale, not the UI language'; c = 'the dialog always offered'; f = 'memocampus.iss'; a = 'LanguageDetectionMethod=uilanguage'; b = 'LanguageDetectionMethod=locale' },
+    @{ n = 'an update ignores the installed language'; c = 'the dialog always offered'; f = 'memocampus.iss'; a = 'UsePreviousLanguage=yes'; b = 'UsePreviousLanguage=no' },
+    @{ n = 'languages only in the product build'; c = 'same languages'; f = 'memocampus.iss'; a = "[Languages]`n"; b = "#ifndef InstallerTestMode`n[Languages]`n#endif`n" },
+    @{ n = 'code branches on the language'; c = 'no code branches on the language'; f = 'memocampus.iss'; a = 'Why := Quiesce;'; b = "if ActiveLanguage = 'japanese' then Why := '' else Why := Quiesce;" },
+    @{ n = 'a message box with a literal text'; c = 'no literal text is shown'; f = 'memocampus.iss'; a = 'procedure DeinitializeSetup;'; b = "procedure Warn; begin SuppressibleMsgBox('Setup did not finish.', mbError, MB_OK, IDOK); end;`nprocedure DeinitializeSetup;" },
+    @{ n = 'a refusal with a literal text'; c = 'no literal text is shown'; f = 'memocampus.iss'; a = "Result := MsgText('McTrayStillRunning', []);"; b = "Result := MsgText('McTrayStillRunning', []);`n    if R.Found > 99 then`n      Result := 'Memocampus is still running.';" },
+    @{ n = 'a registration conflict with a literal text'; c = 'no literal text is shown'; f = 'nmh.pas'; a = "Why := MsgText('McNmhUnknownKey', [KeyPath]);"; b = "Why := MsgText('McNmhUnknownKey', [KeyPath]);`n  if Why = '' then Why := 'Unknown key ' + KeyPath;" },
+    @{ n = 'a Run description with literal text added'; c = 'no literal text is shown'; f = 'memocampus.iss'; a = 'Description: "{cm:McLaunchTray}"'; b = 'Description: "{cm:McLaunchTray} now"' },    @{ n = 'an undefined text named by the code'; c = 'every text the code names is defined'; f = 'memocampus.iss'; a = "MsgText('McTrayStillRunning', [])"; b = "MsgText('McTrayStillRuning', [])" },
+    @{ n = 'a custom message read without MsgText'; c = 'read only through MsgText'; f = 'memocampus.iss'; a = "Result := MsgText('McInvalidExtensionId', [])"; b = "Result := MsgText('McInvalidExtensionId', []) + CustomMessage('McInvalidExtensionId')" },
+    @{ n = 'the install failure no longer shows the error'; c = 'keeps ROLLBACK_FAILED'; f = 'memocampus.iss'; a = "MsgText('McRegisterFailed', [HostName, Err])"; b = "MsgText('McRegisterFailed', [HostName, ''])" },
+    @{ n = 'the uninstall decision reads a translated text'; c = 'untranslated report'; f = 'memocampus.iss'; a = "if (Pos('KEPT', Report) > 0) or (Pos('FAILED', Report) > 0) then"; b = "if Pos(MsgText('McUninstallKept', ['']), Report) > 0 then" }
   )
   $scratch = Join-Path ([IO.Path]::GetTempPath()) ("memocampus-verify-neg-" + [guid]::NewGuid().ToString('N'))
   $missed = 0
@@ -256,12 +363,18 @@ if ($Negative) {
       $copy = Join-Path $scratch ([guid]::NewGuid().ToString('N'))
       New-Item -ItemType Directory -Path $copy | Out-Null
       Copy-Item -LiteralPath (Join-Path $here 'memocampus.iss'), (Join-Path $here 'nmh.pas'), (Join-Path $here 'lifecycle.pas') -Destination $copy
+      Copy-Item -LiteralPath (Join-Path $here 'i18n') -Destination $copy -Recurse
       $p = Join-Path $copy $m.f
       $t = (Get-Content -LiteralPath $p -Raw -Encoding UTF8).Replace("`r`n", "`n")
-      if ($t.Split([string[]]@($m.a), [StringSplitOptions]::None).Count -ne 2) { "FAIL  mutation does not apply exactly once: $($m.n)"; $missed++; continue }
-      [IO.File]::WriteAllText($p, $t.Replace($m.a, $m.b), (New-Object Text.UTF8Encoding($false)))
+      # u: the texts are written with \uXXXX escapes (Japanese), so that this script stays ASCII.
+      $a = $m.a; $b = $m.b
+      if ($m.ContainsKey('u') -and $m.u) { $a = [regex]::Unescape($a); $b = [regex]::Unescape($b) }
+      if ($t.Split([string[]]@($a), [StringSplitOptions]::None).Count -ne 2) { "FAIL  mutation does not apply exactly once: $($m.n)"; $missed++; continue }
+      [IO.File]::WriteAllText($p, $t.Replace($a, $b), (New-Object Text.UTF8Encoding($false)))
       $got = Invoke-Checks $copy $true
-      if ($got.Count -gt 0) { "PASS  caught: {0}  ({1})" -f $m.n, ($got[0]) } else { "FAIL  NOT CAUGHT: $($m.n)"; $missed++ }
+      # c: the check that must catch it (not merely some other check that happens to fail too).
+      $meant = (-not $m.ContainsKey('c')) -or (@($got | Where-Object { $_ -like "*$($m.c)*" }).Count -gt 0)
+      if (($got.Count -gt 0) -and $meant) { "PASS  caught: {0}  ({1})" -f $m.n, $(if ($m.ContainsKey('c')) { @($got | Where-Object { $_ -like "*$($m.c)*" })[0] } else { $got[0] }) } elseif ($got.Count -gt 0) { "FAIL  caught only by another check: $($m.n) ($($got -join '; '))"; $missed++ } else { "FAIL  NOT CAUGHT: $($m.n)"; $missed++ }
     }
   } finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
   if ($missed) { "$missed mutation(s) not caught"; exit 1 }
@@ -286,6 +399,7 @@ if ($Compile) {
     $src = Join-Path $out 'src'
     New-Item -ItemType Directory -Path (Join-Path $src 'stage') | Out-Null
     foreach ($f in 'memocampus.iss', 'nmh.pas', 'lifecycle.pas') { Copy-Item -LiteralPath (Join-Path $here $f) -Destination $src }
+    Copy-Item -LiteralPath (Join-Path $here 'i18n') -Destination $src -Recurse
     foreach ($f in 'memocampus-native-host.exe', 'memocampus-mcp.exe', 'memocampus-tray.exe') { [IO.File]::WriteAllBytes((Join-Path $src "stage\$f"), [byte[]](0x4D, 0x5A)) }
     $iss = Join-Path $src 'memocampus.iss'
     $good = 'abcdefghijklmnopabcdefghijklmnop'

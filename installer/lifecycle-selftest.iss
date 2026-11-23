@@ -23,6 +23,13 @@ DisableReadyPage=yes
 DisableFinishedPage=yes
 OutputBaseFilename=lifecycle-selftest
 Compression=none
+; The installer's own languages and texts (Issue #75; nmh.pas takes its texts from them). The runner picks
+; one with /LANG=; never a dialog.
+ShowLanguageDialog=no
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl,i18n\en.isl"
+Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl,i18n\ja.isl"
 
 [Code]
 #include "nmh.pas"
@@ -303,6 +310,7 @@ end;
 
 procedure RunRegistryMode;
 begin
+  Say('language ' + ActiveLanguage);
   ForceDirectories(Dir);
   SaveStringToFile(ExePath, 'x', False);
   ResetAll;
