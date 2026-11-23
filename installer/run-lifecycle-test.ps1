@@ -45,6 +45,8 @@ function Report([string]$name, [bool]$ok, [string]$detail = '') {
 function Invoke-Harness([string[]]$Arguments, [string]$LogName) {
   $log = Join-Path $scratch $LogName
   Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
+  # English unless the caller names the language (/LANG= first, so a caller's own /LANG= wins).
+  if (-not ($Arguments | Where-Object { $_ -like '/LANG=*' })) { $Arguments = @('/LANG=english') + $Arguments }
   $p = Start-Process -FilePath "$scratch\build\lifecycle-selftest.exe" -Wait -PassThru -ArgumentList ($Arguments + "/SelfTestLog=$log")
   if (-not (Test-Path -LiteralPath $log)) { throw "the harness wrote no result (exit $($p.ExitCode)): $LogName" }
   , (Get-Content -LiteralPath $log -Encoding UTF8)
@@ -93,12 +95,19 @@ try {
   & $Iscc /Q "/O$scratch\build" /Flifecycle-selftest (Join-Path $here 'lifecycle-selftest.iss')
   if ($LASTEXITCODE -ne 0) { throw 'the lifecycle self-test did not compile' }
 
-  '--- registry and ownership logic (private keys)'
-  $lines = Invoke-Harness @('/Mode=registry', "/SelfTestKey=$rootKey", "/SelfTestDir=$scratch\files") 'registry.log'
-  $lines | Where-Object { $_ -match '^(FAIL |EXCEPTION|REFUSED)' }
-  $pass = @($lines | Where-Object { $_ -match '^PASS ' }).Count
-  $fail = @($lines | Where-Object { $_ -match '^(FAIL |EXCEPTION|REFUSED)' }).Count
-  Report "Pascal lifecycle self-test: $pass PASS, $fail FAIL" (($fail -eq 0) -and ($pass -gt 0))
+  '--- registry and ownership logic (private keys), in each installer language (Issue #75)'
+  $passed = @{}
+  foreach ($lang in 'english', 'japanese') {
+    Remove-Item -LiteralPath "HKCU:\$rootKey" -Recurse -Force -ErrorAction SilentlyContinue
+    $lines = Invoke-Harness @("/LANG=$lang", '/Mode=registry', "/SelfTestKey=$rootKey", "/SelfTestDir=$scratch\files-$lang") "registry-$lang.log"
+    $lines | Where-Object { $_ -match '^(FAIL |EXCEPTION|REFUSED)' }
+    $pass = @($lines | Where-Object { $_ -match '^PASS ' }).Count
+    $fail = @($lines | Where-Object { $_ -match '^(FAIL |EXCEPTION|REFUSED)' }).Count
+    Report "Pascal lifecycle self-test ($lang): $pass PASS, $fail FAIL" (($fail -eq 0) -and ($pass -gt 0) -and (@($lines | Where-Object { $_ -ceq "language $lang" }).Count -eq 1))
+    $passed[$lang] = @($lines | Where-Object { $_ -match '^PASS ' }) -join "`n"
+  }
+  # The language changes no decision: the same checks, by name, pass in both.
+  Report 'the same lifecycle checks pass in English and in Japanese' ($passed.english -ceq $passed.japanese)
 
   if (-not $SkipTrays) {
     if (-not (Test-Path -LiteralPath $TrayExe)) { throw "tray build not found: $TrayExe (build it, or pass -SkipTrays)" }

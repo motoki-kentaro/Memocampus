@@ -137,8 +137,28 @@ These are the documented contracts the design relies on. Each must be seen once:
    (`skipifsilent`), and never when unticked.
 7. The tray started by the last page runs as the original user without arguments.
 
+## F. Languages (Issue #75)
+
+Needs two VMs (or one, switched): a Japanese Windows 11 and an English Windows 11, plus one more display
+language that Setup does not offer (for example German or French) for F3. The rows marked "development
+machine" were seen on a Japanese Windows development machine with the **test** build only, without
+installing anything (the wizard was left before *Install*, or stopped in *Preparing to Install* by a
+refusal); they are partial evidence and are still to be run in the VM.
+
+| # | Check | Expected | Result |
+|---|-------|----------|--------|
+| F1 | Japanese Windows, run Setup | The *Select Setup Language* dialog appears in Japanese with 日本語 preselected; OK gives a Japanese wizard | NOT RUN in the VM. Development machine (ja-JP UI, test build, 2026-11-24): dialog in Japanese, 日本語 preselected, Ready page in Japanese, no garbled text |
+| F2 | English Windows, run Setup | The dialog preselects English; the wizard is English | NOT RUN |
+| F3 | A display language Setup does not offer (for example German) | English is preselected (fallback) | NOT RUN |
+| F4 | Choose the other language in the dialog, and `/LANG=english` / `/LANG=japanese` | The wizard follows the choice; with `/LANG=` no dialog appears | NOT RUN in the VM. Development machine: English chosen by hand on Japanese Windows gave an English wizard; `/LANG=english` skipped the dialog |
+| F5 | In each language: the last page (A4), its two choices, and the refusals that can be provoked (D1 foreign registration, B3/B4 files in use, B5 tray that does not quit, D5 registration failure, D6 cleanup failure, B8 rollback) | Every text in the chosen language, complete, not cut off, no garbled characters; identifiers (`ROLLBACK_FAILED`, paths, host name) unchanged; the details under a Japanese message (the error or report lines) are English by design | NOT RUN in the VM. Development machine: D1 (foreign registration in the test build's private key) shown in Japanese and in English in *Preparing to Install*, nothing installed, the foreign value unchanged |
+| F6 | Update: install in Japanese, then run the new Setup on English Windows (or the reverse) | The dialog preselects the language of the installed copy (`UsePreviousLanguage`); the update behaves exactly as B1 to B8 | NOT RUN |
+| F7 | Uninstall after an install in each language | The uninstaller speaks the language of the last install or update, without a language dialog; its messages (C1, D6, kept entries) in that language | NOT RUN |
+| F8 | Silent install (`/VERYSILENT`) on each Windows | No language dialog, no prompt; the result is as A7 | NOT RUN |
+| F9 | The behaviour does not change with the language | For the same case, the same files, registrations, exit code and log decisions (`e2e-snapshot.ps1 -Compare` of a Japanese and an English run of A1, B6, C2) | NOT RUN (the Pascal self-tests pass the same checks in both languages; that is code, not the engine) |
+
 ## Release rule
 
-The release candidate is publishable only when **every row of A to D is PASS with evidence, section E
+The release candidate is publishable only when **every row of A to D and F is PASS with evidence, section E
 is observed, and nobody has had to edit a result**. Any FAIL is a release blocker. This file is the
 checklist; the evidence lives wherever the PO keeps release records.

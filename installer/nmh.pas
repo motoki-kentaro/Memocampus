@@ -36,6 +36,14 @@ var
   // executable is not in place yet then). Always False otherwise: the default requires the executable.
   NmhExeMayBeMissing: Boolean;
 
+// A text of the active language (installer\i18n\*.isl, [CustomMessages]), with %1..%9 filled in and %n as
+// a line break. Only texts shown to the user come from here; the diagnostic details (Err, Report) and the
+// identifiers in them (ROLLBACK_FAILED, KEPT, FAILED) are the same in every language. Issue #75.
+function MsgText(const Name: String; const Args: array of String): String;
+begin
+  Result := FmtMessage(CustomMessage(Name), Args);
+end;
+
 function NmhIsValidExtensionId(const Id: String): Boolean;
 var
   I, C: Integer;
@@ -210,13 +218,11 @@ begin
     Exit;
   end;
   Result := False;
+  // Not ours: refused (Setup will not replace or change it), with the reason in the active language.
   if RegQueryStringValue(HKCU, KeyPath, '', Current) then
-    Why := 'Chrome already has a Memocampus host registration for this user that points somewhere else:'#13#10 +
-      Current + #13#10#13#10'Setup will not replace it. Remove that registration (or uninstall the other ' +
-      'Memocampus it belongs to), then run Setup again.'
+    Why := MsgText('McNmhForeignRegistration', [Current])
   else
-    Why := 'Chrome already has a registry key for the Memocampus host (' + KeyPath + ') that Setup did not ' +
-      'create and cannot identify.'#13#10#13#10'Setup will not change it. Remove that key, then run Setup again.';
+    Why := MsgText('McNmhUnknownKey', [KeyPath]);
 end;
 
 // Whether the registration is this installation's own (for a later, ownership-checked removal).
