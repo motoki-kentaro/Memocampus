@@ -178,7 +178,27 @@ fn explicit_page_save_bypasses_policy_but_never_creates_a_visit_and_lost_ack_use
             .get::<_, i64>(0))
             .unwrap(),
         0
-    );
+    ); // Schema 10 (Issue #71, S3): a save through the host is permitted for MCP by default, which
+       // grants nothing by itself; and once the person turned it off, a replay never turns it back on.
+    let permission = |db: &Connection| -> i64 {
+        db.query_row("SELECT mcp_public FROM saved_pages", [], |r| r.get(0))
+            .unwrap()
+    };
+    assert_eq!(permission(&db), 1);
+    drop(db);
+    Connection::open(&f.db)
+        .unwrap()
+        .execute("UPDATE saved_pages SET mcp_public = 0", [])
+        .unwrap();
+    let replayed = f.host().send(message(
+        &binding,
+        "page_save_status",
+        json!({"metadata":meta(),"byteLength":raw.len(),"sha256":prepared["sha256"]}),
+    ));
+    assert_eq!(replayed["replayed"], true);
+    let db = Connection::open_with_flags(&f.db, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    assert_eq!(permission(&db), 0);
+    assert_eq!(f.counts(), (1, 1, 0));
 }
 
 #[test]

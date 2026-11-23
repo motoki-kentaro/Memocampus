@@ -5,7 +5,7 @@ use crate::{pages, vault::tests::TempDir};
 fn ten_thousand_groups_are_bounded_and_maximum_metadata_obeys_response_budget() {
     let (_t, mut s, mut m, b) = fixture();
     seed(&mut s, "https://seed.test/", "row", 1, 1);
-    s.write(|db|{let mut insert=db.prepare("INSERT INTO saved_pages (save_id,blob_id,url,title,captured_at,saved_at,incognito) VALUES (?1,1,?2,'synthetic',1,?3,0)")?;
+    s.write(|db|{let mut insert=db.prepare("INSERT INTO saved_pages (save_id,blob_id,url,title,captured_at,saved_at,incognito,mcp_public,instance) VALUES (?1,1,?2,'synthetic',1,?3,0,1,randomblob(16))")?;
         for i in 1..10_000 {insert.execute(params![uuid::Uuid::new_v4().to_string(),format!("https://synthetic.test/{i}"),i])?;}Ok(0)
     }).unwrap();
     let started = Instant::now();

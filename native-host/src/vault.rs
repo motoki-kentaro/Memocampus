@@ -396,6 +396,9 @@ pub enum OpenCause {
     Key(KeyError),
     /// The first bytes of the file contradict the recorded mode.
     ModeMismatch,
+    /// A rollback journal or WAL beside the vault, which SQLite would apply at the first read,
+    /// cannot be shown to restore a vault of this schema: nothing was read (`recovery`).
+    Recovery,
 }
 
 pub use memocampus_native_host::secure_vault::secret::{CipherSalt, VaultId, VaultKey};
@@ -495,7 +498,7 @@ impl OpenFailure {
                 | VaultError::ModeMismatch
                 | VaultError::EncryptionUnsupported
                 | VaultError::LegacyUnsupported
-        )
+        ) || self.cause == OpenCause::Recovery
     }
 
     fn from_io(error: &io::Error) -> Self {
@@ -608,6 +611,27 @@ fn validate_schema_in(db: &Connection, mode: VaultMode) -> Result<(), OpenFailur
         .map_err(in_mode)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests only: runs after the recovery check and before the first read of the vault.
+    pub(crate) static BEFORE_FIRST_READ: std::cell::RefCell<Option<Box<dyn FnMut()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn before_first_read() {
+    BEFORE_FIRST_READ.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().as_mut() {
+            hook();
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn before_first_read() {}
+
+mod recovery;
+
 /// Opens an existing vault. Never creates a file: SQLite's create flag is not passed.
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn open_vault(path: &Path) -> Result<Connection, VaultError> {
@@ -621,6 +645,8 @@ pub fn open_vault_detailed(path: &Path) -> Result<Connection, OpenFailure> {
         Ok(_) => return Err(OpenFailure::new(VaultError::Invalid, OpenCause::NotAFile)),
         Err(error) => return Err(OpenFailure::from_io(&error)),
     }
+    // Held until the connection is validated: the checked file is the one SQLite reads.
+    let pin = recovery::pin(path).map_err(|error| OpenFailure::from_io(&error))?;
     let db = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -634,6 +660,10 @@ pub fn open_vault_detailed(path: &Path) -> Result<Connection, OpenFailure> {
         .map_err(|error| OpenFailure::from_sqlite(&error))?;
     db.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|error| OpenFailure::from_sqlite(&error))?;
+    // Nothing of the file has been read through the connection yet: the first read may recover
+    // (write) it, so it must be a vault of this schema in every state recovery could restore.
+    recovery::check(&pin, path, None)?;
+    before_first_read();
     validate_schema(&db)?;
     // SQLite silently opens read-only when read-write access is denied; such a vault cannot
     // take writes or a write fence, which is a permission problem, not a format problem.
@@ -643,6 +673,7 @@ pub fn open_vault_detailed(path: &Path) -> Result<Connection, OpenFailure> {
     {
         return Err(OpenFailure::new(VaultError::Io, OpenCause::ReadOnly));
     }
+    drop(pin);
     Ok(db)
 }
 
@@ -679,6 +710,7 @@ fn open_encrypted(
         }
         Err(error) => return Err(encrypted(OpenFailure::from_io(&error))),
     }
+    let pin = recovery::pin(path).map_err(|error| encrypted(OpenFailure::from_io(&error)))?;
     // A SQLCipher file starts with its random salt; plain SQLite (or a file too short to hold a
     // salt) contradicts the recorded mode. Never resolved by switching modes.
     let salt = match cipher::read_head(path) {
@@ -706,11 +738,14 @@ fn open_encrypted(
             _ => OpenFailure::from_sqlite_in(&error, VaultMode::Encrypted),
         },
     })?;
+    // As for a plain vault, before the first read (which may recover the file).
+    recovery::check(&pin, path, Some(&key)).map_err(encrypted)?;
     drop(key);
     let sqlite = |error: rusqlite::Error| OpenFailure::from_sqlite_in(&error, VaultMode::Encrypted);
     db.busy_timeout(BUSY_TIMEOUT).map_err(sqlite)?;
     db.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(sqlite)?;
+    before_first_read();
     validate_schema_in(&db, VaultMode::Encrypted)?;
     if db
         .is_readonly(rusqlite::DatabaseName::Main)
@@ -721,6 +756,7 @@ fn open_encrypted(
             OpenCause::ReadOnly,
         )));
     }
+    drop(pin);
     Ok(db)
 }
 /// `open_vault` plus a full structural check, for when the user picks a file to open.
@@ -1708,6 +1744,38 @@ pub mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// Schema 9 exactly as the build before Issue #71 created it: schema 10 without
+    /// `saved_pages.mcp_public` and `saved_pages.instance`.
+    pub fn schema_9_sql() -> String {
+        const ADDED: &str = ", mcp_public INTEGER NOT NULL CHECK (mcp_public IN (0, 1)), instance BLOB NOT NULL CHECK (typeof(instance) = 'blob' AND length(instance) = 16))";
+        let sql = schema::create_sql();
+        assert_eq!(sql.matches(ADDED).count(), 1);
+        sql.replace(ADDED, ")")
+            .replace("PRAGMA user_version = 10;", "PRAGMA user_version = 9;")
+    }
+
+    /// Leaves at `target` (and `target-journal`) what a crash in the middle of a write transaction
+    /// on `db` (the vault at `source`) leaves: pages already spilled into the file and the hot
+    /// journal that restores them. `db` itself is rolled back; one committed row is in the file.
+    pub fn crashed_copy(db: &Connection, source: &Path, target: &Path) {
+        db.execute(
+            "INSERT INTO visits VALUES ('committed', 'https://crash.test/', 'kept', '2026-11-23T00:00:00.000Z')",
+            [],
+        )
+        .unwrap();
+        db.execute_batch("PRAGMA cache_size = 1; BEGIN;").unwrap();
+        for _ in 0..400 {
+            db.execute(
+                "INSERT INTO visits VALUES (hex(randomblob(16)), 'https://crash.test/', hex(randomblob(1500)), '2026-11-23T00:00:00.000Z')",
+                [],
+            )
+            .unwrap();
+        }
+        fs::copy(source, target).unwrap();
+        fs::copy(sidecar(source, "-journal"), sidecar(target, "-journal")).unwrap();
+        db.execute_batch("ROLLBACK").unwrap();
     }
 
     fn insert_visit(db: &Connection, id: &str) -> rusqlite::Result<usize> {
