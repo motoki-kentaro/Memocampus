@@ -1,6 +1,14 @@
-//! Vault schema 9: creation only. Version 8 and older are refused, never migrated or modified.
+//! Vault schema 10: creation only. Version 9 and older are refused, never migrated or modified.
 //!
-//! Schema 9 adds `navigation_events.source_censored` (Issue #7): the source of a navigation was a visit the
+//! Schema 10 adds `saved_pages.mcp_public` (Issue #71, M1'): the person's per-save choice whether a
+//! saved page may ever be offered to MCP. It has no default, so every insert states it; a new save
+//! writes 1. It is a permission, never a publication decision: approval of the vault and of the
+//! Page Vault and the policy decide too. With it comes `saved_pages.instance`, 16 random bytes
+//! written once per save: the row id names a save only until it is deleted (SQLite reuses the id
+//! of the highest row), the instance names that one save for good, so an operation prepared for a
+//! deleted save never reaches another one (S3-02).
+//!
+//! Schema 9 added `navigation_events.source_censored` (Issue #7): the source of a navigation was a visit the
 //! person deleted on purpose, which a bare NULL source cannot say. Schema 8 added isolated `page_blobs` / `saved_pages` (Issue #6). Schema 7 added image tags;
 //! schema 6 navigation events; schema 5 page metadata. All exist only by explicit creation.
 //! Nothing upgrades an older vault, because `visits` has no column
@@ -15,7 +23,7 @@ use rusqlite::Connection;
 
 /// `PRAGMA application_id` of vaults created by Memocampus ("MCMP").
 pub const APP_ID: i64 = 0x4D43_4D50;
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 /// Keep each `sql` as SQLite stores it: it keeps the text from `CREATE` on, without the final `;`.
 struct Object {
@@ -34,7 +42,7 @@ const OBJECTS: [Object; 28] = [
     Object { kind: "index", name: "sqlite_autoindex_page_blobs_1", table: "page_blobs", sql: None },
     Object {
         kind: "table", name: "saved_pages", table: "saved_pages",
-        sql: Some("CREATE TABLE saved_pages (id INTEGER PRIMARY KEY, save_id TEXT NOT NULL UNIQUE, blob_id INTEGER NOT NULL REFERENCES page_blobs (id) ON DELETE RESTRICT, url TEXT NOT NULL CHECK (length(url) BETWEEN 1 AND 32768), title TEXT NOT NULL CHECK (length(title) <= 65536), captured_at INTEGER NOT NULL CHECK (captured_at >= 0), saved_at INTEGER NOT NULL CHECK (saved_at >= 0), incognito INTEGER NOT NULL CHECK (incognito = 0))"),
+        sql: Some("CREATE TABLE saved_pages (id INTEGER PRIMARY KEY, save_id TEXT NOT NULL UNIQUE, blob_id INTEGER NOT NULL REFERENCES page_blobs (id) ON DELETE RESTRICT, url TEXT NOT NULL CHECK (length(url) BETWEEN 1 AND 32768), title TEXT NOT NULL CHECK (length(title) <= 65536), captured_at INTEGER NOT NULL CHECK (captured_at >= 0), saved_at INTEGER NOT NULL CHECK (saved_at >= 0), incognito INTEGER NOT NULL CHECK (incognito = 0), mcp_public INTEGER NOT NULL CHECK (mcp_public IN (0, 1)), instance BLOB NOT NULL CHECK (typeof(instance) = 'blob' AND length(instance) = 16))"),
     },
     Object { kind: "index", name: "sqlite_autoindex_saved_pages_1", table: "saved_pages", sql: None },
     Object { kind: "index", name: "saved_pages_by_url", table: "saved_pages", sql: Some("CREATE INDEX saved_pages_by_url ON saved_pages (url, saved_at DESC, id DESC)") },
@@ -278,7 +286,7 @@ END",
     },
 ];
 
-/// Everything that makes an empty database a schema 8 vault, for one transaction. There is no form
+/// Everything that makes an empty database a schema 10 vault, for one transaction. There is no form
 /// of this that can run against an existing vault: `CREATE TABLE` fails if the table exists.
 pub fn create_sql() -> String {
     let mut sql =
@@ -393,6 +401,15 @@ mod tests {
         assert_eq!(
             column(&db, "saved_images", "incognito"),
             ("INTEGER".to_owned(), true, None, 0)
+        );
+        // Schema 10: the per-save Page permission, without a default like the image one.
+        assert_eq!(
+            column(&db, "saved_pages", "mcp_public"),
+            ("INTEGER".to_owned(), true, None, 0)
+        );
+        assert_eq!(
+            column(&db, "saved_pages", "instance"),
+            ("BLOB".to_owned(), true, None, 0)
         );
         assert_eq!(column(&db, "visits", "event_id").3, 1);
         for (table, count) in [("saved_images", 2), ("image_blobs", 2)] {
@@ -633,6 +650,97 @@ mod tests {
     }
 
     #[test]
+    fn page_permissions_hold_only_zero_or_one_and_must_be_stated() {
+        let db = vault("");
+        db.execute_batch(&format!(
+            "INSERT INTO page_blobs (id, sha256, byte_length, format, mime_type, data) VALUES (1, '{}', 1, 'mhtml', 'multipart/related', x'00')",
+            "a".repeat(64)
+        ))
+        .unwrap();
+        let insert = |save_id: &str, value: &str| {
+            db.execute(
+                &format!("INSERT INTO saved_pages (save_id, blob_id, url, title, captured_at, saved_at, incognito, instance{}) VALUES (?1, 1, 'https://a.test/', '', 0, 0, 0, randomblob(16){})", if value.is_empty() { "" } else { ", mcp_public" }, if value.is_empty() { String::new() } else { format!(", {value}") }),
+                [save_id],
+            )
+        };
+        for bad in ["", "NULL", "2", "-1", "0.5", "'yes'", "x'01'"] {
+            assert!(insert("bad", bad).is_err(), "{bad:?}");
+        }
+        insert("zero", "0").unwrap();
+        // INTEGER affinity stores a text or real 1 as the integer 1: what is stored is 0 or 1 only.
+        insert("one", "'1'").unwrap();
+        let stored: String = db
+            .query_row(
+                "SELECT typeof(mcp_public) FROM saved_pages WHERE save_id = 'one'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, "integer");
+        for bad in ["NULL", "2", "'yes'"] {
+            assert!(db
+                .execute(
+                    &format!("UPDATE saved_pages SET mcp_public = {bad} WHERE save_id = 'one'"),
+                    []
+                )
+                .is_err());
+        }
+        let values: Vec<i64> = db
+            .prepare("SELECT mcp_public FROM saved_pages ORDER BY save_id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(values, [1, 0]);
+    }
+
+    #[test]
+    fn page_instances_are_exactly_sixteen_stated_bytes() {
+        let db = vault("");
+        db.execute_batch(&format!(
+            "INSERT INTO page_blobs (id, sha256, byte_length, format, mime_type, data) VALUES (1, '{}', 1, 'mhtml', 'multipart/related', x'00')",
+            "a".repeat(64)
+        ))
+        .unwrap();
+        let insert = |save_id: &str, value: Option<&str>| {
+            db.execute(
+                &format!("INSERT INTO saved_pages (save_id, blob_id, url, title, captured_at, saved_at, incognito, mcp_public{}) VALUES (?1, 1, 'https://a.test/', '', 0, 0, 0, 1{})", if value.is_none() { "" } else { ", instance" }, value.map(|v| format!(", {v}")).unwrap_or_default()),
+                [save_id],
+            )
+        };
+        let sixteen_as_text = format!("'{}'", "a".repeat(16));
+        for bad in [
+            None,
+            Some("NULL"),
+            Some("randomblob(15)"),
+            Some("randomblob(17)"),
+            Some("x''"),
+            Some(sixteen_as_text.as_str()),
+            Some("1234567890123456"),
+        ] {
+            assert!(insert("bad", bad).is_err(), "{bad:?}");
+        }
+        insert("one", Some("randomblob(16)")).unwrap();
+        for bad in ["NULL", "randomblob(8)", "'0123456789abcdef'"] {
+            assert!(db
+                .execute(
+                    &format!("UPDATE saved_pages SET instance = {bad} WHERE save_id = 'one'"),
+                    []
+                )
+                .is_err());
+        }
+        let stored: (String, i64) = db
+            .query_row(
+                "SELECT typeof(instance), length(instance) FROM saved_pages",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(stored, ("blob".to_owned(), 16));
+    }
+
+    #[test]
     fn creating_over_an_existing_vault_fails_instead_of_filling_gaps() {
         let db = vault("");
         assert!(db.execute_batch(&create_sql()).is_err());
@@ -649,15 +757,47 @@ mod tests {
         };
         assert!(matches!(
             replaced(
-                "mcp_public INTEGER NOT NULL CHECK (mcp_public IN (0, 1))",
-                "mcp_public INTEGER NOT NULL DEFAULT 0 CHECK (mcp_public IN (0, 1))"
+                "  mcp_public INTEGER NOT NULL CHECK (mcp_public IN (0, 1))
+",
+                "  mcp_public INTEGER NOT NULL DEFAULT 0 CHECK (mcp_public IN (0, 1))
+"
             ),
             SchemaError::Shape("saved_images")
         ));
         assert!(matches!(
-            replaced("(mcp_public IN (0, 1))", "(mcp_public IN (0, 1, 2))"),
+            replaced(
+                "(mcp_public IN (0, 1))
+",
+                "(mcp_public IN (0, 1, 2))
+"
+            ),
             SchemaError::Shape("saved_images")
         ));
+        // The Page permission and the save's instance: any default, a wider CHECK, a nullable or a
+        // missing column is not schema 10.
+        const PAGE: &str = ", mcp_public INTEGER NOT NULL CHECK (mcp_public IN (0, 1)), instance";
+        const INSTANCE: &str =
+            ", instance BLOB NOT NULL CHECK (typeof(instance) = 'blob' AND length(instance) = 16))";
+        for (from, altered) in [
+            (PAGE, ", mcp_public INTEGER NOT NULL DEFAULT 1 CHECK (mcp_public IN (0, 1)), instance"),
+            (PAGE, ", mcp_public INTEGER NOT NULL DEFAULT 0 CHECK (mcp_public IN (0, 1)), instance"),
+            (PAGE, ", mcp_public INTEGER NOT NULL CHECK (mcp_public IN (0, 1, 2)), instance"),
+            (PAGE, ", mcp_public INTEGER CHECK (mcp_public IN (0, 1)), instance"),
+            (PAGE, ", mcp_public INTEGER NOT NULL, instance"),
+            (PAGE, ", instance"),
+            // The save's instance: a default, a nullable, an unchecked or another length is not it.
+            (INSTANCE, ", instance BLOB NOT NULL DEFAULT (randomblob(16)) CHECK (typeof(instance) = 'blob' AND length(instance) = 16))"),
+            (INSTANCE, ", instance BLOB CHECK (typeof(instance) = 'blob' AND length(instance) = 16))"),
+            (INSTANCE, ", instance BLOB NOT NULL)"),
+            (INSTANCE, ", instance BLOB NOT NULL CHECK (typeof(instance) = 'blob' AND length(instance) = 8))"),
+            (INSTANCE, ", instance BLOB NOT NULL UNIQUE CHECK (typeof(instance) = 'blob' AND length(instance) = 16))"),
+            (INSTANCE, ")"),
+        ] {
+            assert!(
+                matches!(replaced(from, altered), SchemaError::Shape("saved_pages")),
+                "{altered}"
+            );
+        }
         assert!(matches!(
             replaced(
                 "url TEXT NOT NULL, title TEXT NOT NULL, visited_at",
@@ -716,7 +856,9 @@ mod tests {
             ("PRAGMA user_version = 6;", 6),
             ("PRAGMA user_version = 7;", 7),
             ("PRAGMA user_version = 8;", 8),
-            ("PRAGMA application_id = 0;", 9),
+            ("PRAGMA user_version = 9;", 9),
+            ("PRAGMA user_version = 11;", 11),
+            ("PRAGMA application_id = 0;", 10),
         ] {
             assert!(
                 matches!(check(&vault(extra)).unwrap_err(), SchemaError::UnsupportedVersion(v) if v == expected),

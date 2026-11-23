@@ -4,7 +4,7 @@
 
 use super::backup::{self, Fault, Step, FAULT};
 use super::*;
-use crate::vault::tests::TempDir;
+use crate::vault::tests::{crashed_copy, schema_9_sql, TempDir};
 use crate::vault::Environment;
 use memocampus_native_host::secure_vault::{cipher, container, key_store, recovery, sidecar};
 use std::cell::RefCell;
@@ -139,6 +139,66 @@ fn page_management_after_plain_and_secure_restore_preserves_other_content() {
             before,
             "source and backup were not deleted"
         );
+    }
+}
+
+/// Issue #71, S3: the per-save Page permission survives backup and restore, plain and encrypted,
+/// save by save (two saves of one shared original keep different values).
+#[test]
+fn page_permissions_survive_plain_and_encrypted_backup_and_restore_save_by_save() {
+    for encrypted in [false, true] {
+        let tmp = TempDir::new();
+        let mut source = Session::new(tmp.env());
+        let path = tmp.0.join("source.sqlite3");
+        let spell = if encrypted {
+            Some(create_encrypted(&mut source, &path))
+        } else {
+            create_plain(&mut source, &path);
+            None
+        };
+        fill(&mut source);
+        let permissions = |session: &mut Session| -> Vec<(String, i64)> {
+            session
+                .read(|db| {
+                    db.prepare("SELECT save_id, mcp_public FROM saved_pages ORDER BY save_id")
+                        .unwrap()
+                        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                        .unwrap()
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .unwrap()
+                })
+                .unwrap()
+        };
+        source
+            .write(|db| {
+                use sha2::Digest;
+                let bytes = b"MIME-Version: 1.0\r\n\r\nCANARY-MHTML-original\x00\xff";
+                crate::pages::insert(db, "00000000-0000-4000-8000-000000000007", &crate::pages::Metadata { url: "https://synthetic.test/CANARY-page-2".into(), title: "CANARY-page-title".into(), captured_at: 1, incognito: false }, bytes, &format!("{:x}", sha2::Sha256::digest(bytes)), 3).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                db.execute("UPDATE saved_pages SET mcp_public = 0 WHERE save_id = '00000000-0000-4000-8000-000000000006'", [])
+            })
+            .unwrap();
+        let expected = vec![
+            ("00000000-0000-4000-8000-000000000006".to_owned(), 0),
+            ("00000000-0000-4000-8000-000000000007".to_owned(), 1),
+        ];
+        assert_eq!(permissions(&mut source), expected);
+        let before = active_dump(&mut source);
+        let dir = tmp.0.join("backup");
+        fs::create_dir(&dir).unwrap();
+        let done = backup_to(&mut source, &dir, json!({}));
+        assert_eq!(done["ok"], true, "{done}");
+        let mut target = Session::new(env_of(&tmp, "other-app"));
+        let extra = spell.map_or(json!({}), |s| json!({"recoverySpell":s}));
+        let restored = restore_to(
+            &mut target,
+            &done["backupPath"],
+            &tmp.0.join("restored.sqlite3"),
+            extra,
+        );
+        assert_eq!(restored["ok"], true, "{restored}");
+        assert_eq!(activate(&mut target, &restored)["ok"], true);
+        assert_eq!(permissions(&mut target), expected, "encrypted={encrypted}");
+        assert_eq!(active_dump(&mut target), before);
     }
 }
 
@@ -855,6 +915,18 @@ fn files_that_are_not_backups_are_refused_and_nothing_is_created() {
             },
             "backup_schema_mismatch",
         ),
+        // A plain vault of schema 9, exactly as the previous build created it (Issue #71, S3).
+        (
+            "schema-9.sqlite3",
+            {
+                let path = tmp.0.join("tmp-db3");
+                let db = rusqlite::Connection::open(&path).unwrap();
+                db.execute_batch(&schema_9_sql()).unwrap();
+                drop(db);
+                fs::read(&path).unwrap()
+            },
+            "backup_schema_mismatch",
+        ),
         (
             "v4",
             {
@@ -934,6 +1006,7 @@ fn files_that_are_not_backups_are_refused_and_nothing_is_created() {
             json!({ "password": "password123" }),
         );
         assert_eq!(restored["error"], code, "{name}");
+        assert_eq!(fs::read(&path).unwrap(), bytes, "{name} is left as it was");
         assert!(!tmp.0.join("target.sqlite3").exists());
         assert!(!tmp.0.join("target.sqlite3.partial").exists());
         assert!(!tmp.0.join("app").join("vault-restore.json").exists());
@@ -946,6 +1019,40 @@ fn files_that_are_not_backups_are_refused_and_nothing_is_created() {
         json!({ "type": "vault_restore_inspect", "path": tmp.0.join("enc.sqlite3") }),
     );
     assert_eq!(refused["error"], "backup_unsupported_format");
+}
+
+/// S3-01: a plain backup file (format A) left with a hot journal beside it, of schema 9 or 10, is
+/// read only read-only: SQLite refuses to recover it instead of writing it, and the restore fails
+/// with both files as they were.
+#[test]
+fn a_plain_backup_with_a_hot_journal_is_refused_and_left_as_it_was() {
+    let tmp = TempDir::new();
+    let mut session = Session::new(tmp.env());
+    for (name, sql) in [
+        ("v9", schema_9_sql()),
+        ("v10", memocampus_native_host::schema::create_sql()),
+    ] {
+        let source = tmp.0.join(format!("{name}-source.sqlite3"));
+        let db = rusqlite::Connection::open(&source).unwrap();
+        db.execute_batch(&sql).unwrap();
+        let path = tmp.0.join(format!("{name}.sqlite3"));
+        crashed_copy(&db, &source, &path);
+        drop(db);
+        let journal = tmp.0.join(format!("{name}.sqlite3-journal"));
+        let before = (fs::read(&path).unwrap(), fs::read(&journal).unwrap());
+        let target = tmp.0.join(format!("{name}-target.sqlite3"));
+        let refused = restore_to(&mut session, &json!(path), &target, json!({}));
+        assert_eq!(
+            refused["error"], "backup_vault_invalid",
+            "{name}: {refused}"
+        );
+        assert_eq!(
+            (fs::read(&path).unwrap(), fs::read(&journal).unwrap()),
+            before,
+            "{name}"
+        );
+        assert!(!target.exists());
+    }
 }
 
 #[test]

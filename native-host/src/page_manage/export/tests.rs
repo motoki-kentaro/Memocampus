@@ -1124,7 +1124,7 @@ fn exact_128_mib_original_streams_to_an_identical_file() {
                 blob.write_all(&chunk[1..]).unwrap();
             }
             drop(blob);
-            db.execute("INSERT INTO saved_pages (save_id, blob_id, url, title, captured_at, saved_at, incognito) VALUES (?1, ?2, 'https://synthetic.test/large', 'large', 1, 1, 0)", params![save_id, blob_id])?;
+            db.execute("INSERT INTO saved_pages (save_id, blob_id, url, title, captured_at, saved_at, incognito, mcp_public, instance) VALUES (?1, ?2, 'https://synthetic.test/large', 'large', 1, 1, 0, 1, randomblob(16))", params![save_id, blob_id])?;
             id = db.last_insert_rowid();
             Ok(0)
         })

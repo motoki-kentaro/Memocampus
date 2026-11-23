@@ -1,4 +1,15 @@
 //! Explicit MHTML saves only. Never writes visits/metadata, evaluates policy or grants publication.
+//!
+//! `saved_pages.mcp_public` (schema 10) is the person's per-save permission: every new save writes 1
+//! explicitly, a replay of the same `save_id` never touches it, and only `set_mcp_public` changes it,
+//! for exactly one save. It is necessary, never sufficient, for MCP: the approvals of the vault and
+//! of the Page Vault and the policy must allow it too, and nothing here reads or grants those.
+//!
+//! A save is named by a `SaveRef`: its row id and the random `instance` written with it. The id alone
+//! is not enough, because SQLite gives a new row the id of a deleted highest one; a save deleted and
+//! saved again, under the same `save_id` too, is a new instance. So a choice prepared for a save that
+//! no longer exists finds nothing (`not_found`) instead of changing whichever save has its id now.
+use crate::vault::{self, Session, VaultError, VaultTicket};
 use rusqlite::{params, Connection, DatabaseName, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -49,6 +60,15 @@ pub fn validate_size(size: usize) -> Result<(), &'static str> {
     } else {
         Ok(())
     }
+}
+
+/// One save as it was shown to the person: whoever lists saves for a choice (S7) hands out both
+/// parts, read together, and an operation must name both. Never look the instance up by id when
+/// the operation runs: that would name whichever save holds the id then.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SaveRef {
+    pub id: i64,
+    pub instance: [u8; 16],
 }
 
 #[derive(Debug, Serialize)]
@@ -138,7 +158,9 @@ pub fn insert(
         blob.close().map_err(db_error)?;
         id
     };
-    db.execute("INSERT INTO saved_pages (save_id, blob_id, url, title, captured_at, saved_at, incognito) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)", params![save_id, blob_id, meta.url, meta.title, meta.captured_at, now]).map_err(db_error)?;
+    // A new instance for every new save (never for a replay, which returned above).
+    let instance = uuid::Uuid::new_v4().into_bytes();
+    db.execute("INSERT INTO saved_pages (save_id, blob_id, url, title, captured_at, saved_at, incognito, mcp_public, instance) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 1, ?7)", params![save_id, blob_id, meta.url, meta.title, meta.captured_at, now, instance]).map_err(db_error)?;
     Ok(Receipt {
         saved_page_id: db.last_insert_rowid(),
         blob_id,
@@ -147,6 +169,71 @@ pub fn insert(
         deduplicated,
         replayed: false,
     })
+}
+
+/// The stored permission of one save, `None` if that save (id and instance) does not exist. Anything
+/// but the integers 0 and 1 is refused rather than read as either, so a forged value never counts as
+/// permitted.
+#[cfg_attr(not(test), allow(dead_code))] // read by the publication UI and MCP of later slices (S7/S8)
+pub fn mcp_public(db: &Connection, save: SaveRef) -> Result<Option<bool>, &'static str> {
+    let stored = db
+        .query_row(
+            "SELECT mcp_public FROM saved_pages WHERE id = ?1 AND instance = ?2",
+            params![save.id, save.instance],
+            |row| row.get::<_, rusqlite::types::Value>(0),
+        )
+        .optional()
+        .map_err(db_error)?;
+    match stored {
+        None => Ok(None),
+        Some(rusqlite::types::Value::Integer(0)) => Ok(Some(false)),
+        Some(rusqlite::types::Value::Integer(1)) => Ok(Some(true)),
+        Some(_) => Err("invalid_mcp_public"),
+    }
+}
+
+/// Records the person's choice for exactly one save (never its shared blob or other saves of it) of
+/// the vault named by `ticket`. Under the write lock the vault must still be that ticket's: the same
+/// configured path (`write_for`) and the same file there (`vault_token`), so a choice never lands in
+/// another vault put at the same path. Within it, the one statement that writes matches the save by
+/// id and instance together, in the same IMMEDIATE transaction: a save that was deleted (and maybe
+/// replaced by another one under its id or `save_id`) fails with `not_found` and nothing changes.
+#[cfg_attr(not(test), allow(dead_code))] // the per-save setting UI is Slice S7
+pub fn set_mcp_public(
+    session: &mut Session,
+    ticket: &VaultTicket,
+    save: SaveRef,
+    mcp_public: bool,
+) -> Result<(), &'static str> {
+    session
+        .write_for(ticket, |db| {
+            if vault::vault_token(std::path::Path::new(&ticket.path))? != ticket.token {
+                return Err(SetError::Vault(VaultError::Switched));
+            }
+            match db.execute(
+                "UPDATE saved_pages SET mcp_public = ?3 WHERE id = ?1 AND instance = ?2",
+                params![save.id, save.instance, mcp_public],
+            ) {
+                Ok(1) => Ok(()),
+                Ok(_) => Err(SetError::NotFound),
+                Err(_) => Err(SetError::Vault(VaultError::Db)),
+            }
+        })
+        .map_err(|error| match error {
+            SetError::NotFound => "not_found",
+            SetError::Vault(error) => error.code(),
+        })
+}
+
+enum SetError {
+    NotFound,
+    Vault(VaultError),
+}
+
+impl From<VaultError> for SetError {
+    fn from(error: VaultError) -> Self {
+        Self::Vault(error)
+    }
 }
 
 /// Streaming integrity verification for backups/restores: never materializes whole originals.
@@ -185,6 +272,9 @@ pub fn verify(db: &Connection) -> rusqlite::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod mcp_public_tests;
 
 #[cfg(test)]
 mod tests {

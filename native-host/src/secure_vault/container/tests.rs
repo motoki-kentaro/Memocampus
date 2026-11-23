@@ -841,3 +841,34 @@ fn an_earlier_format_c_file_is_still_read_and_new_ones_are_version_3() {
     }
     assert_eq!(write_version(), VERSION);
 }
+
+/// Issue #71, S3: a package or meta of schema 9 (or any version but this build's) is refused as a
+/// schema mismatch before anything is restored; nothing upgrades it.
+#[test]
+fn packages_and_meta_of_another_schema_version_are_refused() {
+    let (key, secret, _) = fixture();
+    for version in [9, crate::schema::SCHEMA_VERSION + 1] {
+        let old = VaultFacts {
+            schema_version: version,
+            cipher_salt: CipherSalt::from_array(SALT),
+        };
+        let bytes = package_b(&key, old, &payload(4096), None);
+        assert!(
+            matches!(restore_b(&bytes, &secret), Err(FormatError::SchemaMismatch)),
+            "{version}: {:?}",
+            restore_b(&bytes, &secret).err()
+        );
+        let meta = format!(
+            r#"{{"format":"{META_FORMAT}","version":1,"mode":"plain","schemaVersion":{version}}}"#
+        );
+        assert!(matches!(
+            Meta::parse(meta.as_bytes()),
+            Err(FormatError::SchemaMismatch)
+        ));
+    }
+    let current = serde_json::to_vec(&Meta::plain()).unwrap();
+    assert_eq!(
+        Meta::parse(&current).unwrap().schema_version,
+        crate::schema::SCHEMA_VERSION
+    );
+}

@@ -125,7 +125,8 @@ fn tree(dir: &Path) -> Vec<String> {
 const IMAGE_BYTES: usize = 1 << 20;
 
 /// Rows in every kind of table, with canaries: visits, page metadata, a navigation, a tab
-/// snapshot, an image of 1 MiB with its thumbnail and a save, tags.
+/// snapshot, an image of 1 MiB with its thumbnail and a save, tags, and three saved pages, two of
+/// them on one shared original, whose per-save MCP permissions differ (schema 10).
 fn fill(session: &mut Session) {
     let image: Vec<u8> = (0..IMAGE_BYTES as u32)
         .map(|i| (i.wrapping_mul(2_654_435_761) >> 11) as u8)
@@ -155,6 +156,30 @@ fn fill(session: &mut Session) {
                  INSERT INTO saved_images (save_id, blob_id, image_url, page_url, saved_at, incognito, mcp_public)
                    VALUES ('s1', 1, 'https://canary.test/CANARY-image.png', 'https://canary.test/CANARY-url', 3, 0, 1);
                  INSERT INTO image_tag_links VALUES (1, 1), (1, 2);",
+            )?;
+            let page = |save_id: &str, url: &str, bytes: &[u8]| {
+                crate::pages::insert(
+                    db,
+                    save_id,
+                    &crate::pages::Metadata {
+                        url: url.into(),
+                        title: "CANARY-page-title".into(),
+                        captured_at: 4,
+                        incognito: false,
+                    },
+                    bytes,
+                    &format!("{:x}", Sha256::digest(bytes)),
+                    5,
+                )
+                .map_err(|_| rusqlite::Error::InvalidQuery)
+            };
+            let shared = b"MIME-Version: 1.0\r\n\r\nCANARY-MHTML-shared";
+            page("00000000-0000-4000-8000-0000000000a1", "https://canary.test/p1", shared)?;
+            let hidden = page("00000000-0000-4000-8000-0000000000a2", "https://canary.test/p2", shared)?;
+            page("00000000-0000-4000-8000-0000000000a3", "https://canary.test/p3", b"CANARY-MHTML-other")?;
+            db.execute(
+                "UPDATE saved_pages SET mcp_public = 0 WHERE id = ?1",
+                [hidden.saved_page_id],
             )?;
             Ok(0)
         })
@@ -196,6 +221,8 @@ fn dump(db: &Connection) -> Vec<String> {
         ("navigation_events", "target_visit_id"),
         ("image_tags", "id"),
         ("image_tag_links", "blob_id, tag_id"),
+        ("page_blobs", "id"),
+        ("saved_pages", "id"),
     ] {
         let mut statement = db
             .prepare(&format!("SELECT * FROM {table} ORDER BY {order}"))
@@ -218,6 +245,23 @@ fn dump(db: &Connection) -> Vec<String> {
         }
     }
     out
+}
+
+/// The dump carries the per-save Page permissions of `fill` (1, 0, 1, next to last) and each save's
+/// instance (last, three different ones), so comparing dumps compares them too.
+fn assert_page_permissions(rows: &[String]) {
+    let saves: Vec<Vec<&str>> = rows
+        .iter()
+        .filter(|row| row.starts_with("saved_pages: "))
+        .map(|row| row.rsplit('|').take(2).collect())
+        .collect();
+    let permissions: Vec<&str> = saves.iter().map(|save| save[1]).collect();
+    assert_eq!(permissions, ["Integer(1)", "Integer(0)", "Integer(1)"]);
+    let instances: std::collections::BTreeSet<&str> = saves.iter().map(|save| save[0]).collect();
+    assert_eq!(instances.len(), 3);
+    assert!(instances
+        .iter()
+        .all(|instance| instance.starts_with("blob:")));
 }
 
 fn active_dump(session: &mut Session) -> Vec<String> {
@@ -310,6 +354,7 @@ fn d1_a_plain_vault_becomes_a_new_encrypted_vault_only_through_spell_and_activat
     create_plain(&mut session, &source);
     fill(&mut session);
     let before = active_dump(&mut session);
+    assert_page_permissions(&before);
     let source_token = token_of(&mut session);
     let source_hash = hash(&source);
     let target = tmp.0.join("encrypted.sqlite3");
@@ -320,7 +365,7 @@ fn d1_a_plain_vault_becomes_a_new_encrypted_vault_only_through_spell_and_activat
     assert_eq!(started["direction"], "encrypt");
     assert_eq!(
         started["counts"],
-        json!({ "visits": 2, "snapshots": 1, "images": 1, "pages": 0, "pageBlobs": 0 })
+        json!({ "visits": 2, "snapshots": 1, "images": 1, "pages": 3, "pageBlobs": 2 })
     );
     let spell = started["recoverySpell"].as_str().unwrap().to_owned();
     assert_eq!(spell.len(), 43);
@@ -495,6 +540,7 @@ fn d2_an_encrypted_vault_becomes_a_plain_vault_only_with_the_users_acknowledgeme
     let spell = create_encrypted(&mut session, &source);
     fill(&mut session);
     let before = active_dump(&mut session);
+    assert_page_permissions(&before);
     let source_status = status_of(&mut session);
     let source_hash = hash(&source);
     let keys_before: Vec<(String, String)> = keys_of(&app)
@@ -551,7 +597,7 @@ fn d2_an_encrypted_vault_becomes_a_plain_vault_only_with_the_users_acknowledgeme
     );
     assert_eq!(
         started["counts"],
-        json!({ "visits": 2, "snapshots": 1, "images": 1, "pages": 0, "pageBlobs": 0 })
+        json!({ "visits": 2, "snapshots": 1, "images": 1, "pages": 3, "pageBlobs": 2 })
     );
     // A standard SQLite file holding the same rows (in the clear, as acknowledged).
     assert_eq!(
