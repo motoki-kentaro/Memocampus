@@ -3,6 +3,7 @@
 /visible-store/target/
 /mcp-server/target/
 /tray/target/
+/page-extract/target/
 
 # Node
 node_modules/
