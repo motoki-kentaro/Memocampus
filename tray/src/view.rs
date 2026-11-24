@@ -6,8 +6,14 @@
 //! a state is never shown that the supervisor has not reported (no "Running" on a click); the check
 //! marks are the settings, and what Windows really does is said beside them; "Running" says nothing
 //! about the vault, which has its own line.
+//!
+//! Every text comes from the catalog (`i18n`) in the language the view is asked for (Issue #78). The
+//! language changes words only: which items are enabled, the icon and the check marks are decided
+//! from the state alone, the same in every language.
 
 use crate::autostart::{Approval, Autostart};
+use crate::controller::OpError;
+use crate::i18n::{fill, t, Key, Lang};
 use crate::state::{ErrorKind, ServerState, Snapshot, VaultStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,8 +102,8 @@ pub struct Inputs {
     pub server_autostart_setting: bool,
     pub autostart: Autostart,
     pub settings_note: SettingsNote,
-    /// The last operation that failed (a fixed, user-readable text), until the next succeeds.
-    pub last_error: Option<String>,
+    /// The last operation that failed (a fixed code), until the next succeeds.
+    pub last_error: Option<OpError>,
     pub quitting: bool,
 }
 
@@ -105,11 +111,11 @@ pub struct Inputs {
 pub struct View {
     pub icon: IconKind,
     pub tooltip: String,
-    pub title: &'static str,
+    pub title: String,
     pub status: String,
     pub address: String,
     pub vault: String,
-    pub start_label: &'static str,
+    pub start_label: String,
     pub start: bool,
     pub stop: bool,
     pub restart: bool,
@@ -126,52 +132,69 @@ pub struct View {
     pub quit: bool,
 }
 
-fn error_text(kind: &ErrorKind) -> String {
+fn error_key(kind: &ErrorKind) -> Key {
     match kind {
-        ErrorKind::SettingsInvalid(_) => "設定ファイルが不正です".into(),
-        ErrorKind::McpMissing => "MCP実行ファイルが見つかりません".into(),
-        ErrorKind::LaunchFailed => "MCPを起動できません".into(),
-        ErrorKind::PortInUse => "ポートが使用中です".into(),
-        ErrorKind::ListenFailed(_) => "待受を開始できません".into(),
-        ErrorKind::VaultRefused(_) => "Vaultの公開が承認されていません".into(),
-        ErrorKind::StartRefused(_) => "MCPが起動を拒否しました".into(),
-        ErrorKind::StartTimeout => "起動が時間内に完了しません".into(),
+        ErrorKind::SettingsInvalid(_) => Key::ErrorSettingsInvalid,
+        ErrorKind::McpMissing => Key::ErrorMcpMissing,
+        ErrorKind::LaunchFailed => Key::ErrorLaunchFailed,
+        ErrorKind::PortInUse => Key::ErrorPortInUse,
+        ErrorKind::ListenFailed(_) => Key::ErrorListenFailed,
+        ErrorKind::VaultRefused(_) => Key::ErrorVaultRefused,
+        ErrorKind::StartRefused(_) => Key::ErrorStartRefused,
+        ErrorKind::StartTimeout => Key::ErrorStartTimeout,
         ErrorKind::Crashed {
             will_restart: true, ..
-        } => "異常終了しました（再起動を試みます）".into(),
-        ErrorKind::Crashed { .. } => "異常終了しました".into(),
-        ErrorKind::CrashLoop => "異常終了を繰り返したため停止しました".into(),
+        } => Key::ErrorCrashedRestarting,
+        ErrorKind::Crashed { .. } => Key::ErrorCrashed,
+        ErrorKind::CrashLoop => Key::ErrorCrashLoop,
     }
 }
 
-fn state_text(state: &ServerState) -> String {
+/// The state in a word or two ("稼働中", "Error (port is already in use)"), for the status line and
+/// the tooltip.
+fn state_word(lang: Lang, state: &ServerState) -> String {
     match state {
-        ServerState::Stopped => "状態: 停止中".into(),
-        ServerState::Starting => "状態: 起動中…".into(),
-        ServerState::Running => "状態: 稼働中".into(),
-        ServerState::Stopping => "状態: 停止処理中…".into(),
-        ServerState::Error(kind) => format!("状態: エラー（{}）", error_text(kind)),
+        ServerState::Stopped => t(lang, Key::StateStopped),
+        ServerState::Starting => t(lang, Key::StateStarting),
+        ServerState::Running => t(lang, Key::StateRunning),
+        ServerState::Stopping => t(lang, Key::StateStopping),
+        ServerState::Error(kind) => fill(
+            lang,
+            Key::StateError,
+            &[("error", &t(lang, error_key(kind)))],
+        ),
     }
 }
 
-fn autostart_note(setting: bool, actual: Autostart) -> (String, bool) {
-    let text = match (actual, setting) {
-        (Autostart::NotRegistered, false) => "自動起動: オフ",
-        (Autostart::NotRegistered, true) => "自動起動: 未登録（設定はオンです）",
-        (Autostart::Registered(Approval::Enabled), true) => "自動起動: 登録済み",
-        (Autostart::Registered(Approval::Enabled), false) => {
-            "自動起動: 登録が残っています（設定はオフです）"
-        }
-        (Autostart::Registered(Approval::DisabledByWindows), _) => {
-            "自動起動: Windows側で無効にされています"
-        }
-        (Autostart::Registered(Approval::Unknown), _) => {
-            "自動起動: 登録済み（Windows側の状態は不明）"
-        }
-        (Autostart::PathMismatch(_), _) => "自動起動: 登録パスが現在の実行ファイルと異なります",
-        (Autostart::Unreadable, _) => "自動起動: レジストリを読めません",
+fn op_error_key(error: OpError) -> Key {
+    match error {
+        OpError::AutostartUnreadable => Key::OpAutostartUnreadable,
+        OpError::RegistryInconsistent => Key::OpRegistryInconsistent,
+        OpError::SaveFailedUndone => Key::OpSaveFailedUndone,
+        OpError::AutostartRegisterFailed => Key::OpAutostartRegisterFailed,
+        OpError::SettingsCreateFailed => Key::OpSettingsCreateFailed,
+        OpError::SettingsInvalidNoChange => Key::OpSettingsInvalidNoChange,
+        OpError::AutostartChangeFailed => Key::OpAutostartChangeFailed,
+        OpError::SettingsSaveFailed => Key::OpSettingsSaveFailed,
+        OpError::AutostartRepairFailed => Key::OpAutostartRepairFailed,
+        OpError::SettingsOpenFailed => Key::OpSettingsOpenFailed,
+        OpError::LogsMissing => Key::OpLogsMissing,
+        OpError::LogsOpenFailed => Key::OpLogsOpenFailed,
+    }
+}
+
+fn autostart_note(lang: Lang, setting: bool, actual: Autostart) -> (String, bool) {
+    let key = match (actual, setting) {
+        (Autostart::NotRegistered, false) => Key::AutostartOff,
+        (Autostart::NotRegistered, true) => Key::AutostartNotRegistered,
+        (Autostart::Registered(Approval::Enabled), true) => Key::AutostartRegistered,
+        (Autostart::Registered(Approval::Enabled), false) => Key::AutostartLeftRegistered,
+        (Autostart::Registered(Approval::DisabledByWindows), _) => Key::AutostartDisabledByWindows,
+        (Autostart::Registered(Approval::Unknown), _) => Key::AutostartApprovalUnknown,
+        (Autostart::PathMismatch(_), _) => Key::AutostartPathMismatch,
+        (Autostart::Unreadable, _) => Key::AutostartUnreadable,
     };
-    (text.into(), matches!(actual, Autostart::PathMismatch(_)))
+    (t(lang, key), matches!(actual, Autostart::PathMismatch(_)))
 }
 
 /// The tooltip is limited to 127 UTF-16 units by Windows.
@@ -189,51 +212,67 @@ fn limited(text: String) -> String {
     out
 }
 
-pub fn view(inputs: &Inputs) -> View {
+pub fn view(inputs: &Inputs, lang: Lang) -> View {
     let snapshot = &inputs.snapshot;
     let state = &snapshot.state;
     let live = !inputs.quitting;
     let address = match (state, snapshot.port) {
-        (ServerState::Running, Some(port)) => format!("127.0.0.1:{port}"),
-        _ => format!("待受予定: 127.0.0.1:{}", inputs.listen_port),
+        (ServerState::Running, Some(port)) => {
+            fill(lang, Key::AddressRunning, &[("port", &port.to_string())])
+        }
+        _ => fill(
+            lang,
+            Key::AddressPlanned,
+            &[("port", &inputs.listen_port.to_string())],
+        ),
     };
     let vault = match &snapshot.vault {
-        VaultStatus::Unknown => "Vault公開: 未確認（稼働中でも公開可否は示しません）".to_owned(),
-        VaultStatus::Refused(code) => format!("Vault公開: 拒否（{code}）"),
+        VaultStatus::Unknown => t(lang, Key::VaultUnknown),
+        VaultStatus::Refused(code) => fill(lang, Key::VaultRefused, &[("code", code)]),
     };
-    let (autostart_note, mismatch) = autostart_note(inputs.autostart_setting, inputs.autostart);
+    let (autostart_note, mismatch) =
+        autostart_note(lang, inputs.autostart_setting, inputs.autostart);
     let settings_note = match (&inputs.last_error, &inputs.settings_note) {
-        (Some(error), _) => format!("直前の操作に失敗: {error}"),
-        (None, SettingsNote::InForce) => "設定: 反映済み".into(),
-        (None, SettingsNote::RestartNeeded) => "設定: 変更あり（サーバ再起動で反映）".into(),
-        (None, SettingsNote::Invalid(_)) => "設定: 不正（以前の設定を使用中）".into(),
-    };
-    let status = if inputs.quitting {
-        "状態: 終了処理中…".to_owned()
-    } else {
-        state_text(state)
-    };
-    let tooltip = limited(match (inputs.quitting, state) {
-        (true, _) => "Memocampus MCP: 終了処理中".to_owned(),
-        (false, ServerState::Running) => format!("Memocampus MCP: 稼働中 {address}"),
-        (false, other) => format!(
-            "Memocampus MCP: {}",
-            state_text(other).trim_start_matches("状態: ")
+        (Some(error), _) => fill(
+            lang,
+            Key::LastOperationFailed,
+            &[("error", &t(lang, op_error_key(*error)))],
         ),
+        (None, SettingsNote::InForce) => t(lang, Key::SettingsInForce),
+        (None, SettingsNote::RestartNeeded) => t(lang, Key::SettingsRestartNeeded),
+        (None, SettingsNote::Invalid(_)) => t(lang, Key::SettingsInvalid),
+    };
+    let word = if inputs.quitting {
+        t(lang, Key::StateQuitting)
+    } else {
+        state_word(lang, state)
+    };
+    let status = fill(lang, Key::StatusLine, &[("state", &word)]);
+    let tooltip = limited(match (inputs.quitting, state) {
+        (true, _) => t(lang, Key::TooltipQuitting),
+        (false, ServerState::Running) => fill(
+            lang,
+            Key::TooltipRunning,
+            &[("state", &word), ("address", &address)],
+        ),
+        (false, _) => fill(lang, Key::Tooltip, &[("state", &word)]),
     });
     let can_start = matches!(state, ServerState::Stopped | ServerState::Error(_));
     View {
         icon: icon_kind(state),
         tooltip,
-        title: "Memocampus MCP Server",
+        title: t(lang, Key::Title),
         status,
         address,
         vault,
-        start_label: if matches!(state, ServerState::Error(_)) {
-            "サーバ起動（再試行）"
-        } else {
-            "サーバ起動"
-        },
+        start_label: t(
+            lang,
+            if matches!(state, ServerState::Error(_)) {
+                Key::StartServerRetry
+            } else {
+                Key::StartServer
+            },
+        ),
         start: live && can_start,
         stop: live && matches!(state, ServerState::Running | ServerState::Starting),
         restart: live && matches!(state, ServerState::Running | ServerState::Error(_)),
@@ -289,6 +328,11 @@ pub fn action_for_id(id: &str) -> Option<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The rules below were written against the Japanese source text; English is checked after them.
+    fn view(inputs: &Inputs) -> View {
+        super::view(inputs, Lang::Ja)
+    }
 
     fn inputs(state: ServerState) -> Inputs {
         let mut snapshot = Snapshot::initial();
@@ -454,8 +498,266 @@ mod tests {
         assert!(view(&i).settings_note.contains("再起動で反映"));
         i.settings_note = SettingsNote::Invalid("settings_invalid_json".into());
         assert!(view(&i).settings_note.contains("不正"));
-        i.last_error = Some("レジストリに書き込めません".into());
+        i.last_error = Some(OpError::AutostartChangeFailed);
         assert!(view(&i).settings_note.starts_with("直前の操作に失敗"));
+    }
+
+    const ALL_STATES: [fn() -> ServerState; 16] = [
+        || ServerState::Stopped,
+        || ServerState::Starting,
+        || ServerState::Running,
+        || ServerState::Stopping,
+        || ServerState::Error(ErrorKind::SettingsInvalid("settings_invalid_json".into())),
+        || ServerState::Error(ErrorKind::McpMissing),
+        || ServerState::Error(ErrorKind::LaunchFailed),
+        || ServerState::Error(ErrorKind::PortInUse),
+        || ServerState::Error(ErrorKind::ListenFailed("os_10013".into())),
+        || ServerState::Error(ErrorKind::VaultRefused("vault_publication_pending".into())),
+        || ServerState::Error(ErrorKind::StartRefused(Some("token".into()))),
+        || ServerState::Error(ErrorKind::StartRefused(None)),
+        || ServerState::Error(ErrorKind::StartTimeout),
+        || {
+            ServerState::Error(ErrorKind::Crashed {
+                exit: Some(1),
+                will_restart: true,
+            })
+        },
+        || {
+            ServerState::Error(ErrorKind::Crashed {
+                exit: None,
+                will_restart: false,
+            })
+        },
+        || ServerState::Error(ErrorKind::CrashLoop),
+    ];
+
+    const ALL_OP_ERRORS: [OpError; 12] = [
+        OpError::AutostartUnreadable,
+        OpError::RegistryInconsistent,
+        OpError::SaveFailedUndone,
+        OpError::AutostartRegisterFailed,
+        OpError::SettingsCreateFailed,
+        OpError::SettingsInvalidNoChange,
+        OpError::AutostartChangeFailed,
+        OpError::SettingsSaveFailed,
+        OpError::AutostartRepairFailed,
+        OpError::SettingsOpenFailed,
+        OpError::LogsMissing,
+        OpError::LogsOpenFailed,
+    ];
+
+    const ALL_AUTOSTART: [Autostart; 6] = [
+        Autostart::NotRegistered,
+        Autostart::Registered(Approval::Enabled),
+        Autostart::Registered(Approval::DisabledByWindows),
+        Autostart::Registered(Approval::Unknown),
+        Autostart::PathMismatch(Approval::Enabled),
+        Autostart::Unreadable,
+    ];
+
+    /// Every combination of what the view depends on that changes a text.
+    fn every_input() -> Vec<Inputs> {
+        let mut all = Vec::new();
+        for state in ALL_STATES {
+            for quitting in [false, true] {
+                for port in [None, Some(9001)] {
+                    let mut i = inputs(state());
+                    i.quitting = quitting;
+                    i.snapshot.port = port;
+                    if let ServerState::Error(ErrorKind::VaultRefused(code)) = &i.snapshot.state {
+                        i.snapshot.vault = VaultStatus::Refused(code.clone());
+                    }
+                    all.push(i);
+                }
+            }
+        }
+        for autostart in ALL_AUTOSTART {
+            for setting in [false, true] {
+                let mut i = inputs(ServerState::Stopped);
+                i.autostart = autostart;
+                i.autostart_setting = setting;
+                all.push(i);
+            }
+        }
+        for note in [
+            SettingsNote::InForce,
+            SettingsNote::RestartNeeded,
+            SettingsNote::Invalid("settings_invalid_json".into()),
+        ] {
+            let mut i = inputs(ServerState::Running);
+            i.settings_note = note;
+            all.push(i);
+        }
+        for error in ALL_OP_ERRORS {
+            let mut i = inputs(ServerState::Running);
+            i.last_error = Some(error);
+            all.push(i);
+        }
+        all
+    }
+
+    fn texts(v: &View) -> [&str; 8] {
+        [
+            &v.tooltip,
+            &v.title,
+            &v.status,
+            &v.address,
+            &v.vault,
+            &v.start_label,
+            &v.autostart_note,
+            &v.settings_note,
+        ]
+    }
+
+    fn has_japanese(text: &str) -> bool {
+        text.chars().any(|c| {
+            matches!(c,
+                '\u{3000}'..='\u{303F}' | '\u{3040}'..='\u{30FF}' | '\u{4E00}'..='\u{9FFF}'
+                | '\u{FF00}'..='\u{FFEF}')
+        })
+    }
+
+    #[test]
+    fn the_language_changes_the_words_only_never_what_can_be_done() {
+        for i in every_input() {
+            let (ja, en) = (super::view(&i, Lang::Ja), super::view(&i, Lang::En));
+            let decisions = |v: &View| {
+                (
+                    v.icon,
+                    v.start,
+                    v.stop,
+                    v.restart,
+                    v.autostart_checked,
+                    v.autostart_enabled,
+                    v.repair_enabled,
+                    v.server_autostart_checked,
+                    v.server_autostart_enabled,
+                    (v.open_settings, v.reload, v.open_logs, v.quit),
+                )
+            };
+            assert_eq!(decisions(&ja), decisions(&en), "{i:?}");
+        }
+    }
+
+    #[test]
+    fn every_english_text_is_english_and_no_placeholder_is_left_in_either_language() {
+        for i in every_input() {
+            for lang in [Lang::Ja, Lang::En] {
+                let v = super::view(&i, lang);
+                for text in texts(&v) {
+                    assert!(!text.is_empty(), "{i:?}");
+                    assert!(!text.contains('{') && !text.contains('}'), "{text}");
+                    if lang == Lang::En {
+                        assert!(!has_japanese(text), "{text}");
+                    }
+                }
+                assert!(v.tooltip.encode_utf16().count() <= 127, "{}", v.tooltip);
+            }
+        }
+    }
+
+    #[test]
+    fn every_state_and_every_failure_has_its_own_words() {
+        for lang in [Lang::Ja, Lang::En] {
+            let mut statuses: Vec<String> = ALL_STATES
+                .iter()
+                .filter(|s| !matches!(s(), ServerState::Error(ErrorKind::StartRefused(None))))
+                .map(|s| super::view(&inputs(s()), lang).status)
+                .collect();
+            let count = statuses.len();
+            statuses.sort();
+            statuses.dedup();
+            // A refusal with or without its reason reads the same; the other kinds all differ.
+            assert_eq!(statuses.len(), count, "{lang:?}: {statuses:?}");
+            let mut notes: Vec<String> = ALL_OP_ERRORS
+                .iter()
+                .map(|e| {
+                    let mut i = inputs(ServerState::Running);
+                    i.last_error = Some(*e);
+                    super::view(&i, lang).settings_note
+                })
+                .collect();
+            notes.sort();
+            notes.dedup();
+            assert_eq!(notes.len(), ALL_OP_ERRORS.len(), "{lang:?}");
+        }
+    }
+
+    #[test]
+    fn the_japanese_texts_are_the_ones_shown_before_the_catalog() {
+        let mut running = inputs(ServerState::Running);
+        running.snapshot.port = Some(9001);
+        let v = view(&running);
+        assert_eq!(v.title, "Memocampus MCP Server");
+        assert_eq!(v.status, "状態: 稼働中");
+        assert_eq!(v.tooltip, "Memocampus MCP: 稼働中 127.0.0.1:9001");
+        assert_eq!(
+            v.vault,
+            "Vault公開: 未確認（稼働中でも公開可否は示しません）"
+        );
+        assert_eq!(v.autostart_note, "自動起動: 登録済み");
+        assert_eq!(v.settings_note, "設定: 反映済み");
+        let v = view(&inputs(ServerState::Error(ErrorKind::PortInUse)));
+        assert_eq!(v.status, "状態: エラー（ポートが使用中です）");
+        assert_eq!(v.tooltip, "Memocampus MCP: エラー（ポートが使用中です）");
+        assert_eq!(
+            view(&inputs(ServerState::Stopped)).tooltip,
+            "Memocampus MCP: 停止中"
+        );
+        assert_eq!(view(&inputs(ServerState::Starting)).status, "状態: 起動中…");
+        let mut quitting = inputs(ServerState::Running);
+        quitting.quitting = true;
+        let v = view(&quitting);
+        assert_eq!(v.status, "状態: 終了処理中…");
+        assert_eq!(v.tooltip, "Memocampus MCP: 終了処理中");
+        let mut failed = inputs(ServerState::Running);
+        failed.last_error = Some(OpError::SaveFailedUndone);
+        assert_eq!(
+            view(&failed).settings_note,
+            "直前の操作に失敗: 設定ファイルを保存できませんでした（変更を取り消しました）"
+        );
+    }
+
+    #[test]
+    fn the_english_texts_say_the_same_things() {
+        let en = |i: &Inputs| super::view(i, Lang::En);
+        let mut running = inputs(ServerState::Running);
+        running.snapshot.port = Some(9001);
+        let v = en(&running);
+        assert_eq!(v.title, "Memocampus MCP Server");
+        assert_eq!(v.status, "Status: Running");
+        assert_eq!(v.address, "127.0.0.1:9001");
+        assert_eq!(v.tooltip, "Memocampus MCP: Running 127.0.0.1:9001");
+        assert!(
+            v.vault.starts_with("Vault access: Not confirmed"),
+            "{}",
+            v.vault
+        );
+        assert_eq!(v.start_label, "Start server");
+        let stopped = en(&inputs(ServerState::Stopped));
+        assert_eq!(stopped.address, "Will listen on 127.0.0.1:8765");
+        assert_eq!(stopped.tooltip, "Memocampus MCP: Stopped");
+        let error = en(&inputs(ServerState::Error(ErrorKind::PortInUse)));
+        assert_eq!(error.status, "Status: Error (port is already in use)");
+        assert_eq!(error.start_label, "Start server (retry)");
+        let mut refused = inputs(ServerState::Error(ErrorKind::VaultRefused(
+            "vault_publication_pending".into(),
+        )));
+        refused.snapshot.vault = VaultStatus::Refused("vault_publication_pending".into());
+        assert_eq!(
+            en(&refused).vault,
+            "Vault access: Refused (vault_publication_pending)",
+            "the code is shown as it is"
+        );
+        let mut quitting = inputs(ServerState::Running);
+        quitting.quitting = true;
+        assert_eq!(en(&quitting).status, "Status: Quitting…");
+        let mut failed = inputs(ServerState::Running);
+        failed.last_error = Some(OpError::LogsMissing);
+        assert_eq!(
+            en(&failed).settings_note,
+            "Last action failed: the log folder does not exist yet"
+        );
     }
 
     #[test]

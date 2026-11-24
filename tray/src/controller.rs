@@ -21,6 +21,28 @@ pub trait Opener: Send {
     fn open(&mut self, path: &Path) -> io::Result<()>;
 }
 
+/// Why the last operation failed. A fixed code, never text: the view says it in the user's language
+/// (Issue #78), and nothing compares texts to learn what happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpError {
+    /// The Run value cannot be read, so it was not changed (it could not be restored).
+    AutostartUnreadable,
+    /// A registry change could not be undone: the setting and the Run value disagree.
+    RegistryInconsistent,
+    /// The settings could not be saved; the registry change before it was undone and verified.
+    SaveFailedUndone,
+    AutostartRegisterFailed,
+    SettingsCreateFailed,
+    /// The settings file is invalid, so a toggle did not change it.
+    SettingsInvalidNoChange,
+    AutostartChangeFailed,
+    SettingsSaveFailed,
+    AutostartRepairFailed,
+    SettingsOpenFailed,
+    LogsMissing,
+    LogsOpenFailed,
+}
+
 /// What the UI needs from the controller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControllerState {
@@ -36,7 +58,7 @@ pub struct ControllerState {
     /// A registry change could not be undone after its settings save failed: the logon entry and
     /// the setting disagree. Cleared by the next change that succeeds.
     pub registry_inconsistent: bool,
-    pub last_error: Option<String>,
+    pub last_error: Option<OpError>,
 }
 
 /// What the supervisor's settings source last did, shared with the controller and the UI (S2-04).
@@ -90,7 +112,7 @@ pub struct Controller {
     applied: SharedApplied,
     autostart: Autostart,
     registry_inconsistent: bool,
-    last_error: Option<String>,
+    last_error: Option<OpError>,
 }
 
 /// The fields the server only reads when it starts.
@@ -164,12 +186,12 @@ impl Controller {
             settings_invalid: self.invalid.clone(),
             pending_restart,
             registry_inconsistent: self.registry_inconsistent,
-            last_error: self.last_error.clone(),
+            last_error: self.last_error,
         }
     }
 
-    fn fail(&mut self, text: &str) {
-        self.last_error = Some(text.into());
+    fn fail(&mut self, error: OpError) {
+        self.last_error = Some(error);
     }
 
     fn refresh_autostart(&mut self) {
@@ -179,11 +201,11 @@ impl Controller {
     /// Changes the Run value to on or off. Returns the exact value it had before (for a restore),
     /// or `Err` after reporting why nothing was changed. If the change itself fails half way, the
     /// previous value is put back here; if even that fails the state is reported as inconsistent.
-    fn change_registry(&mut self, enable: bool, failure: &str) -> Result<Option<String>, ()> {
+    fn change_registry(&mut self, enable: bool, failure: OpError) -> Result<Option<String>, ()> {
         // What cannot be read cannot be restored, so nothing is changed.
         let Ok(before) = self.registry.run_value() else {
             self.refresh_autostart();
-            self.fail("ログオン時の自動起動の登録を読み取れないため変更しません");
+            self.fail(OpError::AutostartUnreadable);
             return Err(());
         };
         let changed = if enable {
@@ -216,9 +238,7 @@ impl Controller {
     fn mark_inconsistent(&mut self) {
         self.registry_inconsistent = true;
         self.refresh_autostart();
-        self.fail(
-            "自動起動の登録を元に戻せず、設定と登録が一致していません（レジストリのMemocampusTrayを確認してください）",
-        );
+        self.fail(OpError::RegistryInconsistent);
     }
 
     /// The settings could not be saved after the registry was changed: undo the registry change.
@@ -226,7 +246,7 @@ impl Controller {
     fn undo_after_failed_save(&mut self, before: &Option<String>) {
         if self.restore(before) {
             self.refresh_autostart();
-            self.fail("設定ファイルを保存できませんでした（変更を取り消しました）");
+            self.fail(OpError::SaveFailedUndone);
         } else {
             self.mark_inconsistent();
         }
@@ -242,8 +262,7 @@ impl Controller {
         }
         let defaults = Settings::default();
         let before = if defaults.autostart {
-            match self.change_registry(true, "ログオン時の自動起動を登録できませんでした")
-            {
+            match self.change_registry(true, OpError::AutostartRegisterFailed) {
                 Ok(before) => Some(before),
                 // Nothing was saved either, so the next start tries again.
                 Err(()) => return,
@@ -254,7 +273,7 @@ impl Controller {
         if settings::save(&self.app_dir, &defaults).is_err() {
             match before {
                 Some(before) => self.undo_after_failed_save(&before),
-                None => self.fail("設定ファイルを作成できませんでした"),
+                None => self.fail(OpError::SettingsCreateFailed),
             }
             return;
         }
@@ -265,7 +284,7 @@ impl Controller {
 
     fn settings_for_change(&mut self) -> Option<Settings> {
         if self.invalid.is_some() {
-            self.fail("設定ファイルが不正なため変更できません（ファイルは変更していません）");
+            self.fail(OpError::SettingsInvalidNoChange);
             return None;
         }
         Some(self.settings.clone().unwrap_or_default())
@@ -276,10 +295,8 @@ impl Controller {
             return;
         };
         next.autostart = !next.autostart;
-        let Ok(before) = self.change_registry(
-            next.autostart,
-            "ログオン時の自動起動を変更できませんでした（レジストリ）",
-        ) else {
+        let Ok(before) = self.change_registry(next.autostart, OpError::AutostartChangeFailed)
+        else {
             return;
         };
         if settings::save(&self.app_dir, &next).is_err() {
@@ -302,7 +319,7 @@ impl Controller {
                 self.settings = Some(next);
                 self.last_error = None;
             }
-            Err(_) => self.fail("設定ファイルを保存できませんでした"),
+            Err(_) => self.fail(OpError::SettingsSaveFailed),
         }
     }
 
@@ -314,7 +331,7 @@ impl Controller {
             return;
         }
         if self
-            .change_registry(true, "自動起動の登録を更新できませんでした")
+            .change_registry(true, OpError::AutostartRepairFailed)
             .is_ok()
         {
             self.last_error = None;
@@ -357,25 +374,25 @@ impl Controller {
         if !file.exists() {
             // Only a file that does not exist is created (with the defaults) so there is one to edit.
             if settings::save(&self.app_dir, &Settings::default()).is_err() {
-                return self.fail("設定ファイルを作成できませんでした");
+                return self.fail(OpError::SettingsCreateFailed);
             }
             self.load();
         }
         // An invalid file is opened as it is, for the user to fix.
         match self.opener.open(&file) {
             Ok(()) => self.last_error = None,
-            Err(_) => self.fail("設定ファイルを開けませんでした"),
+            Err(_) => self.fail(OpError::SettingsOpenFailed),
         }
     }
 
     pub fn open_logs(&mut self) {
         let logs = self.app_dir.join("logs");
         if !logs.is_dir() {
-            return self.fail("ログフォルダがまだありません");
+            return self.fail(OpError::LogsMissing);
         }
         match self.opener.open(&logs) {
             Ok(()) => self.last_error = None,
-            Err(_) => self.fail("ログフォルダを開けませんでした"),
+            Err(_) => self.fail(OpError::LogsOpenFailed),
         }
     }
 
@@ -837,7 +854,7 @@ mod tests {
         );
         let state = rig.controller.state();
         assert!(!state.registry_inconsistent);
-        assert!(state.last_error.unwrap().contains("取り消しました"));
+        assert_eq!(state.last_error, Some(OpError::SaveFailedUndone));
         assert_eq!(
             state.autostart,
             Autostart::PathMismatch(Approval::Enabled),
@@ -854,7 +871,7 @@ mod tests {
         assert_eq!(*rig.registry.value.lock().unwrap(), None);
         let state = rig.controller.state();
         assert!(!state.registry_inconsistent);
-        assert!(state.last_error.unwrap().contains("取り消しました"));
+        assert_eq!(state.last_error, Some(OpError::SaveFailedUndone));
         assert_eq!(state.autostart, Autostart::NotRegistered);
         untouched_other(&rig);
     }
@@ -877,9 +894,7 @@ mod tests {
         rig.controller.toggle_autostart();
         let state = rig.controller.state();
         assert!(state.registry_inconsistent);
-        let error = state.last_error.unwrap();
-        assert!(!error.contains("取り消しました"), "{error}");
-        assert!(error.contains("一致していません"), "{error}");
+        assert_eq!(state.last_error, Some(OpError::RegistryInconsistent));
         assert_eq!(
             rig.registry.value.lock().unwrap().as_deref(),
             Some(OURS),
@@ -902,7 +917,9 @@ mod tests {
         rig.controller.toggle_autostart();
         let state = rig.controller.state();
         assert!(state.registry_inconsistent);
-        assert!(!state.last_error.unwrap().contains("取り消しました"));
+        assert!(state
+            .last_error
+            .is_some_and(|e| e != OpError::SaveFailedUndone));
     }
 
     #[test]
@@ -937,7 +954,9 @@ mod tests {
         rig.controller.toggle_autostart();
         let state = rig.controller.state();
         assert!(state.registry_inconsistent);
-        assert!(!state.last_error.unwrap().contains("取り消しました"));
+        assert!(state
+            .last_error
+            .is_some_and(|e| e != OpError::SaveFailedUndone));
         assert!(!state.autostart_setting, "the setting still says off");
     }
 
@@ -954,7 +973,7 @@ mod tests {
         fs::create_dir_all(&rig.dir).unwrap();
         assert_eq!(registered, None, "undone");
         assert!(!state.registry_inconsistent);
-        assert!(state.last_error.unwrap().contains("取り消しました"));
+        assert_eq!(state.last_error, Some(OpError::SaveFailedUndone));
     }
 
     #[test]
