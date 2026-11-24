@@ -16,6 +16,8 @@ const LOCALIZED_FILES = [
   // Slice 2: the Side Panel except the Vault section (sidepanel.html is checked in i18n-sidepanel.test.js).
   "sidepanel.js", "tabs.js", "delete-ui.js", "url-history.js", "visit-calendar.js", "item-dialog.js", "image-gallery.js", "image-client.js",
   "page-panel.js", "page-text.js", "page-client.js", "delete-client.js", "vault-items-client.js", "host-capabilities.js",
+  // Slice 3: the Vault section of the Side Panel (sidepanel.html has no Japanese left; see i18n-sidepanel.test.js).
+  "vault-client.js", "vault-panel.js",
 ];
 
 const entry = (message, placeholders) => ({ message, description: "test", ...(placeholders ? { placeholders } : {}) });

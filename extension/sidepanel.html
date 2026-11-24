@@ -173,8 +173,7 @@
     </dialog>
 
     <section id="panel-settings" class="tabpanel" role="tabpanel" aria-labelledby="tab-settings" hidden>
-      <!-- i18n: the Vault section is localized in Issue #77 Slice 3; until then it is Japanese and marked lang="ja". -->
-      <section id="vault-panel" class="vault-panel" aria-labelledby="vault-heading" lang="ja">
+      <section id="vault-panel" class="vault-panel" aria-labelledby="vault-heading">
         <h2 id="vault-heading">Vault</h2>
         <p id="vault-state" class="vault-state"></p>
         <p id="vault-path" class="vault-path" hidden></p>
@@ -186,55 +185,55 @@
         <div id="vault-publication" class="vault-publication" hidden>
           <p id="vault-publication-state" class="vault-publication-state"></p>
           <p id="vault-publication-note" class="vault-meta"></p>
-          <button id="vault-publication-confirm" type="button" hidden>MCPへの公開を確認して承認…</button>
-          <button id="vault-publication-revoke" type="button" hidden>MCPへの公開を停止</button>
+          <button id="vault-publication-confirm" type="button" data-i18n="vaultPublicationConfirmButton" hidden></button>
+          <button id="vault-publication-revoke" type="button" data-i18n="vaultPublicationRevokeButton" hidden></button>
           <div id="vault-publication-review" class="vault-approval" role="alertdialog" aria-labelledby="vault-publication-review-title" hidden>
             <p id="vault-publication-review-title"></p>
-            <button id="vault-publication-approve" type="button">確認した上で承認し、MCPに公開する</button>
-            <button id="vault-publication-cancel" type="button">やめる</button>
+            <button id="vault-publication-approve" type="button" data-i18n="vaultPublicationApproveButton"></button>
+            <button id="vault-publication-cancel" type="button" data-i18n="vaultCancelButton"></button>
           </div>
         </div>
         <div id="vault-creation-pending" class="vault-approval" role="alert" hidden>
           <p id="vault-creation-pending-text"></p>
-          <button id="vault-creation-discard" type="button">作成途中のVaultを破棄する</button>
+          <button id="vault-creation-discard" type="button" data-i18n="vaultCreationDiscardButton"></button>
         </div>
         <div id="vault-recovery-offer" class="vault-recovery-offer" hidden>
-          <button id="vault-recovery-start" type="button">ふっかつのじゅもんで復旧…</button>
+          <button id="vault-recovery-start" type="button" data-i18n="vaultRecoveryStartButton"></button>
         </div>
         <fieldset id="vault-encryption" class="vault-encryption">
-          <legend>新規作成するVault</legend>
-          <label><input id="vault-encryption-encrypted" type="radio" name="vault-encryption" value="encrypted" checked> 暗号化する（推奨）</label>
-          <label><input id="vault-encryption-plain" type="radio" name="vault-encryption" value="plain"> 暗号化しない</label>
+          <legend data-i18n="vaultNewVaultLegend"></legend>
+          <label><input id="vault-encryption-encrypted" type="radio" name="vault-encryption" value="encrypted" checked> <span data-i18n="vaultEncryptChoice"></span></label>
+          <label><input id="vault-encryption-plain" type="radio" name="vault-encryption" value="plain"> <span data-i18n="vaultPlainChoice"></span></label>
           <p id="vault-encryption-note" class="vault-meta"></p>
         </fieldset>
         <fieldset id="vault-backup-options" class="vault-encryption">
-          <legend>バックアップの保護</legend>
-          <label><input id="vault-backup-normal" type="radio" name="vault-backup-protection" value="normal" checked> 通常</label>
-          <label><input id="vault-backup-password" type="radio" name="vault-backup-protection" value="password"> パスワードで保護する</label>
+          <legend data-i18n="vaultBackupLegend"></legend>
+          <label><input id="vault-backup-normal" type="radio" name="vault-backup-protection" value="normal" checked> <span data-i18n="vaultBackupNormalChoice"></span></label>
+          <label><input id="vault-backup-password" type="radio" name="vault-backup-protection" value="password"> <span data-i18n="vaultBackupPasswordChoice"></span></label>
           <p id="vault-backup-note" class="vault-meta"></p>
           <div id="vault-backup-password-fields" class="vault-secret-fields" hidden>
-            <label>パスワード <input id="vault-backup-password-input" type="password" autocomplete="new-password" spellcheck="false"></label>
-            <label>パスワード（確認） <input id="vault-backup-password-confirm" type="password" autocomplete="new-password" spellcheck="false"></label>
+            <label><span data-i18n="vaultPasswordLabel"></span> <input id="vault-backup-password-input" type="password" autocomplete="new-password" spellcheck="false"></label>
+            <label><span data-i18n="vaultPasswordConfirmLabel"></span> <input id="vault-backup-password-confirm" type="password" autocomplete="new-password" spellcheck="false"></label>
             <p id="vault-backup-password-note" class="vault-meta"></p>
           </div>
           <div id="vault-backup-spell-row" class="vault-secret-fields" hidden>
-            <label>ふっかつのじゅもん（43文字） <input id="vault-backup-spell" class="vault-spell-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" translate="no"></label>
+            <label><span data-i18n="vaultSpellInputLabel"></span> <input id="vault-backup-spell" class="vault-spell-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" translate="no"></label>
             <p id="vault-backup-spell-note" class="vault-meta"></p>
           </div>
         </fieldset>
         <div class="vault-actions">
-          <button id="vault-create-default" type="button">既定の場所に新規作成</button>
+          <button id="vault-create-default" type="button" data-i18n="vaultCreateDefaultButton"></button>
           <p id="vault-default-path" class="vault-meta"></p>
-          <button id="vault-create-pick" type="button">場所を選んで新規作成…</button>
-          <button id="vault-open-pick" type="button">既存のVaultを開く…</button>
-          <button id="vault-backup-pick" type="button">バックアップを作成…</button>
-          <button id="vault-restore-pick" type="button">バックアップから復元…</button>
+          <button id="vault-create-pick" type="button" data-i18n="vaultCreatePickButton"></button>
+          <button id="vault-open-pick" type="button" data-i18n="vaultOpenPickButton"></button>
+          <button id="vault-backup-pick" type="button" data-i18n="vaultBackupPickButton"></button>
+          <button id="vault-restore-pick" type="button" data-i18n="vaultRestorePickButton"></button>
         </div>
         <fieldset id="vault-convert" class="vault-encryption vault-convert" hidden>
           <legend id="vault-convert-title"></legend>
           <p id="vault-convert-note" class="vault-meta"></p>
           <p id="vault-convert-source" class="vault-meta"></p>
-          <label id="vault-convert-ack-row" class="vault-convert-ack" hidden><input id="vault-convert-ack" type="checkbox"> 閲覧履歴や保存画像などが暗号化されずにディスクへ保存されることを理解しました</label>
+          <label id="vault-convert-ack-row" class="vault-convert-ack" hidden><input id="vault-convert-ack" type="checkbox"> <span data-i18n="vaultDecryptAck"></span></label>
           <button id="vault-convert-pick" type="button"></button>
         </fieldset>
         <fieldset id="vault-reissue" class="vault-encryption vault-convert" hidden>
@@ -243,12 +242,12 @@
           <button id="vault-reissue-pick" type="button"></button>
         </fieldset>
         <details class="vault-manual">
-          <summary>パスを直接入力</summary>
-          <input id="vault-path-input" type="text" spellcheck="false" autocomplete="off" aria-label="Vaultまたはバックアップ先のパス" placeholder="C:\Users\…\memocampus.sqlite3">
+          <summary data-i18n="vaultManualSummary"></summary>
+          <input id="vault-path-input" type="text" spellcheck="false" autocomplete="off" data-i18n-aria-label="vaultPathInputLabel" placeholder="C:\Users\…\memocampus.sqlite3">
           <div class="vault-manual-actions">
-            <button type="button" data-manual="vault_create">このパスに新規作成</button>
-            <button type="button" data-manual="vault_open">このVaultを開く</button>
-            <button type="button" data-manual="vault_backup">このフォルダにバックアップ</button>
+            <button type="button" data-manual="vault_create" data-i18n="vaultManualCreateButton"></button>
+            <button type="button" data-manual="vault_open" data-i18n="vaultManualOpenButton"></button>
+            <button type="button" data-manual="vault_backup" data-i18n="vaultManualBackupButton"></button>
           </div>
         </details>
         <div id="vault-onboarding" class="vault-approval vault-onboarding" role="alertdialog" aria-labelledby="vault-onboarding-title" hidden>
@@ -258,60 +257,59 @@
           <p id="vault-onboarding-path" class="vault-meta"></p>
           <div id="vault-spell-show">
             <code id="vault-spell" class="vault-spell" translate="no"></code>
-            <button id="vault-spell-copy" type="button">コピー</button>
+            <button id="vault-spell-copy" type="button" data-i18n="vaultSpellCopyButton"></button>
             <p id="vault-spell-note" class="vault-meta"></p>
-            <button id="vault-spell-written" type="button">記録しました。確認に進む</button>
+            <button id="vault-spell-written" type="button" data-i18n="vaultSpellWrittenButton"></button>
           </div>
           <div id="vault-spell-check" class="vault-secret-fields" hidden>
             <p id="vault-spell-check-title"></p>
-            <label>ふっかつのじゅもん（43文字） <input id="vault-spell-confirm-input" class="vault-spell-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" translate="no"></label>
-            <button id="vault-spell-confirm" type="button">確認して作成を完了する</button>
-            <button id="vault-spell-back" type="button">呪文の表示に戻る</button>
+            <label><span data-i18n="vaultSpellInputLabel"></span> <input id="vault-spell-confirm-input" class="vault-spell-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" translate="no"></label>
+            <button id="vault-spell-confirm" type="button" data-i18n="vaultSpellConfirmCreate"></button>
+            <button id="vault-spell-back" type="button" data-i18n="vaultSpellBackButton"></button>
           </div>
-          <button id="vault-onboarding-cancel" type="button">作成をやめる</button>
+          <button id="vault-onboarding-cancel" type="button" data-i18n="vaultOnboardingCancelCreate"></button>
         </div>
         <div id="vault-recovery" class="vault-approval" role="alertdialog" aria-labelledby="vault-recovery-title" hidden>
           <p id="vault-recovery-title"></p>
-          <input id="vault-recovery-input" class="vault-spell-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" translate="no" aria-label="ふっかつのじゅもん（43文字）">
-          <button id="vault-recovery-submit" type="button">復旧して開く</button>
-          <button id="vault-recovery-cancel" type="button">やめる</button>
+          <input id="vault-recovery-input" class="vault-spell-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" translate="no" data-i18n-aria-label="vaultSpellInputLabel">
+          <button id="vault-recovery-submit" type="button" data-i18n="vaultRecoverySubmitButton"></button>
+          <button id="vault-recovery-cancel" type="button" data-i18n="vaultCancelButton"></button>
         </div>
         <div id="vault-restore" class="vault-approval" role="alertdialog" aria-labelledby="vault-restore-title" hidden>
           <p id="vault-restore-title"></p>
           <div class="vault-secret-fields">
-            <label id="vault-restore-password-row" hidden>バックアップのパスワード <input id="vault-restore-password" type="password" autocomplete="off" spellcheck="false"></label>
-            <label id="vault-restore-spell-row" hidden>ふっかつのじゅもん（43文字） <input id="vault-restore-spell" class="vault-spell-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" translate="no"></label>
+            <label id="vault-restore-password-row" hidden><span data-i18n="vaultRestorePasswordLabel"></span> <input id="vault-restore-password" type="password" autocomplete="off" spellcheck="false"></label>
+            <label id="vault-restore-spell-row" hidden><span data-i18n="vaultSpellInputLabel"></span> <input id="vault-restore-spell" class="vault-spell-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" translate="no"></label>
           </div>
-          <button id="vault-restore-submit" type="button">復元先を選んで復元…</button>
-          <button id="vault-restore-cancel" type="button">やめる</button>
+          <button id="vault-restore-submit" type="button" data-i18n="vaultRestoreSubmitButton"></button>
+          <button id="vault-restore-cancel" type="button" data-i18n="vaultCancelButton"></button>
         </div>
         <div id="vault-restored" class="vault-approval" role="alertdialog" aria-labelledby="vault-restored-title" hidden>
           <p id="vault-restored-title"></p>
           <p id="vault-restored-policy" class="vault-meta"></p>
           <details id="vault-restored-policy-details" hidden>
-            <summary>プライバシー設定のコピーを表示</summary>
+            <summary data-i18n="vaultPolicyCopyShow"></summary>
             <pre id="vault-restored-policy-json" class="vault-policy-copy"></pre>
           </details>
-          <button id="vault-restore-activate" type="button">このVaultを使い始める（MCPへの公開は未承認）</button>
-          <button id="vault-restore-discard" type="button">復元したVaultを破棄する</button>
+          <button id="vault-restore-activate" type="button" data-i18n="vaultRestoreActivateButton"></button>
+          <button id="vault-restore-discard" type="button" data-i18n="vaultRestoreDiscardButton"></button>
         </div>
         <div id="vault-converted" class="vault-approval" role="alertdialog" aria-labelledby="vault-converted-title" hidden>
           <p id="vault-converted-title"></p>
-          <button id="vault-convert-activate" type="button">変換したVaultを使い始める（MCPへの公開は未承認）</button>
-          <button id="vault-convert-keep" type="button">切り替えずに保存して終える</button>
-          <button id="vault-convert-discard" type="button">変換したVaultを破棄する</button>
+          <button id="vault-convert-activate" type="button" data-i18n="vaultConvertActivateButton"></button>
+          <button id="vault-convert-keep" type="button" data-i18n="vaultConvertKeepButton"></button>
+          <button id="vault-convert-discard" type="button" data-i18n="vaultConvertDiscardButton"></button>
         </div>
         <div id="vault-approval" class="vault-approval" role="alertdialog" aria-labelledby="vault-approval-title" hidden>
           <p id="vault-approval-title"></p>
           <ul id="vault-approval-reasons"></ul>
-          <button id="vault-approve" type="button">注意を理解して続行</button>
-          <button id="vault-approve-cancel" type="button">やめる</button>
+          <button id="vault-approve" type="button" data-i18n="vaultApproveButton"></button>
+          <button id="vault-approve-cancel" type="button" data-i18n="vaultCancelButton"></button>
         </div>
         <p id="vault-message" class="vault-message" role="status" aria-live="polite"></p>
         <p class="vault-meta" id="vault-note"></p>
-        <p class="vault-meta">別のVaultに切り替えても、データは移行されず、元のVaultは削除されません。</p>
+        <p class="vault-meta" data-i18n="vaultSwitchNote"></p>
       </section>
-      <!-- i18n: end of the Vault section (Slice 3). -->
       <section class="vault-panel" aria-labelledby="privacy-heading">
         <h2 id="privacy-heading" data-i18n="panelPrivacyHeading"></h2>
         <p class="vault-meta" data-i18n="panelPrivacyNote"></p>

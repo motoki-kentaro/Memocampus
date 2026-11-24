@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { OTHER_SPELL, TEST_SPELL, loadSidePanel, pages, settle } from "./fake-dom.js";
-import { SPELL_CAUTION, SPELL_LEAD, checkSpell, describeSpellProblem, normalizeSpellInput, spellMatches } from "../../extension/vault-client.js";
+import { texts, checkSpell, describeSpellProblem, normalizeSpellInput, spellMatches } from "../../extension/vault-client.js";
 
 const sent = (host, type) => host.requests.filter((message) => message.type === type);
 
@@ -55,9 +55,9 @@ test("encryption is the default: the spell is shown once, entered again in full,
   // The wording the PO chose, and the spell itself in one piece.
   assert.equal($("#vault-onboarding-title").textContent, "ふっかつのじゅもん（Recovery Spell）");
   assert.equal($("#vault-spell-lead").textContent, "あなたの記憶を取り戻すための、復活の呪文を記録してください。決して忘れないでくださいね。");
-  assert.equal($("#vault-spell-lead").textContent, SPELL_LEAD);
+  assert.equal($("#vault-spell-lead").textContent, texts.SPELL_LEAD);
   assert.equal($("#vault-spell-caution").textContent, "この呪文は一度しか表示されません。安全な場所に保管してください。失うとバックアップから復元できなくなる場合があります。");
-  assert.equal($("#vault-spell-caution").textContent, SPELL_CAUTION);
+  assert.equal($("#vault-spell-caution").textContent, texts.SPELL_CAUTION);
   assert.equal($("#vault-spell").textContent, TEST_SPELL);
   assert.match($("#vault-onboarding-path").textContent, /保存先: C:\\Vaults\\memocampus\.sqlite3/);
   assert.match($("#vault-spell-note").textContent, /大文字と小文字は区別されます/);
@@ -97,7 +97,7 @@ test("encryption is the default: the spell is shown once, entered again in full,
     await settle(20);
     assert.equal(sent(host, "vault_create_encrypted_commit").length, 0, typed);
     assert.match($("#vault-message").textContent, message, typed);
-    assert.match($("#vault-message").textContent, /Vaultはまだ作成していません/);
+    assert.match($("#vault-message").textContent, /Vaultの作成はまだ完了していません/);
     assert.equal($("#vault-onboarding").hidden, false);
     assert.equal(host.active, "A");
   }

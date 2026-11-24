@@ -3217,5 +3217,1123 @@
   "panelPrivacySettings": {
     "message": "Privacy設定",
     "description": "Side Panel (sidepanel.html). Settings tab: opens the Options page."
+  },
+  "vaultStateReady": {
+    "message": "接続中",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state: the Active Vault is open and usable."
+  },
+  "vaultStateNotConfigured": {
+    "message": "Vaultが未設定です",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state: no Vault has been created or chosen. Must not suggest that one will be created automatically."
+  },
+  "vaultStateMissing": {
+    "message": "Vaultファイルが見つかりません",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state. Nothing is re-created automatically."
+  },
+  "vaultStateInvalid": {
+    "message": "Vaultの形式が不正です",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state."
+  },
+  "vaultStateSchemaMismatch": {
+    "message": "このVaultは現在の形式に対応していません。自動変換は行いません",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state; no final period, as in Japanese."
+  },
+  "vaultStateConfigInvalid": {
+    "message": "設定ファイルを読み取れません",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state."
+  },
+  "vaultStateAppDirUnavailable": {
+    "message": "設定フォルダを特定できません",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state."
+  },
+  "vaultStateModeMismatch": {
+    "message": "Vaultファイルが設定上の形式（暗号化／平文）と一致しません。ファイルは変更していません",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state. SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultStateEncryptionUnsupported": {
+    "message": "この環境では暗号化Vaultを開けません。ファイルは変更していません",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state. SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultStateKeyUnavailable": {
+    "message": "このWindowsユーザーでは暗号化Vaultの鍵を取得できません。ファイルは変更していません",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state. SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultStateLocked": {
+    "message": "暗号化Vaultがロックされています。ファイルは変更していません",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state. SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultStateDecryptFailed": {
+    "message": "暗号化Vaultを復号できません。ファイルは変更していません",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state. SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultStateOverridden": {
+    "message": "開発用DB(MEMOCAMPUS_DB)を使用中（$state$）",
+    "description": "Side Panel, Vault settings (vault-client.js). State while a developer database is forced; [state] is a one-line state or a raw state code.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultStateUnknown": {
+    "message": "Vaultの状態を確認できません",
+    "description": "Side Panel, Vault settings (vault-client.js). One-line state for an unknown answer."
+  },
+  "vaultCounts": {
+    "message": "閲覧 $visits$件・スナップショット $snapshots$件",
+    "description": "Side Panel, Vault settings (vault-client.js). Contents of the Active Vault; numbers are already formatted.",
+    "placeholders": {
+      "visits": {
+        "content": "$1"
+      },
+      "snapshots": {
+        "content": "$2"
+      }
+    }
+  },
+  "vaultCountsWithPages": {
+    "message": "閲覧 $visits$件・スナップショット $snapshots$件・Page保存 $pages$件・MHTML原本 $blobs$件",
+    "description": "Side Panel, Vault settings (vault-client.js). Contents of the Active Vault; numbers are already formatted.",
+    "placeholders": {
+      "visits": {
+        "content": "$1"
+      },
+      "snapshots": {
+        "content": "$2"
+      },
+      "pages": {
+        "content": "$3"
+      },
+      "blobs": {
+        "content": "$4"
+      }
+    }
+  },
+  "vaultReasonNetworkPath": {
+    "message": "ネットワーク共有(UNC)上です",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultReasonNetworkDrive": {
+    "message": "ネットワークドライブ上です",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultReasonOpticalDrive": {
+    "message": "光学ドライブです",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultReasonRamDisk": {
+    "message": "RAMディスクです（再起動で消えます）",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultReasonUnknownDrive": {
+    "message": "ドライブの種類を判定できません",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultReasonExecutableDirectory": {
+    "message": "Native Hostの実行ファイルと同じフォルダです",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultReasonRemovableDrive": {
+    "message": "取り外し可能なドライブです",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultReasonNonLocalFilesystem": {
+    "message": "NTFS/ReFS以外のファイルシステムです",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultReasonVolumeInfoUnavailable": {
+    "message": "ボリューム情報を取得できません",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultReasonGoogleDrive": {
+    "message": "Google Driveのドライブ上です",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultReasonSyncFolder": {
+    "message": "同期フォルダ(OneDrive等)の中です",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultReasonCloudFiles": {
+    "message": "クラウド同期ファイルの属性があります",
+    "description": "Side Panel, Vault settings (vault-client.js). Why a Vault location is risky or refused."
+  },
+  "vaultVerdictNoIssue": {
+    "message": "既知の問題は検出されませんでした",
+    "description": "Side Panel, Vault settings (vault-client.js). Result of the location check of the Vault shown."
+  },
+  "vaultVerdictNeedsApproval": {
+    "message": "注意が必要な場所です",
+    "description": "Side Panel, Vault settings (vault-client.js). Result of the location check: usable only after the person confirms."
+  },
+  "vaultVerdictRejected": {
+    "message": "Active Vaultには使用できない場所です",
+    "description": "Side Panel, Vault settings (vault-client.js). Result of the location check: refused."
+  },
+  "vaultVerdictApproved": {
+    "message": "$verdict$（承認済み）",
+    "description": "Side Panel, Vault settings (vault-panel.js). [verdict] is the location check result; the person has already accepted this location.",
+    "placeholders": {
+      "verdict": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultLocationNote": {
+    "message": "未登録の同期ツール（Syncthing等）は判定できません。Active Vaultは同期・ネットワーク外のローカルディスクに置いてください。",
+    "description": "Side Panel, Vault settings (vault-client.js). Note under the Vault settings."
+  },
+  "vaultReasonBullet": {
+    "message": "・$reason$",
+    "description": "Side Panel, Vault settings (vault-panel.js). One reason in a list inside a message; [reason] is a reason text or code.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultEncryptionNote": {
+    "message": "暗号化すると、Vaultファイルが盗まれたりコピーされたりしても、鍵がなければ中身を読めません。このWindowsユーザーでは、毎回パスワードを入力せずに使えます。作成時に一度だけ表示する「ふっかつのじゅもん（Recovery Spell）」は、PCの入れ替えやWindowsの再インストール後に開くときと、暗号化Vaultのバックアップから復元するときに必要です。",
+    "description": "Side Panel, Vault settings (vault-client.js). Note under the choice of a new Vault's encryption. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSpellTitle": {
+    "message": "ふっかつのじゅもん（Recovery Spell）",
+    "description": "Side Panel, Vault settings (vault-client.js). Title of the step that shows the spell once. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSpellLead": {
+    "message": "あなたの記憶を取り戻すための、復活の呪文を記録してください。決して忘れないでくださいね。",
+    "description": "Side Panel, Vault settings (vault-client.js). Friendly lead of the spell step (the product's tone). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSpellCaution": {
+    "message": "この呪文は一度しか表示されません。安全な場所に保管してください。失うとバックアップから復元できなくなる場合があります。",
+    "description": "Side Panel, Vault settings (vault-client.js). Warning of the spell step. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSpellNote": {
+    "message": "・この呪文と暗号化Vaultのファイル1個（またはそのバックアップ）があれば、別のPC、Windowsの再インストール後、別のWindowsユーザーでも記憶を取り戻せます。ほかのファイルは必要ありません。\n・Memocampusは呪文を保存せず、再表示もできません。呪文をなくしたときは、Vaultを開けるうちに「ふっかつのじゅもんを再発行する」で、新しい呪文の新しいVaultを作れます。\n・呪文を知っている人は、Vaultファイル（またはバックアップ）があれば中身を読めます。誰にも伝えないでください。\n・英字の大文字と小文字は区別されます。紙に書き写すときは、0（ゼロ）とO（オー）、1とlとI、-（ハイフン）と_（アンダースコア）の違いに注意してください。\n・「コピー」を押すと、呪文がクリップボードに入ります。クリップボードやWindowsのクリップボード履歴に残る場合があるため、保管し終えたら消去してください。",
+    "description": "Side Panel, Vault settings (vault-client.js). Bullet notes of the spell step, one per line; quoted names are the reissue section title and the Copy button. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSpellCheckTitle": {
+    "message": "記録したふっかつのじゅもんを、$length$文字すべて入力するか貼り付けてください。表示した呪文と完全に一致するまで、この操作は完了しません。\n※この確認は、呪文を安全に保管したことの証明にはなりません。PCとは別の安全な場所に保管してください。",
+    "description": "Side Panel, Vault settings (vault-client.js). The re-entry step; [length] is the number of characters of a spell. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message.",
+    "placeholders": {
+      "length": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultRecoveryTitle": {
+    "message": "このWindowsユーザーには、この暗号化Vaultの鍵が保存されていません（別のPC・再インストール後・別のユーザーなど）。\n作成時に記録したふっかつのじゅもん（$length$文字）を入力すると、鍵をこのWindowsユーザー用に保存し直して開きます。\n呪文はこのPCに保存しません。",
+    "description": "Side Panel, Vault settings (vault-client.js). Recovery of an encrypted Vault; [length] is the number of characters of a spell. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message.",
+    "placeholders": {
+      "length": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultSpellLength": {
+    "message": "ふっかつのじゅもんは$length$文字です（$count$文字でした）。",
+    "description": "Side Panel, Vault settings (vault-client.js). Input check; [count] is how many characters were entered. Never shows the input. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message.",
+    "placeholders": {
+      "length": {
+        "content": "$1"
+      },
+      "count": {
+        "content": "$2"
+      }
+    }
+  },
+  "vaultSpellCharacter": {
+    "message": "$position$文字目に使えない文字があります。使える文字は英字（大文字・小文字）、数字、「-」「_」だけです（空白や全角文字は使えません）。",
+    "description": "Side Panel, Vault settings (vault-client.js). Input check before sending; [position] is a 1-based position. Never shows the input. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message.",
+    "placeholders": {
+      "position": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultSpellCharacterHost": {
+    "message": "$position$文字目に使えない文字があります。使える文字は英字（大文字・小文字）、数字、「-」「_」だけです。",
+    "description": "Side Panel, Vault settings (vault-client.js). The Native Host refused the spell; [position] is a 1-based position or ?. Never shows the input. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message.",
+    "placeholders": {
+      "position": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultSpellLastCharacter": {
+    "message": "最後の文字が正しくありません。記録した呪文と照らし合わせてください。",
+    "description": "Side Panel, Vault settings (vault-client.js). Input check. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultBackupFormatA": {
+    "message": "形式A: 通常のSQLiteファイルとして保存します（暗号化なし）。プライバシー設定のコピーは含みません。",
+    "description": "Side Panel, Vault settings (vault-client.js). Backup format of an unencrypted Vault, normal protection. Format letters A to D are fixed names."
+  },
+  "vaultBackupFormatB": {
+    "message": "形式B: 暗号化したまま1つのファイルに保存します。復元にはふっかつのじゅもんが必要です（このPCの鍵は不要）。作成時に、お手元の呪文でこのVaultを復旧できることを確認します。プライバシー設定のコピーを暗号化して含みます。",
+    "description": "Side Panel, Vault settings (vault-client.js). Backup format of an encrypted Vault, normal protection. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultBackupFormatC": {
+    "message": "形式C: バックアップ全体をパスワードで暗号化します。復元にはこのパスワードが必要です。元のVault自体は暗号化されません。プライバシー設定のコピーを含みます。",
+    "description": "Side Panel, Vault settings (vault-client.js). Backup format of an unencrypted Vault, password protection."
+  },
+  "vaultBackupFormatD": {
+    "message": "形式D: 暗号化Vaultを、さらにパスワードで保護します。復元にはパスワードとふっかつのじゅもんの両方が必要です。作成時に、お手元の呪文でこのVaultを復旧できることを確認します。プライバシー設定のコピーを含みます。",
+    "description": "Side Panel, Vault settings (vault-client.js). Backup format of an encrypted Vault, password protection. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultBackupPasswordNote": {
+    "message": "パスワードは$min$文字以上にしてください。パスワードはどこにも保存しません。忘れると、このバックアップは復元できません（Memocampusは再発行できません）。",
+    "description": "Side Panel, Vault settings (vault-client.js). SECRET: the backup password; [min] is the minimum length.",
+    "placeholders": {
+      "min": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultBackupSpellNote": {
+    "message": "暗号化Vaultのバックアップは、復元にふっかつのじゅもんが必要です。記録した呪文（43文字）を入力してください。このVaultを復旧できる呪文でなければ、バックアップは作成しません。呪文は保存しません。",
+    "description": "Side Panel, Vault settings (vault-client.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultBackupPasswordShort": {
+    "message": "パスワードは$min$文字以上で入力してください。",
+    "description": "Side Panel, Vault settings (vault-client.js). Input check of the backup password; [min] is the minimum length. Never shows the input.",
+    "placeholders": {
+      "min": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultBackupPasswordMismatch": {
+    "message": "確認用のパスワードが一致しません。",
+    "description": "Side Panel, Vault settings (vault-client.js). Input check of the backup password. Never shows the input."
+  },
+  "vaultBackupNotCreated": {
+    "message": "バックアップは作成していません。",
+    "description": "Side Panel, Vault settings (vault-panel.js). Appended after a problem. SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultBackupCreated": {
+    "message": "バックアップを作成しました。\nバックアップ元: $source$\n保存先: $target$",
+    "description": "Side Panel, Vault settings (vault-panel.js). [source] is the Vault backed up, [target] the backup file (paths as is).",
+    "placeholders": {
+      "source": {
+        "content": "$1"
+      },
+      "target": {
+        "content": "$2"
+      }
+    }
+  },
+  "vaultBackupCreatedFormat": {
+    "message": "バックアップを作成しました（形式$format$）。\nバックアップ元: $source$\n保存先: $target$",
+    "description": "Side Panel, Vault settings (vault-panel.js). [format] is a format letter A to D; [source] the Vault backed up, [target] the backup file.",
+    "placeholders": {
+      "format": {
+        "content": "$1"
+      },
+      "source": {
+        "content": "$2"
+      },
+      "target": {
+        "content": "$3"
+      }
+    }
+  },
+  "vaultBackupPolicyIncluded": {
+    "message": "プライバシー設定のコピーを含めました。",
+    "description": "Side Panel, Vault settings (vault-panel.js). Appended to the backup result."
+  },
+  "vaultBackupSourceMismatch": {
+    "message": "バックアップ元が表示中のVaultと一致しません。作成されたファイルを確認してください。\nバックアップ元: $source$\n保存先: $target$",
+    "description": "Side Panel, Vault settings (vault-panel.js). The host answered about another Vault than the one shown; the answer is reported, not trusted.",
+    "placeholders": {
+      "source": {
+        "content": "$1"
+      },
+      "target": {
+        "content": "$2"
+      }
+    }
+  },
+  "vaultBackupSourceUnknown": {
+    "message": "バックアップするVaultを確認できないため、開始しませんでした。表示を更新します。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultRestoreFormatA": {
+    "message": "形式A（平文Vaultの通常バックアップ）。暗号化されていません。プライバシー設定のコピーは含まれません。",
+    "description": "Side Panel, Vault settings (vault-client.js). Format of the backup chosen for a restore."
+  },
+  "vaultRestoreFormatB": {
+    "message": "形式B（暗号化Vaultの通常バックアップ）。復元にはふっかつのじゅもんが必要です。",
+    "description": "Side Panel, Vault settings (vault-client.js). Format of the backup chosen for a restore. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultRestoreFormatC": {
+    "message": "形式C（パスワード保護）。復元にはバックアップのパスワードが必要です。",
+    "description": "Side Panel, Vault settings (vault-client.js). Format of the backup chosen for a restore."
+  },
+  "vaultRestoreFormatD": {
+    "message": "形式D（暗号化Vault＋パスワード保護）。復元にはパスワードとふっかつのじゅもんの両方が必要です。",
+    "description": "Side Panel, Vault settings (vault-client.js). Format of the backup chosen for a restore. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultRestoreFormatUnknown": {
+    "message": "形式を確認できません。",
+    "description": "Side Panel, Vault settings (vault-client.js). The backup's format is not known."
+  },
+  "vaultRestoreNote": {
+    "message": "復元は常に新しいVaultとして作成します。既存のファイルやVaultは上書きしません。現在のVaultは、復元したVaultを「使い始める」まで変わりません。復元したVaultのMCPへの公開は、未承認から始まります。",
+    "description": "Side Panel, Vault settings (vault-client.js). SAFETY: restoring (creating the restored file) and starting to use it are two separate steps; “Start using” quotes the start of the button label."
+  },
+  "vaultRestoreSourcePath": {
+    "message": "復元するバックアップ: $path$",
+    "description": "Side Panel, Vault settings (vault-client.js). [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultRestorePolicyIncluded": {
+    "message": "プライバシー設定のコピーが含まれています（復元後に内容を確認できます。自動では適用しません）。",
+    "description": "Side Panel, Vault settings (vault-client.js). About the backup chosen for a restore."
+  },
+  "vaultRestoredPath": {
+    "message": "復元しました（まだ使用していません）: $path$",
+    "description": "Side Panel, Vault settings (vault-client.js). SAFETY: the restored Vault exists but is not the Active Vault. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultRestoredEncrypted": {
+    "message": "暗号化Vault（このWindowsユーザーで鍵を保存しました）",
+    "description": "Side Panel, Vault settings (vault-client.js). Kind of the restored Vault."
+  },
+  "vaultRestoredPlain": {
+    "message": "平文のVault",
+    "description": "Side Panel, Vault settings (vault-client.js). Kind of the restored Vault."
+  },
+  "vaultRestoredCounts": {
+    "message": "閲覧 $visits$件・スナップショット $snapshots$件・画像 $images$件",
+    "description": "Side Panel, Vault settings (vault-client.js). Contents of the restored Vault; numbers are already formatted.",
+    "placeholders": {
+      "visits": {
+        "content": "$1"
+      },
+      "snapshots": {
+        "content": "$2"
+      },
+      "images": {
+        "content": "$3"
+      }
+    }
+  },
+  "vaultPageCounts": {
+    "message": "Page保存 $pages$件・MHTML原本 $blobs$件",
+    "description": "Side Panel, Vault settings (vault-client.js). Saved pages in a restored or converted Vault; numbers are already formatted.",
+    "placeholders": {
+      "pages": {
+        "content": "$1"
+      },
+      "blobs": {
+        "content": "$2"
+      }
+    }
+  },
+  "vaultRestoredStartNote": {
+    "message": "「使い始める」を押すと、このVaultをActive Vaultにします。MCPへの公開は未承認のままです。",
+    "description": "Side Panel, Vault settings (vault-client.js). SAFETY: nothing becomes active before the person chooses Start using."
+  },
+  "vaultPolicyCopyValid": {
+    "message": "このバックアップには、プライバシー設定のコピー（改訂$revision$）が含まれています。現在のプライバシー設定には自動で適用しません。内容を確認し、必要なら「プライバシー設定」で同じ設定にしてください。",
+    "description": "Side Panel, Vault settings (vault-client.js). PRIVACY: a policy copy is only shown, never applied. [revision] is a number or ?. The quote is the Privacy settings button.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultPolicyCopyInvalid": {
+    "message": "プライバシー設定のコピーを読み取れません（破損または未対応の版）。適用はしません。",
+    "description": "Side Panel, Vault settings (vault-client.js). PRIVACY."
+  },
+  "vaultPolicyCopyAbsent": {
+    "message": "このバックアップには、プライバシー設定のコピーは含まれていません。",
+    "description": "Side Panel, Vault settings (vault-client.js)."
+  },
+  "vaultPolicyCopyNotSupported": {
+    "message": "形式Aのバックアップには、プライバシー設定のコピーは含まれません。",
+    "description": "Side Panel, Vault settings (vault-client.js)."
+  },
+  "vaultRestorePendingReady": {
+    "message": "復元済みで、まだ使用していないVaultがあります:\n$path$\n使い始めるか、破棄してください。",
+    "description": "Side Panel, Vault settings (vault-client.js). A restore recorded by the host and waiting for the person's decision. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultRestoreInterrupted": {
+    "message": "中断された復元があります\n途中のファイルを破棄してから、もう一度復元してください。",
+    "description": "Side Panel, Vault settings (vault-client.js). A restore that did not finish; its path is not known."
+  },
+  "vaultRestoreInterruptedPath": {
+    "message": "中断された復元があります:\n$path$\n途中のファイルを破棄してから、もう一度復元してください。",
+    "description": "Side Panel, Vault settings (vault-client.js). A restore that did not finish. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultRestoreDone": {
+    "message": "復元が完了しました。内容を確認して、使い始めるか破棄してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: the restored Vault is not active yet."
+  },
+  "vaultRestoreActivated": {
+    "message": "復元したVaultを使い始めました:\n$path$\nMCPへの公開は未承認です。必要なら下で承認してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultRestoreDiscarded": {
+    "message": "復元したVault（または中断された復元）を破棄しました。Active Vaultは変更していません。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultRestorePasswordRequired": {
+    "message": "バックアップのパスワードを入力してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). Input check before a restore."
+  },
+  "vaultNothingRestored": {
+    "message": "何も復元していません。",
+    "description": "Side Panel, Vault settings (vault-panel.js). Appended after a problem. SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultRestoreCancelled": {
+    "message": "キャンセルしました。何も復元していません。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultConvertEncryptTitle": {
+    "message": "このVaultを暗号化する",
+    "description": "Side Panel, Vault settings (vault-client.js). Section title: copy the unencrypted Vault shown into a new encrypted Vault."
+  },
+  "vaultConvertEncryptNote": {
+    "message": "現在のVaultの内容を、新しい暗号化Vaultへコピーします。元のVaultは削除されません。コピーの後に、新しいVaultの「ふっかつのじゅもん」を一度だけ表示します。記録して全文を入力し直すまで、変換は完了しません。変換したVaultを使い始めるかどうかは、その後で選べます。",
+    "description": "Side Panel, Vault settings (vault-client.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultConvertEncryptPick": {
+    "message": "保存先を選んで暗号化…",
+    "description": "Side Panel, Vault settings (vault-client.js). Button; opens a Windows save dialog."
+  },
+  "vaultConvertDecryptTitle": {
+    "message": "このVaultの暗号化を解除する",
+    "description": "Side Panel, Vault settings (vault-client.js). Section title: copy the encrypted Vault shown into a new unencrypted Vault."
+  },
+  "vaultConvertDecryptNote": {
+    "message": "新しい平文Vaultを作成します。閲覧履歴や保存画像などが暗号化されずにディスクへ保存されます。元の暗号化Vaultは削除されません。平文Vaultには、ふっかつのじゅもんはありません（元の暗号化Vaultの呪文は、元のVaultにだけ使えます）。",
+    "description": "Side Panel, Vault settings (vault-client.js). SAFETY (most important): removing encryption stores history and images unencrypted on disk. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultConvertDecryptPick": {
+    "message": "保存先を選んで暗号化を解除…",
+    "description": "Side Panel, Vault settings (vault-client.js). Button; enabled only after the acknowledgement is checked."
+  },
+  "vaultReissueTitle": {
+    "message": "ふっかつのじゅもんを再発行する",
+    "description": "Side Panel, Vault settings (vault-client.js). Section title; quoted in the spell notes. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultReissueNote": {
+    "message": "新しいふっかつのじゅもんで暗号化した新しいVaultへ、現在のVaultの内容をコピーします。元のVaultは削除されません。コピーの後に新しい呪文を一度だけ表示します。記録して全文を入力し直すまで、再発行は完了しません。\n再発行しても、古い呪文は失効しません。古い呪文は、元のVaultとその古いバックアップを引き続き開けます。古い呪文を他人に知られたおそれがあるときは、新しいVaultを使い始めた後で、元のVaultと古いバックアップを安全に処分してください。",
+    "description": "Side Panel, Vault settings (vault-client.js). SAFETY: the old spell stays valid for the old Vault and backups. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultReissuePick": {
+    "message": "保存先を選んで再発行…",
+    "description": "Side Panel, Vault settings (vault-client.js). Button; opens a Windows save dialog."
+  },
+  "vaultConvertSpellNote": {
+    "message": "これは新しい暗号化Vaultのふっかつのじゅもんです。以前に記録した呪文（ほかのVaultの呪文）では、このVaultを復旧できません。",
+    "description": "Side Panel, Vault settings (vault-client.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultReissueSpellNote": {
+    "message": "古い呪文は失効しません。元のVaultと古いバックアップは、古い呪文で開けるままです。",
+    "description": "Side Panel, Vault settings (vault-client.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultConvertedPath": {
+    "message": "変換しました（まだ使用していません）: $path$",
+    "description": "Side Panel, Vault settings (vault-client.js). SAFETY: the converted Vault exists but is not the Active Vault. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultReissuedPath": {
+    "message": "再発行しました（まだ使用していません）: $path$",
+    "description": "Side Panel, Vault settings (vault-client.js). SAFETY: the new Vault exists but is not the Active Vault. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultConvertedSource": {
+    "message": "変換元（そのまま残ります）: $path$",
+    "description": "Side Panel, Vault settings (vault-client.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultReissuedSource": {
+    "message": "元のVault（そのまま残ります）: $path$",
+    "description": "Side Panel, Vault settings (vault-client.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultReissuedKind": {
+    "message": "新しいふっかつのじゅもんで暗号化した新しいVault（古い呪文では開けません。鍵はこのWindowsユーザー用に保存しました）",
+    "description": "Side Panel, Vault settings (vault-client.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultConvertedEncrypted": {
+    "message": "新しい暗号化Vault（鍵はこのWindowsユーザー用に保存しました）",
+    "description": "Side Panel, Vault settings (vault-client.js). Kind of the converted Vault."
+  },
+  "vaultConvertedPlain": {
+    "message": "新しい平文Vault（暗号化されていません）",
+    "description": "Side Panel, Vault settings (vault-client.js). Kind of the converted Vault."
+  },
+  "vaultConvertedCounts": {
+    "message": "検証済み: 閲覧 $visits$件・スナップショット $snapshots$件・画像 $images$件（変換元と全件一致）",
+    "description": "Side Panel, Vault settings (vault-client.js). Numbers are already formatted.",
+    "placeholders": {
+      "visits": {
+        "content": "$1"
+      },
+      "snapshots": {
+        "content": "$2"
+      },
+      "images": {
+        "content": "$3"
+      }
+    }
+  },
+  "vaultConvertedActivateNote": {
+    "message": "「使い始める」を押すと、その時点までに変換元へ記録された内容も取り込んでから、このVaultをActive Vaultにします。MCPへの公開は未承認から始まります。",
+    "description": "Side Panel, Vault settings (vault-client.js). SAFETY: switching happens only on Start using."
+  },
+  "vaultConvertedKeepNote": {
+    "message": "「切り替えずに保存」を選ぶと、変換した時点の内容のまま残します（後で「既存のVaultを開く」で開けます。その後の記録は変換元にだけ残ります）。",
+    "description": "Side Panel, Vault settings (vault-client.js). Quotes the start of the Save and finish button and the Open existing Vault button."
+  },
+  "vaultConversionPendingEncrypt": {
+    "message": "変換済みで、まだ使用していない暗号化した新しいVaultがあります:\n$path$\n使い始めるか、切り替えずに保存するか、破棄してください。",
+    "description": "Side Panel, Vault settings (vault-client.js). [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultConversionPendingDecrypt": {
+    "message": "変換済みで、まだ使用していない暗号化を解除した平文Vaultがあります:\n$path$\n使い始めるか、切り替えずに保存するか、破棄してください。",
+    "description": "Side Panel, Vault settings (vault-client.js). [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultConversionPendingReissue": {
+    "message": "変換済みで、まだ使用していない新しいふっかつのじゅもんのVaultがあります:\n$path$\n使い始めるか、切り替えずに保存するか、破棄してください。",
+    "description": "Side Panel, Vault settings (vault-client.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultConversionPendingSpell": {
+    "message": "ふっかつのじゅもんの確認前に中断された変換があります:\n$path$\n呪文は再表示できないため、破棄してから、もう一度変換してください。元のVaultは変更していません。",
+    "description": "Side Panel, Vault settings (vault-client.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message. SAFETY: says what was NOT changed; must not read as if anything was changed or deleted.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultConversionInterrupted": {
+    "message": "中断された変換があります\n途中のファイルを破棄してから、もう一度変換してください。元のVaultは変更していません。",
+    "description": "Side Panel, Vault settings (vault-client.js). Path not known. SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultConversionInterruptedPath": {
+    "message": "中断された変換があります:\n$path$\n途中のファイルを破棄してから、もう一度変換してください。元のVaultは変更していません。",
+    "description": "Side Panel, Vault settings (vault-client.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultConvertSourceLine": {
+    "message": "変換元（このVault・そのまま残ります）: $path$",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultConvertSourceUnknown": {
+    "message": "変換するVaultを確認できないため、開始しませんでした。表示を更新します。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultDecryptCreated": {
+    "message": "暗号化を解除した新しいVaultを作成し、内容を検証しました。使い始めるか、切り替えずに保存するか、破棄してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: the new Vault is not active yet."
+  },
+  "vaultConvertSpellConfirmed": {
+    "message": "ふっかつのじゅもんの確認が完了しました。使い始めるか、切り替えずに保存するか、破棄してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultConvertActivated": {
+    "message": "変換したVaultを使い始めました:\n$path$\n変換元のVaultは削除していません。MCPへの公開は未承認です。必要なら下で承認してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultConvertKept": {
+    "message": "変換したVaultを、切り替えずに保存しました:\n$path$\nActive Vaultは変更していません。使うときは「既存のVaultを開く」で開いてください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultConvertDiscarded": {
+    "message": "変換したVault（または変換途中のファイル）を破棄しました。元のVaultとActive Vaultは変更していません。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultDecryptNotAcknowledged": {
+    "message": "暗号化を解除すると、閲覧履歴や画像が暗号化されずにディスクへ保存されます。確認のチェックを入れてから実行してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY (most important): nothing is sent until the acknowledgement is checked."
+  },
+  "vaultPublicationConfirmed": {
+    "message": "MCPへの公開: 承認済み",
+    "description": "Side Panel, Vault settings (vault-client.js). State of the Vault shown: MCP clients may read what passes the privacy settings."
+  },
+  "vaultPublicationConfirmedRevision": {
+    "message": "MCPへの公開: 承認済み（プライバシー設定 改訂$revision$の時点で承認）",
+    "description": "Side Panel, Vault settings (vault-client.js). [revision] is a number.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultPublicationPending": {
+    "message": "MCPへの公開: 未承認",
+    "description": "Side Panel, Vault settings (vault-client.js). State of the Vault shown: MCP clients get nothing."
+  },
+  "vaultPublicationNoteConfirmed": {
+    "message": "MCPクライアントは、プライバシー設定を通過した記録と、MCP公開にした画像だけを読めます。設定の変更は次の読み取りから反映されます。",
+    "description": "Side Panel, Vault settings (vault-client.js). PRIVACY/MCP."
+  },
+  "vaultPublicationNotePending": {
+    "message": "MCPクライアントには、このVaultの内容を一切返しません。新規作成・切り替え・置き換えたVaultは、承認するまでこの状態です。",
+    "description": "Side Panel, Vault settings (vault-client.js). PRIVACY/MCP."
+  },
+  "vaultPublicationNoteUnusable": {
+    "message": "Vaultを開けないため、承認できません。",
+    "description": "Side Panel, Vault settings (vault-client.js). PRIVACY/MCP."
+  },
+  "vaultPublicationReview": {
+    "message": "このVaultを、MCPクライアント（Claudeなど）から読めるようにします。\n読めるのは、現在のプライバシー設定（保存しないグループ・MCPサーバに見せないグループ・基本保護）を通過した記録と、MCP公開にした画像だけです。\n承認の前に、下の「プライバシー設定」で内容を確認してください。承認は、このVaultファイルにだけ適用されます。",
+    "description": "Side Panel, Vault settings (vault-client.js). PRIVACY/MCP: what approving means. Group names as in the privacy dialog."
+  },
+  "vaultPublicationSourceUnknown": {
+    "message": "対象のVaultを確認できないため、MCPへの公開の設定は変更していません。表示を更新します。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultPublicationApproved": {
+    "message": "このVaultをMCPに公開しました。プライバシー設定を通過した記録だけが読まれます。",
+    "description": "Side Panel, Vault settings (vault-panel.js). PRIVACY/MCP."
+  },
+  "vaultPublicationRevoked": {
+    "message": "このVaultのMCPへの公開を停止しました。MCPクライアントには内容を返しません。",
+    "description": "Side Panel, Vault settings (vault-panel.js). PRIVACY/MCP."
+  },
+  "vaultPublicationPolicyUnreadable": {
+    "message": "プライバシー設定を読み取れない（未初期化・破損・使用中など）ため、MCPへの公開を承認していません。下の「プライバシー設定」を確認してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). PRIVACY/MCP: fails closed. SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultPublicationCancelled": {
+    "message": "キャンセルしました。MCPへの公開は承認していません。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultStatusFailed": {
+    "message": "Vaultの状態を取得できませんでした。",
+    "description": "Side Panel, Vault settings (vault-panel.js). The host could not be asked."
+  },
+  "vaultLocationWarning": {
+    "message": "この場所をActive Vaultにすると、同期による破損やデータ消失の恐れがあります:\n$path$",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: asked before a risky location becomes the Active Vault. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultCreated": {
+    "message": "新しいVaultを作成し、使用を開始しました:\n$path$",
+    "description": "Side Panel, Vault settings (vault-panel.js). [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultEncryptedCreated": {
+    "message": "暗号化Vaultを作成し、使用を開始しました:\n$path$\nMCPへの公開は未承認です。必要なら下で承認してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultCreationDiscarded": {
+    "message": "作成途中の暗号化Vaultを破棄しました。Active Vaultは変更していません。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultRecovered": {
+    "message": "ふっかつのじゅもんで復旧し、このWindowsユーザーで開けるようにしました:\n$path$\nMCPへの公開は未承認です。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultOpened": {
+    "message": "Vaultを開きました:\n$path$",
+    "description": "Side Panel, Vault settings (vault-panel.js). [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultChooseInDialog": {
+    "message": "Windowsのダイアログで選択してください。\n表示されない場合はタスクバーを確認してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). While a Windows file dialog is open."
+  },
+  "vaultWorking": {
+    "message": "処理中…",
+    "description": "Side Panel, Vault settings (vault-panel.js). While a request is running."
+  },
+  "vaultRecoverableHint": {
+    "message": "ふっかつのじゅもんで復旧できます。",
+    "description": "Side Panel, Vault settings (vault-panel.js). Appended to a key or lock error. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSwitchedBackup": {
+    "message": "表示していたVault（$path$）は、もうActiveではありません。バックアップは作成していません。\n表示を最新の状態に更新しました。確認してから、もう一度実行してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultSwitchedConvert": {
+    "message": "表示していたVault（$path$）は、もうActiveではありません。変換は開始していません。\n表示を最新の状態に更新しました。確認してから、もう一度実行してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultSwitchedPublication": {
+    "message": "表示していたVault（$path$）は、もうActiveではありません。MCPへの公開の設定は変更していません。\n表示を最新の状態に更新しました。確認してから、もう一度実行してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultCreatedNotActive": {
+    "message": "Vaultファイルは作成されましたが、使用開始に失敗しました。「既存のVaultを開く」で開けます。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: the file exists; the Active Vault did not change."
+  },
+  "vaultCreationPending": {
+    "message": "作成途中の暗号化Vaultがあります（ふっかつのじゅもんの確認前に中断されました）。呪文は再表示できないため、破棄して作成し直してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultLocationLine": {
+    "message": "保存先: $path$",
+    "description": "Side Panel, Vault settings (vault-panel.js). Where a new Vault is (or was being) created. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultDefaultExists": {
+    "message": "既定の場所に既にファイルがあります: $path$\n開く場合は「既存のVaultを開く」を使ってください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: an existing file is never overwritten or re-created. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultSpellNotReceivedCreate": {
+    "message": "ふっかつのじゅもんを受け取れませんでした。作成途中のVaultを破棄して、作成し直してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSpellNotReceivedConvert": {
+    "message": "ふっかつのじゅもんを受け取れませんでした。変換したVaultを破棄して、もう一度変換してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultOnboardingConvertPaths": {
+    "message": "変換先（新しい暗号化Vault）: $path$\n変換元（そのまま残ります）: $source$",
+    "description": "Side Panel, Vault settings (vault-panel.js). [path] the new Vault, [source] the Vault converted (paths as is). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      },
+      "source": {
+        "content": "$2"
+      }
+    }
+  },
+  "vaultTargetLine": {
+    "message": "対象: $path$",
+    "description": "Side Panel, Vault settings (vault-panel.js). The Vault a recovery or an MCP approval applies to. [path] is a file path shown as is.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "vaultSpellCopied": {
+    "message": "コピーしました。安全な場所に保管したら、クリップボード（Windowsのクリップボード履歴を含む）から消去してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSpellCopyFailed": {
+    "message": "コピーできませんでした。表示された呪文を書き写してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSpellMismatch": {
+    "message": "入力した呪文が、表示したふっかつのじゅもんと一致しません。",
+    "description": "Side Panel, Vault settings (vault-panel.js). Never shows either spell. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSpellRetryCreate": {
+    "message": "記録した内容を確認して、もう一度入力してください（Vaultの作成はまだ完了していません）。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultSpellRetryConvert": {
+    "message": "記録した内容を確認して、もう一度入力してください（変換はまだ完了していません。元のVaultは変更していません）。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultRecoveryUnchanged": {
+    "message": "Vaultも鍵も変更していません。",
+    "description": "Side Panel, Vault settings (vault-panel.js). Appended after a problem. SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultRecoveryCancelled": {
+    "message": "キャンセルしました。Vaultも鍵も変更していません。",
+    "description": "Side Panel, Vault settings (vault-panel.js). SAFETY: says what was NOT changed; must not read as if anything was changed or deleted."
+  },
+  "vaultEnterPath": {
+    "message": "パスを入力してください。",
+    "description": "Side Panel, Vault settings (vault-panel.js). The manual path field is empty."
+  },
+  "vaultCancelled": {
+    "message": "キャンセルしました。",
+    "description": "Side Panel, Vault settings (vault-panel.js). The location warning was cancelled; nothing was sent."
+  },
+  "vaultPublicationConfirmButton": {
+    "message": "MCPへの公開を確認して承認…",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button: opens the explanation before approving."
+  },
+  "vaultPublicationRevokeButton": {
+    "message": "MCPへの公開を停止",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button: MCP clients get nothing from this Vault afterwards."
+  },
+  "vaultPublicationApproveButton": {
+    "message": "確認した上で承認し、MCPに公開する",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button: approves MCP access to this Vault file only."
+  },
+  "vaultCancelButton": {
+    "message": "やめる",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button that closes a step without changing anything."
+  },
+  "vaultCreationDiscardButton": {
+    "message": "作成途中のVaultを破棄する",
+    "description": "Side Panel, Vault settings (sidepanel.html). DESTRUCTIVE: deletes the unfinished encrypted Vault file; the Active Vault is not changed."
+  },
+  "vaultRecoveryStartButton": {
+    "message": "ふっかつのじゅもんで復旧…",
+    "description": "Side Panel, Vault settings (sidepanel.html). SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultNewVaultLegend": {
+    "message": "新規作成するVault",
+    "description": "Side Panel, Vault settings (sidepanel.html). Legend of the choice of encryption for a Vault to create."
+  },
+  "vaultEncryptChoice": {
+    "message": "暗号化する（推奨）",
+    "description": "Side Panel, Vault settings (sidepanel.html). Radio choice."
+  },
+  "vaultPlainChoice": {
+    "message": "暗号化しない",
+    "description": "Side Panel, Vault settings (sidepanel.html). Radio choice."
+  },
+  "vaultBackupLegend": {
+    "message": "バックアップの保護",
+    "description": "Side Panel, Vault settings (sidepanel.html). Legend of the backup protection choice."
+  },
+  "vaultBackupNormalChoice": {
+    "message": "通常",
+    "description": "Side Panel, Vault settings (sidepanel.html). Radio choice: no password."
+  },
+  "vaultBackupPasswordChoice": {
+    "message": "パスワードで保護する",
+    "description": "Side Panel, Vault settings (sidepanel.html). Radio choice."
+  },
+  "vaultPasswordLabel": {
+    "message": "パスワード",
+    "description": "Side Panel, Vault settings (sidepanel.html). SECRET: label of the backup password input."
+  },
+  "vaultPasswordConfirmLabel": {
+    "message": "パスワード（確認）",
+    "description": "Side Panel, Vault settings (sidepanel.html). SECRET: label of the backup password confirmation."
+  },
+  "vaultSpellInputLabel": {
+    "message": "ふっかつのじゅもん（43文字）",
+    "description": "Side Panel, Vault settings (sidepanel.html). Label and accessible name of a spell input. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultCreateDefaultButton": {
+    "message": "既定の場所に新規作成",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button: creates a new Vault; never overwrites an existing file."
+  },
+  "vaultCreatePickButton": {
+    "message": "場所を選んで新規作成…",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button; opens a Windows save dialog."
+  },
+  "vaultOpenPickButton": {
+    "message": "既存のVaultを開く…",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button; quoted in messages as Open existing Vault."
+  },
+  "vaultBackupPickButton": {
+    "message": "バックアップを作成…",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button; opens a Windows folder dialog."
+  },
+  "vaultRestorePickButton": {
+    "message": "バックアップから復元…",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button: chooses a backup file; nothing is restored or switched yet."
+  },
+  "vaultDecryptAck": {
+    "message": "閲覧履歴や保存画像などが暗号化されずにディスクへ保存されることを理解しました",
+    "description": "Side Panel, Vault settings (sidepanel.html). SAFETY (most important): required checkbox before removing encryption."
+  },
+  "vaultManualSummary": {
+    "message": "パスを直接入力",
+    "description": "Side Panel, Vault settings (sidepanel.html). Expandable section."
+  },
+  "vaultPathInputLabel": {
+    "message": "Vaultまたはバックアップ先のパス",
+    "description": "Side Panel, Vault settings (sidepanel.html). Accessible name of the path input."
+  },
+  "vaultManualCreateButton": {
+    "message": "このパスに新規作成",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button; never overwrites an existing file."
+  },
+  "vaultManualOpenButton": {
+    "message": "このVaultを開く",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button."
+  },
+  "vaultManualBackupButton": {
+    "message": "このフォルダにバックアップ",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button."
+  },
+  "vaultSpellCopyButton": {
+    "message": "コピー",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button: copies the spell to the clipboard; quoted in the spell notes. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSpellWrittenButton": {
+    "message": "記録しました。確認に進む",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button: hides the spell and asks for it again. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultSpellConfirmCreate": {
+    "message": "確認して作成を完了する",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button (also vault-panel.js): finishes creating the encrypted Vault after the spell matches."
+  },
+  "vaultSpellConfirmConvert": {
+    "message": "確認して変換を完了する",
+    "description": "Side Panel, Vault settings (vault-panel.js). Button: finishes a conversion or reissue after the spell matches."
+  },
+  "vaultSpellBackButton": {
+    "message": "呪文の表示に戻る",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultOnboardingCancelCreate": {
+    "message": "作成をやめる",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button (also vault-panel.js): DESTRUCTIVE: discards the unfinished encrypted Vault; nothing becomes active."
+  },
+  "vaultOnboardingCancelConvert": {
+    "message": "変換をやめる（作成した暗号化Vaultを破棄）",
+    "description": "Side Panel, Vault settings (vault-panel.js). Button: DESTRUCTIVE: discards the new Vault only; the original Vault is not changed."
+  },
+  "vaultRecoverySubmitButton": {
+    "message": "復旧して開く",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button. SECRET: the Recovery Spell (ふっかつのじゅもん in Japanese) is a fixed product name; never translate it as recovery phrase or key. The spell itself is never part of any message."
+  },
+  "vaultRestorePasswordLabel": {
+    "message": "バックアップのパスワード",
+    "description": "Side Panel, Vault settings (sidepanel.html). SECRET: label of the backup password input."
+  },
+  "vaultRestoreSubmitButton": {
+    "message": "復元先を選んで復元…",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button: creates a new restored Vault; it does not become active."
+  },
+  "vaultPolicyCopyShow": {
+    "message": "プライバシー設定のコピーを表示",
+    "description": "Side Panel, Vault settings (sidepanel.html). Expandable section; the copy is only shown."
+  },
+  "vaultRestoreActivateButton": {
+    "message": "このVaultを使い始める（MCPへの公開は未承認）",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button: makes the restored Vault the Active Vault; quoted as Start using."
+  },
+  "vaultRestoreDiscardButton": {
+    "message": "復元したVaultを破棄する",
+    "description": "Side Panel, Vault settings (sidepanel.html). DESTRUCTIVE: deletes the restored file only; the Active Vault is not changed."
+  },
+  "vaultConvertActivateButton": {
+    "message": "変換したVaultを使い始める（MCPへの公開は未承認）",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button: makes the converted Vault the Active Vault; quoted as Start using."
+  },
+  "vaultConvertKeepButton": {
+    "message": "切り替えずに保存して終える",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button (Save and finish): keeps the converted Vault; the Active Vault is not changed."
+  },
+  "vaultConvertDiscardButton": {
+    "message": "変換したVaultを破棄する",
+    "description": "Side Panel, Vault settings (sidepanel.html). DESTRUCTIVE: deletes the converted file only; the original Vault is not changed."
+  },
+  "vaultApproveButton": {
+    "message": "注意を理解して続行",
+    "description": "Side Panel, Vault settings (sidepanel.html). Button: accepts a risky location for the Active Vault."
+  },
+  "vaultSwitchNote": {
+    "message": "別のVaultに切り替えても、データは移行されず、元のVaultは削除されません。",
+    "description": "Side Panel, Vault settings (sidepanel.html). Note at the end of the Vault settings."
   }
 }
