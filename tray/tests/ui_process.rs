@@ -250,14 +250,6 @@ fn the_scripted_menu_actions_drive_the_server_and_the_settings_and_the_tray_quit
         );
     }
     assert!(!log.contains("FAIL"), "{log}");
-    // The tray took its language from this user's Windows UI language (Issue #78): there is no way
-    // to choose it, so the run shows what this machine is set to.
-    let language = memocampus_tray::i18n::Lang::detect().code();
-    assert!(
-        log.contains(&format!("ui_language={language}\n"))
-            || log.contains(&format!("ui_language={language}\r\n")),
-        "{log}"
-    );
 
     // The states, in the order the supervisor reported them, and what each would show.
     let states: Vec<&str> = log.lines().filter(|l| l.starts_with("state=")).collect();

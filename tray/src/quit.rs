@@ -132,7 +132,7 @@ pub fn await_quit(
 mod tests {
     use super::*;
     use crate::autostart::RunRegistry;
-    use crate::controller::{OpError, Opener, SharedApplied};
+    use crate::controller::{Opener, SharedApplied};
     use crate::settings::{self, Settings};
     use std::fs;
     use std::io;
@@ -385,7 +385,7 @@ mod tests {
         run.thread.join().unwrap();
         let last = run.published.lock().unwrap().last().cloned().unwrap();
         assert!(!last.registry_inconsistent);
-        assert_eq!(last.last_error, Some(OpError::SaveFailedUndone));
+        assert!(last.last_error.unwrap().contains("取り消しました"));
     }
 
     #[test]
@@ -413,8 +413,7 @@ mod tests {
         let last = run.published.lock().unwrap().last().cloned().unwrap();
         assert!(last.registry_inconsistent, "the mismatch is reported");
         assert!(
-            last.last_error
-                .is_some_and(|error| error != OpError::SaveFailedUndone),
+            !last.last_error.unwrap().contains("取り消しました"),
             "never claimed as undone"
         );
     }

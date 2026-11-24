@@ -20,7 +20,6 @@
 
 use crate::autostart::WinRegistry;
 use crate::controller::{AppliedWatch, Controller, ControllerState, Opener, SharedApplied};
-use crate::i18n::{t, Key, Lang};
 use crate::quit::{await_quit, serve, ControllerEnd, ControllerExit, Op, QuitReport};
 use crate::render::{Drawing, Renderer, Timer, TrayPort};
 use crate::settings::{self, Settings};
@@ -138,9 +137,7 @@ pub struct UiConfig {
     pub selftest: bool,
 }
 
-/// The menu items a view changes. Public, with `build_menu`, only for the isolated menu preview
-/// (`examples/menu_preview.rs`), which draws this same menu without a tray.
-pub struct Items {
+struct Items {
     status: MenuItem,
     address: MenuItem,
     vault: MenuItem,
@@ -158,36 +155,8 @@ pub struct Items {
     quit: MenuItem,
 }
 
-impl Items {
-    /// Puts a view's texts, enabled states and check marks on the items.
-    pub fn apply(&self, view: &View) {
-        self.status.set_text(&view.status);
-        self.address.set_text(&view.address);
-        self.vault.set_text(&view.vault);
-        self.start.set_text(&view.start_label);
-        self.start.set_enabled(view.start);
-        self.stop.set_enabled(view.stop);
-        self.restart.set_enabled(view.restart);
-        self.autostart.set_checked(view.autostart_checked);
-        self.autostart.set_enabled(view.autostart_enabled);
-        self.autostart_note.set_text(&view.autostart_note);
-        self.repair.set_enabled(view.repair_enabled);
-        self.server_autostart
-            .set_checked(view.server_autostart_checked);
-        self.server_autostart
-            .set_enabled(view.server_autostart_enabled);
-        self.settings_note.set_text(&view.settings_note);
-        self.open_settings.set_enabled(view.open_settings);
-        self.reload.set_enabled(view.reload);
-        self.open_logs.set_enabled(view.open_logs);
-        self.quit.set_enabled(view.quit);
-    }
-}
-
 struct Ui {
     hwnd: HWND,
-    /// The language of every text, decided once at start from the Windows UI language.
-    lang: Lang,
     rx: Receiver<Msg>,
     wake: Wake,
     tray: Option<TrayIcon>,
@@ -374,7 +343,7 @@ impl Ui {
     }
 
     fn refresh(&mut self) {
-        let view = view(&self.inputs(), self.lang);
+        let view = view(&self.inputs());
         if self.last_view.as_ref() == Some(&view) {
             // Still re-assert the check marks: a click flipped one without changing the view.
             self.items.autostart.set_checked(view.autostart_checked);
@@ -382,7 +351,27 @@ impl Ui {
                 .server_autostart
                 .set_checked(view.server_autostart_checked);
         } else {
-            self.items.apply(&view);
+            let it = &self.items;
+            it.status.set_text(&view.status);
+            it.address.set_text(&view.address);
+            it.vault.set_text(&view.vault);
+            it.start.set_text(view.start_label);
+            it.start.set_enabled(view.start);
+            it.stop.set_enabled(view.stop);
+            it.restart.set_enabled(view.restart);
+            it.autostart.set_checked(view.autostart_checked);
+            it.autostart.set_enabled(view.autostart_enabled);
+            it.autostart_note.set_text(&view.autostart_note);
+            it.repair.set_enabled(view.repair_enabled);
+            it.server_autostart
+                .set_checked(view.server_autostart_checked);
+            it.server_autostart
+                .set_enabled(view.server_autostart_enabled);
+            it.settings_note.set_text(&view.settings_note);
+            it.open_settings.set_enabled(view.open_settings);
+            it.reload.set_enabled(view.reload);
+            it.open_logs.set_enabled(view.open_logs);
+            it.quit.set_enabled(view.quit);
             self.log(&format!(
                 "view icon={:?} tooltip={:?} start={} stop={} restart={} autostart_checked={} server_autostart_checked={} note={:?}",
                 view.icon, view.tooltip, view.start, view.stop, view.restart,
@@ -793,31 +782,43 @@ impl Opener for ShellOpener {
     }
 }
 
-/// The menu, its items carrying the same ids in every language (`ACTION_IDS`); only their texts
-/// come from the catalog.
-pub fn build_menu(lang: Lang) -> io::Result<(Menu, Items)> {
+fn build_menu() -> io::Result<(Menu, Items)> {
     let other = |e: tray_icon::menu::Error| io::Error::other(e.to_string());
     let menu = Menu::new();
-    let title = MenuItem::with_id("title", t(lang, Key::Title), false, None);
-    let item =
-        |id: &str, key: Key, enabled: bool| MenuItem::with_id(id, t(lang, key), enabled, None);
-    let check = |id: &str, key: Key| CheckMenuItem::with_id(id, t(lang, key), false, false, None);
+    let title = MenuItem::with_id("title", "Memocampus MCP Server", false, None);
+    let item = |id: &str, text: &str, enabled: bool| MenuItem::with_id(id, text, enabled, None);
     let items = Items {
-        status: item("status", Key::StatusChecking, false),
-        address: item("address", Key::AddressChecking, false),
-        vault: item("vault", Key::VaultChecking, false),
-        start: item("start", Key::StartServer, false),
-        stop: item("stop", Key::StopServer, false),
-        restart: item("restart", Key::RestartServer, false),
-        autostart: check("autostart", Key::StartWithWindows),
-        autostart_note: item("autostart_note", Key::AutostartChecking, false),
-        repair: item("repair_autostart", Key::RepairAutostart, false),
-        server_autostart: check("server_autostart", Key::StartServerAutomatically),
-        settings_note: item("settings_note", Key::SettingsChecking, false),
-        open_settings: item("open_settings", Key::OpenSettings, false),
-        reload: item("reload", Key::ReloadSettings, false),
-        open_logs: item("open_logs", Key::OpenLogs, false),
-        quit: item("quit", Key::Quit, true),
+        status: item("status", "状態: 確認中…", false),
+        address: item("address", "待受予定: 127.0.0.1", false),
+        vault: item("vault", "Vault公開: 未確認", false),
+        start: item("start", "サーバ起動", false),
+        stop: item("stop", "サーバ停止", false),
+        restart: item("restart", "サーバ再起動", false),
+        autostart: CheckMenuItem::with_id(
+            "autostart",
+            "Windowsログオン時に起動",
+            false,
+            false,
+            None,
+        ),
+        autostart_note: item("autostart_note", "自動起動: 確認中…", false),
+        repair: item(
+            "repair_autostart",
+            "自動起動の登録を現在の場所へ更新",
+            false,
+        ),
+        server_autostart: CheckMenuItem::with_id(
+            "server_autostart",
+            "MCPサーバを自動起動",
+            false,
+            false,
+            None,
+        ),
+        settings_note: item("settings_note", "設定: 確認中…", false),
+        open_settings: item("open_settings", "設定ファイルを開く", false),
+        reload: item("reload", "設定を再読み込み", false),
+        open_logs: item("open_logs", "ログフォルダを開く", false),
+        quit: item("quit", "終了", true),
     };
     let separator = || PredefinedMenuItem::separator();
     menu.append(&title).map_err(other)?;
@@ -873,11 +874,7 @@ pub fn run(config: UiConfig) -> i32 {
         click.send(Msg::Menu(event.id().0.clone()));
     }));
 
-    // The language of every text, from the Windows user UI language (Japanese, else English). It
-    // decides nothing else.
-    let lang = Lang::detect();
-    append_log(&log, &format!("ui_language={}", lang.code()));
-    let (menu, items) = match build_menu(lang) {
+    let (menu, items) = match build_menu() {
         Ok(built) => built,
         Err(_) => {
             append_log(&log, "exit=menu_failed");
@@ -885,19 +882,16 @@ pub fn run(config: UiConfig) -> i32 {
             return 5;
         }
     };
-    let first = view(
-        &Inputs {
-            snapshot: Snapshot::initial(),
-            listen_port: settings::DEFAULT_PORT,
-            autostart_setting: Settings::default().autostart,
-            server_autostart_setting: Settings::default().server_autostart,
-            autostart: crate::autostart::Autostart::Unreadable,
-            settings_note: SettingsNote::InForce,
-            last_error: None,
-            quitting: false,
-        },
-        lang,
-    );
+    let first = view(&Inputs {
+        snapshot: Snapshot::initial(),
+        listen_port: settings::DEFAULT_PORT,
+        autostart_setting: Settings::default().autostart,
+        server_autostart_setting: Settings::default().server_autostart,
+        autostart: crate::autostart::Autostart::Unreadable,
+        settings_note: SettingsNote::InForce,
+        last_error: None,
+        quitting: false,
+    });
     let icon = Icon::from_rgba(icon_rgba(IconKind::Stopped), ICON_SIZE, ICON_SIZE)
         .expect("a 32 x 32 RGBA icon");
     let tray = match TrayIconBuilder::new()
@@ -989,7 +983,6 @@ pub fn run(config: UiConfig) -> i32 {
     let icon_loss = Arc::new(AtomicU8::new(ICON_LOSS_NONE));
     let ui = Ui {
         hwnd,
-        lang,
         rx,
         wake: wake.clone(),
         tray: Some(tray),

@@ -34,7 +34,6 @@ serde_json = "1"
 tray-icon = { version = "=0.26.1", default-features = false }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
-    "Win32_Globalization",
     "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_Storage_FileSystem",
@@ -49,8 +48,3 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
-
-[target.'cfg(windows)'.dev-dependencies]
-# Only the isolated menu preview (`examples/menu_preview.rs`, Issue #78) clicks with the mouse; the
-# tray itself never synthesizes input.
-windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
