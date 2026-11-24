@@ -17,9 +17,53 @@
 - 翻訳しないもの：メニュー ID（`ACTION_IDS`）、ウィンドウクラス `MemocampusTrayHost`、非表示ウィンドウ名、ログの機械判定文字列、エラーコード（`vault_publication_pending` 等は表示内でもそのまま）、レジストリ名、プロトコル識別子。
 - 操作失敗は文字列ではなく `controller::OpError`（固定コード）で保持し、`view` が言語ごとの文言にする。
 
-## 情報表示行の色（Phase C）— PO 判断待ち
+## 情報表示行の色（Phase C）— 灰色表示を当面許容（PO 判断）
 
-Windows 11 の標準メニューでは、操作不能な項目は `MF_GRAYED`・`MF_DISABLED`（`MF_GRAYED` なし）・アイコン付き項目のいずれも同じ灰色で描画される（隔離プローブで実測）。操作不能のまま通常の前景色で描くには、独自描画（`MFT_OWNERDRAW`）が必要になる。本 Issue の指示に従い、独自描画には着手していない。情報行は従来どおり disabled（クリック・キー操作とも何も起きない）。
+Windows 11 の標準メニューでは、操作不能な項目は `MF_GRAYED`・`MF_DISABLED`（`MF_GRAYED` なし）・アイコン付き項目のいずれも同じ灰色で描画される（隔離プローブで実測）。操作不能のまま通常の前景色で描くには、独自描画（`MFT_OWNERDRAW`）が必要になる。
+
+**現状（製品）：** 独自描画は実装していない。情報行は従来どおり disabled の灰色表示で、クリック・キー操作とも何も起きない。
+
+### 判断
+
+- **PoC 判定：NO-GO**（下記の、情報行だけを owner-draw にする限定方式）。
+- **PO 判断：** 情報表示行の灰色表示を当面許容し、owner-draw の本番導入は見送る。全行 owner-draw や独自ポップアップの実装にも進まない。
+- これは通常色表示の恒久的な却下ではない。Tray UI の基盤（メニューライブラリ、独自 UI 等）を見直す機会には、標準メニューの外観・アクセシビリティ・保守性を維持できる方式があるかを再評価する。その際は下記の実測結果と未検証項目を出発点にする。
+
+### Slice 2：owner-draw の隔離 PoC（記録のみ。PoC コードは製品ブランチに取り込んでいない）
+
+PoC は製品の `build_menu` / `view` / muda / tray-icon をそのまま使う example として、マージしない作業ブランチで実施した（コードは撤去済みで、リポジトリには残していない）。情報行 6 行（タイトル・状態・アドレス・Vault・自動起動の注記・設定の注記）だけを `MFT_OWNERDRAW` にして実測した（Windows 11、ライト、100%、DPI 非対応プロセス）。以下はその時点の測定結果であり、この文書の整理にあたって再実行はしていない。
+
+**実現したこと**
+
+- 情報行を通常の前景色（`COLOR_MENUTEXT`、固定 RGB なし）で描画できた。
+- 情報行の非操作性を維持できた（クリック・キー操作とも何も届かない）。
+- 有効な操作のイベント配送（muda の `MenuEvent`）は従来どおり動作した。
+- 日本語・英語の両メニューで描画と操作を確認した。
+- MSAA で全項目の名前と状態を、標準メニューと同じく取得できた。
+- 20 回の開閉で GDI / USER オブジェクト数は増えなかった。
+
+**採用しなかった理由**
+
+- owner-draw の行が 1 行でもあると、メニュー全体がクラシック描画に切り替わる。
+- その結果、Windows 11 標準メニューの外観・寸法・選択表示（青い帯）が変わる。情報行と操作の見分けもつきにくくなる。
+- 無効な操作を灰色のまま保つには、`MF_GRAYED` へ揃え直す追加の状態補正が必要になる（製品の更新処理への変更を伴う）。
+- tray-icon の所有ウィンドウや、muda の無効化方法（`MF_DISABLED`）など、ライブラリ内部の実装に依存する。
+- 解除・作り直しのときに行が空白で描かれるなど、描画の復元に注意が必要。
+- スクリーンリーダー、UI Automation、ハイコントラスト、高 DPI（125% 以上）、実際のダークモード、Windows 10 は未検証。
+
+**技術的な知見**
+
+- 描画メッセージの受信先：`TrackPopupMenu` に渡された所有ウィンドウ。製品では tray-icon の非表示ウィンドウ（クラス `tray_icon_app`、`TrayIcon::window_handle()`）で、`MemocampusTrayHost` ではない（スレッドフックで `WM_INITMENUPOPUP` / `WM_MEASUREITEM` / `WM_DRAWITEM` の宛先を記録して確認）。そこには既に muda のサブクラス（`WM_COMMAND` → `MenuEvent`）があり、PoC のサブクラスはその上に重なる。
+- **owner-draw の行が 1 行でもあると、ポップアップ全体が visual style なし（クラシック描画）になる。** 背景 249→240、行の高さ 22→19、強調表示が青い帯になる。ダークモード（製品は使っていない）も失われる。
+- クラシック描画では `MF_GRAYED` だけが灰色になり、muda の `set_enabled(false)`（`EnableMenuItem(MF_DISABLED)`）で無効にした操作は**黒**で描かれる。開くたびに（`WM_INITMENUPOPUP`）`MF_GRAYED` に揃える必要があり、メニュー表示中の `Items::apply` の直後にも揃え直さないと、その間は黒く表示される。
+- 候補の描画：システム色（`COLOR_MENUTEXT` / `COLOR_MENU`、選択時 `COLOR_HIGHLIGHT(TEXT)`）とクラシックの寸法。visual style の色（`MPI_NORMAL`）で描くと、周囲（クラシック描画になった他の行）と高さ・背景が合わない。
+- muda との共存：`set_text`（`MIIM_STRING`）は `MFT_OWNERDRAW` を消さない（閉じている間・開いている間とも、新しい文字列が描かれる）。muda の remove + insert で作り直された行は通常行に戻るが、開くたびの再マークで owner-draw に戻る。
+- 解除：`MFT_OWNERDRAW` を外すだけでは、その行が**空白**で描かれる。`ModifyMenuW`（同じ ID・文字列・`MF_GRAYED`）で行を書き直すと元に戻る。所有ウィンドウの `WM_NCDESTROY` で解除する。
+- 非操作性：情報行・無効な操作のクリック、Down + Enter、文字キーのいずれでも何も届かない（日英とも、標準メニューと同一の結果）。有効な操作は従来どおり届く。
+- アクセシビリティ：MSAA の名前・状態（unavailable）は全 21 行で標準メニューと同一。UI Automation のツリー列挙とスクリーンリーダーでの確認は未実施。
+- 資源：20 回開閉して GDI / USER オブジェクト数は不変。
+- サブクラス化：manifest のないトレイプロセスでは comctl32 5.82 が読み込まれ、`GetWindowSubclass` は序数でしか公開されていない（名前で呼ぶと `STATUS_ENTRYPOINT_NOT_FOUND`）。`SetWindowSubclass` / `RemoveWindowSubclass` / `DefSubclassProc` は名前で使える。
+- 再評価時に未検証のまま残っている項目：スクリーンリーダー（Narrator 等）、UI Automation のツリー、ハイコントラスト、DPI 125% / 150% / 200%、実際のダークモードとテーマの動的変更、Windows 10。
 
 ## 隔離された描画確認（`tray/examples/menu_preview.rs`）
 
