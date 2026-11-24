@@ -22,6 +22,7 @@ import { evaluatePolicy } from "../../extension/policy.js";
 import defaults from "../../extension/policy-defaults.json" with { type: "json" };
 import { extensionDir } from "./fake-dom.js";
 import { confirmPublication, startMcp } from "./real-processes.js";
+import { chromeI18n } from "./i18n-mock.js";
 
 const T0 = Date.UTC(2026, 10, 6, 12, 0, 0);
 const at = (seconds) => T0 + seconds * 1000;
@@ -664,6 +665,7 @@ async function startWorker({ host = swHost(), session = new Map(), local = new M
     },
   };
   globalThis.chrome = {
+    i18n: chromeI18n,
     runtime,
     webNavigation: {
       onBeforeNavigate: on("before"),

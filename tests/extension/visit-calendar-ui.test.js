@@ -110,14 +110,16 @@ test("the launcher waits for the host's answer and a list from a vault; without 
 test("the markup: a labelled launcher at the start of the count row, a non-modal dialog below the toolbar", () => {
   const html = readFileSync(path.join(extensionDir, "sidepanel.html"), "utf8");
   const launcher = /<button id="visit-calendar-open"[^>]*>/.exec(html)[0];
-  for (const attribute of ['aria-label="閲覧日で絞り込み"', 'aria-expanded="false"', 'aria-haspopup="dialog"', 'aria-controls="visit-calendar"', "disabled", 'type="button"']) {
+  for (const attribute of ['data-i18n-aria-label="calendarFilterByDate"', 'aria-expanded="false"', 'aria-haspopup="dialog"', 'aria-controls="visit-calendar"', "disabled", 'type="button"']) {
     assert.ok(launcher.includes(attribute), attribute);
   }
   const row = html.slice(html.indexOf('<div class="toolbar-row">'), html.indexOf('<div id="record-status"'));
   const order = ["visit-calendar-open", "visit-date-chip", 'id="summary"', "record-tabs"].map((needle) => row.indexOf(needle));
   assert.ok(order.every((index, i) => index >= 0 && (i === 0 || index > order[i - 1])), "[calendar][date ×][count …][全タブを記録]");
   const dialog = /<section id="visit-calendar"[^>]*>/.exec(html)[0];
-  for (const attribute of ['role="dialog"', 'aria-label="閲覧日で絞り込み"', "hidden"]) assert.ok(dialog.includes(attribute), attribute);
+  // Issue #77: the name comes from the catalog; in Japanese it is the same text as before.
+  assert.equal(chrome.i18n.getMessage("calendarFilterByDate"), "閲覧日で絞り込み");
+  for (const attribute of ['role="dialog"', 'data-i18n-aria-label="calendarFilterByDate"', "hidden"]) assert.ok(dialog.includes(attribute), attribute);
   assert.ok(!dialog.includes("aria-modal"), "non-modal");
   const toolbar = html.slice(html.indexOf('<header class="toolbar">'), html.indexOf("</header>"));
   assert.ok(toolbar.includes('<section id="visit-calendar"'), "inside the toolbar, so it hangs over the list without moving it");

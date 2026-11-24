@@ -1,0 +1,3221 @@
+{
+  "langTag": {
+    "message": "ja",
+    "description": "Language of this catalog (BCP 47). Read by i18n.js and i18n-dom.js to know which catalog Chrome actually used; sets <html lang> and the Intl locale. Must equal the folder name."
+  },
+  "extDescription": {
+    "message": "ローカルファーストのWeb記憶キャプチャ。",
+    "description": "manifest.json description shown on chrome://extensions and in the Chrome Web Store. At most 132 characters. No dollar signs (manifest messages are not substituted)."
+  },
+  "menuSaveImage": {
+    "message": "Memocampusへ保存",
+    "description": "Context menu item shown on images. Saves the clicked image to the Vault."
+  },
+  "menuSavePage": {
+    "message": "Memocampusにページを保存",
+    "description": "Context menu item shown on pages. Saves the tab that was clicked in (not a link target) as MHTML to the Vault."
+  },
+  "imageSavedTitle": {
+    "message": "Memocampusへ保存しました",
+    "description": "Notification title after an image was saved."
+  },
+  "imageSavedMessage": {
+    "message": "画像 $width$×$height$・$size$",
+    "description": "Notification body after an image was saved: pixel size and file size.",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSavedMessageReplayed": {
+    "message": "画像 $width$×$height$・$size$（この保存操作は既に保存済みでした）",
+    "description": "Notification body when the same save action was already committed (a retry).",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSavedMessageDeduplicated": {
+    "message": "画像 $width$×$height$・$size$（同じ画像は保存済みのため、保存履歴を追加しました）",
+    "description": "Notification body when identical image bytes were already in the Vault and only a save record was added.",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSaveFailedTitle": {
+    "message": "Memocampusへ保存できませんでした",
+    "description": "Notification title when saving an image failed."
+  },
+  "imageSaveFailedHttp": {
+    "message": "画像の取得に失敗しました（HTTP $status$）。",
+    "description": "Notification body when the image server answered with an HTTP error status.",
+    "placeholders": {
+      "status": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageSavedTitle": {
+    "message": "Memocampusにページを保存しました",
+    "description": "Notification title after a page was saved."
+  },
+  "pageSavedMessage": {
+    "message": "MHTML原本と保存履歴をVaultへ保存しました。MCPには公開しません。",
+    "description": "Privacy: notification body after a page was saved. Must keep saying that saved pages are not published to MCP."
+  },
+  "pageSaveFailedTitle": {
+    "message": "ページを保存できませんでした",
+    "description": "Notification title when saving a page failed."
+  },
+  "pageSaveErrorUnsupportedUrl": {
+    "message": "HTTP(S)ページのみ保存できます。リンク先ではなくクリック元のタブを保存します。",
+    "description": "Notification body when saving a page failed with \"unsupported_url\"."
+  },
+  "pageSaveErrorIncognitoNotAllowed": {
+    "message": "シークレットモードのページ保存には対応していません。",
+    "description": "Notification body when saving a page failed with \"incognito_not_allowed\"."
+  },
+  "pageSaveErrorNavigationChanged": {
+    "message": "保存中にページが変わったため中止しました。読み込み完了後に再操作してください。",
+    "description": "Notification body when saving a page failed with \"navigation_changed\"."
+  },
+  "pageSaveErrorVaultSwitched": {
+    "message": "Vaultが変更されたため保存を中止しました。",
+    "description": "Notification body when saving a page failed with \"vault_switched\"."
+  },
+  "pageSaveErrorInvalidPageSize": {
+    "message": "MHTMLが空、または上限128MiBを超えています。",
+    "description": "Notification body when saving a page failed with \"invalid_page_size\"."
+  },
+  "pageSaveErrorPageUploadBusy": {
+    "message": "別のページを保存中です。完了後に再操作してください。",
+    "description": "Notification body when saving a page failed with \"page_upload_busy\"."
+  },
+  "pageSaveErrorVaultNotConfigured": {
+    "message": "先に設定画面で新しいVaultを作成または選択してください。",
+    "description": "Notification body when saving a page failed with \"vault_not_configured\"."
+  },
+  "pageSaveErrorVaultSchemaMismatch": {
+    "message": "このVaultのスキーマは非対応です。Schema 8のVaultを明示的に新規作成してください。旧Vaultは変更しません。",
+    "description": "Notification body when saving a page failed with \"vault_schema_mismatch\"."
+  },
+  "pageSaveErrorSaveStateUnknown": {
+    "message": "保存状態未確定です。自動再保存は行いません。重複を避けるため状態を確認してください。",
+    "description": "Notification body when saving a page failed with \"save_state_unknown\"."
+  },
+  "pageSaveErrorTimeout": {
+    "message": "保存処理がタイムアウトしました。",
+    "description": "Notification body when saving a page failed with \"timeout\"."
+  },
+  "pageSaveErrorTransferInterrupted": {
+    "message": "Native Hostとの接続が切れたため保存できませんでした。",
+    "description": "Notification body when saving a page failed with \"transfer_interrupted\"."
+  },
+  "pageSaveErrorCaptureFailed": {
+    "message": "ChromeによるMHTML取得に失敗しました。取得できないページやフレーム、ページ消失などの技術的制約が考えられます。",
+    "description": "Notification body when saving a page failed with \"capture_failed\"."
+  },
+  "pageSaveErrorVaultLocked": {
+    "message": "Vaultがロックされているため保存できません。設定画面で状態を確認してください。",
+    "description": "Notification body when saving a page failed with \"vault_locked\"."
+  },
+  "pageSaveErrorKeyUnavailable": {
+    "message": "Vaultの鍵を使用できないため保存できません。",
+    "description": "Notification body when saving a page failed with \"key_unavailable\"."
+  },
+  "pageSaveErrorVaultReselectRequired": {
+    "message": "Vaultを設定画面で明示的に選び直してから保存してください。",
+    "description": "Notification body when saving a page failed with \"vault_reselect_required\"."
+  },
+  "pageSaveErrorSaveIdConflict": {
+    "message": "保存操作IDが既存の異なる保存記録と一致したため中止しました。",
+    "description": "Notification body when saving a page failed with \"save_id_conflict\"."
+  },
+  "pageSaveErrorDbError": {
+    "message": "Vaultへの保存を確定できませんでした。自動再保存は行いません。",
+    "description": "Notification body when saving a page failed with \"db_error\"."
+  },
+  "pageSaveErrorGeneric": {
+    "message": "ページ取得またはVaultへの保存に失敗しました。Chromeの技術的制約で取得できないページもあります。",
+    "description": "Notification body when saving a page failed for any other reason."
+  },
+  "badgeEventsNotRecorded": {
+    "message": "記録できなかったイベント $deadLetters$件・破棄 $dropped$件",
+    "description": "Toolbar tooltip part: quarantined and discarded events.",
+    "placeholders": {
+      "deadLetters": {
+        "content": "$1"
+      },
+      "dropped": {
+        "content": "$2"
+      }
+    }
+  },
+  "badgeNavigationLost": {
+    "message": "遷移情報を保存できなかった訪問 $count$件",
+    "description": "Toolbar tooltip part.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "badgeImageFailure": {
+    "message": "画像を保存できませんでした: $reason$",
+    "description": "Toolbar tooltip part after a failed image save. [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "badgePageFailure": {
+    "message": "ページ保存: $reason$",
+    "description": "Toolbar tooltip part after a failed page save. [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueErrorFull": {
+    "message": "送信待ちキューが満杯のため、記録しませんでした（1件も登録していません）。",
+    "description": "Result of \"record all tabs\"."
+  },
+  "queueErrorStorage": {
+    "message": "キューへの保存に失敗したため、記録しませんでした（1件も登録していません）。",
+    "description": "Result of \"record all tabs\"."
+  },
+  "queueErrorWithReason": {
+    "message": "$reason$（1件も登録していません）",
+    "description": "Result of \"record all tabs\" refused for a reason; [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueErrorGeneric": {
+    "message": "記録に失敗しました。",
+    "description": "Result of \"record all tabs\" when nothing more specific is known."
+  },
+  "recordFailed": {
+    "message": "記録に失敗しました。\n$detail$",
+    "description": "Side panel result of \"record all tabs\"; [detail] is the reason on its own line.",
+    "placeholders": {
+      "detail": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordFailedDetail": {
+    "message": "保存に失敗しました。",
+    "description": "Reason used by recordFailed when none was given."
+  },
+  "recordNoTabs": {
+    "message": "記録できる通常ウィンドウのタブ（http/https）がありません。",
+    "description": "Result of \"record all tabs\". Incognito tabs are never recorded."
+  },
+  "recordStoredAllOne": {
+    "message": "$count$件のタブをSQLiteに保存しました。タブは閉じていません。",
+    "description": "Result of \"record all tabs\", singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordStoredAllOther": {
+    "message": "$count$件のタブをSQLiteに保存しました。タブは閉じていません。",
+    "description": "Result of \"record all tabs\", plural form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordQueuedOne": {
+    "message": "$count$件のタブを送信キューに登録しました。タブは閉じていません。",
+    "description": "Result of \"record all tabs\" when not everything is stored yet, singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordQueuedOther": {
+    "message": "$count$件のタブを送信キューに登録しました。タブは閉じていません。",
+    "description": "Result of \"record all tabs\" when not everything is stored yet, plural form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordStoredCount": {
+    "message": "SQLiteに保存済み: $count$件",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordPendingCount": {
+    "message": "未保存（送信待ち・自動で再送）: $count$件",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordPendingReason": {
+    "message": "理由: $reason$",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordDeadLetteredCount": {
+    "message": "記録できず隔離: $count$件",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyStatusUnknown": {
+    "message": "プライバシー設定の状態を確認できないため、自動記録が止まっている可能性があります。",
+    "description": "Privacy: side panel notice when the policy state is unknown. Recording fails closed."
+  },
+  "policyStatusStopped": {
+    "message": "自動記録を停止しています。",
+    "description": "Privacy: side panel notice when the policy is not ready."
+  },
+  "queuePending": {
+    "message": "送信待ち $count$件",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queuePendingReason": {
+    "message": "送信待ち $count$件（$reason$）",
+    "description": "Side panel queue status line with the reason sending is blocked.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "reason": {
+        "content": "$2"
+      }
+    }
+  },
+  "queueDeadLetters": {
+    "message": "記録できず隔離したイベント $count$件",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueDropped": {
+    "message": "キューに入れられず破棄したイベント $count$件",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueNavigationInvalid": {
+    "message": "遷移情報がHostに拒否された訪問 $count$件（訪問は保存済み）",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueNavigationNotStored": {
+    "message": "Hostが遷移情報に未対応のため遷移情報を保存できなかった訪問 $count$件（訪問は保存済み）",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateToday": {
+    "message": "今日 $time$",
+    "description": "Short date for a time today; [time] is the local time.",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateYesterday": {
+    "message": "昨日 $time$",
+    "description": "Short date for a time yesterday; [time] is the local time.",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateWithTime": {
+    "message": "$date$ $time$",
+    "description": "Short date for older times; [date] is the localized date, [time] the local time.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "time": {
+        "content": "$2"
+      }
+    }
+  },
+  "errorGeneric": {
+    "message": "操作に失敗しました。",
+    "description": "Error message for an error code that has no message of its own."
+  },
+  "errorHostUnavailable": {
+    "message": "Native Hostに接続できません。インストールと登録を確認してください。",
+    "description": "Message for the error code \"host_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTimeout": {
+    "message": "Native Hostから応答がありません。Hostが古いか、停止している可能性があります。",
+    "description": "Message for the error code \"timeout\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidResponse": {
+    "message": "Native Hostから不正な応答を受け取りました。",
+    "description": "Message for the error code \"invalid_response\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDbError": {
+    "message": "データベースの操作に失敗しました。",
+    "description": "Message for the error code \"db_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorQueryTooLong": {
+    "message": "検索語は$max$文字以内で入力してください。",
+    "description": "Message for the error code \"query_too_long\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip.",
+    "placeholders": {
+      "max": {
+        "content": "$1"
+      }
+    }
+  },
+  "errorInvalidQuery": {
+    "message": "検索条件が不正です。",
+    "description": "Message for the error code \"invalid_query\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidLimit": {
+    "message": "検索条件が不正です。",
+    "description": "Message for the error code \"invalid_limit\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidOffset": {
+    "message": "これ以上読み込めません。",
+    "description": "Message for the error code \"invalid_offset\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidRequestId": {
+    "message": "要求が不正です。",
+    "description": "Message for the error code \"invalid_request_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBounds": {
+    "message": "日付の指定が不正です。",
+    "description": "Message for the error code \"invalid_bounds\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnknownType": {
+    "message": "Native Hostがこの操作に対応していません。Hostを更新してください。",
+    "description": "Message for the error code \"unknown_type\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorAppDirUnavailable": {
+    "message": "%LOCALAPPDATA% を特定できないため、Vaultの設定を読み書きできません。",
+    "description": "Message for the error code \"app_dir_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultNotConfigured": {
+    "message": "Vaultが未設定です。Vault設定から新規作成するか、既存のVaultを開いてください。",
+    "description": "Message for the error code \"vault_not_configured\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultMissing": {
+    "message": "Vaultファイルが見つかりません。移動・削除されていないか確認し、Vaultを開き直してください。",
+    "description": "Message for the error code \"vault_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultInvalid": {
+    "message": "このファイルはMemocampus Vaultとして利用できません。",
+    "description": "Message for the error code \"vault_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultSchemaMismatch": {
+    "message": "このVaultは現在の形式に対応していません。自動変換は行いません（このVaultは変更していません）。",
+    "description": "Message for the error code \"vault_schema_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorConfigInvalid": {
+    "message": "設定ファイル(config.json)を読み取れません。Vaultを作成し直すか開き直すと設定が書き直されます。",
+    "description": "Message for the error code \"config_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultSwitched": {
+    "message": "Vaultが切り替えられました。もう一度お試しください。",
+    "description": "Message for the error code \"vault_switched\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultModeMismatch": {
+    "message": "Vaultファイルが設定上の形式（暗号化／平文）と一致しません。ファイルは変更していません。",
+    "description": "Message for the error code \"vault_mode_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultEncryptionUnsupported": {
+    "message": "この環境では暗号化Vaultを開けません。ファイルは変更していません。",
+    "description": "Message for the error code \"vault_encryption_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyUnavailable": {
+    "message": "このWindowsユーザーでは暗号化Vaultの鍵を取得できません。ファイルは変更していません。",
+    "description": "Message for the error code \"key_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultBackupEncryptedUnsupported": {
+    "message": "暗号化Vaultのバックアップは、まだ作成できません（今後のバージョンで対応します）。平文のコピーは作成しません。",
+    "description": "Message for the error code \"vault_backup_encrypted_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordRequired": {
+    "message": "パスワードを入力してください。",
+    "description": "Message for the error code \"backup_password_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordTooShort": {
+    "message": "パスワードは8文字以上にしてください。",
+    "description": "Message for the error code \"backup_password_too_short\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordTooLong": {
+    "message": "パスワードが長すぎます。",
+    "description": "Message for the error code \"backup_password_too_long\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordRejected": {
+    "message": "パスワードが違います。何も作成していません。",
+    "description": "Message for the error code \"backup_password_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPathRequired": {
+    "message": "復元するバックアップファイルを選んでください。",
+    "description": "Message for the error code \"backup_path_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupUnsupportedFormat": {
+    "message": "このファイルはMemocampusのバックアップではありません。",
+    "description": "Message for the error code \"backup_unsupported_format\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupUnsupportedVersion": {
+    "message": "このバックアップは未対応の版です。Memocampusを更新してください。",
+    "description": "Message for the error code \"backup_unsupported_version\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupMalformed": {
+    "message": "バックアップファイルの形式が不正です（改変または破損）。何も作成していません。",
+    "description": "Message for the error code \"backup_malformed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupIncomplete": {
+    "message": "バックアップファイルが途中で切れているか、余分なデータが付いています。何も作成していません。",
+    "description": "Message for the error code \"backup_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupTampered": {
+    "message": "バックアップの内容が改変または破損しています。復元途中のファイルは削除しました。",
+    "description": "Message for the error code \"backup_tampered\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupDamaged": {
+    "message": "バックアップの内容または復旧情報が破損しています。復元途中のファイルは削除しました。",
+    "description": "Message for the error code \"backup_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupSchemaMismatch": {
+    "message": "このバックアップのVaultの形式には対応していません。",
+    "description": "Message for the error code \"backup_schema_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupVaultInvalid": {
+    "message": "このファイルはMemocampus Vaultのバックアップとして利用できません。",
+    "description": "Message for the error code \"backup_vault_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestorePending": {
+    "message": "使用開始前の復元済みVault（または中断された復元）があります。使い始めるか破棄してから、もう一度お試しください。",
+    "description": "Message for the error code \"vault_restore_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreNotPending": {
+    "message": "使用開始を待っている復元済みVaultはありません。",
+    "description": "Message for the error code \"vault_restore_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreIncomplete": {
+    "message": "復元が中断されています。破棄してから、もう一度復元してください。",
+    "description": "Message for the error code \"vault_restore_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreDamaged": {
+    "message": "復元の記録または復元先のファイルが壊れているか、変更されています。破棄してください。",
+    "description": "Message for the error code \"vault_restore_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRestoreFailed": {
+    "message": "復元に失敗しました。復元途中のファイルは削除しました。",
+    "description": "Message for the error code \"restore_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDiskFull": {
+    "message": "保存先の空き容量が不足しています。作成途中のファイルは削除しました。",
+    "description": "Message for the error code \"disk_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupWalUnsupported": {
+    "message": "このVaultはWALモードのため、パスワード保護バックアップを作成できません。通常のバックアップを使ってください。何も作成していません。",
+    "description": "Message for the error code \"backup_wal_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidRequest": {
+    "message": "要求が不正です。",
+    "description": "Message for the error code \"invalid_request\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationPending": {
+    "message": "作成途中の暗号化Vaultがあります。破棄してから、もう一度作成してください。",
+    "description": "Message for the error code \"vault_creation_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertPending": {
+    "message": "変換途中（または使用開始前）のVaultがあります。使い始めるか、保存して終えるか、破棄してから、もう一度お試しください。",
+    "description": "Message for the error code \"vault_convert_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertNotPending": {
+    "message": "使用開始を待っている変換済みVaultはありません。",
+    "description": "Message for the error code \"vault_convert_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertIncomplete": {
+    "message": "変換が中断されています。破棄してから、もう一度変換してください。元のVaultは変更していません。",
+    "description": "Message for the error code \"vault_convert_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSpellUnconfirmed": {
+    "message": "新しいVaultのふっかつのじゅもんを確認するまで、使い始めることはできません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"vault_convert_spell_unconfirmed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertInvalidState": {
+    "message": "この操作は、今の変換の段階では行えません。表示を更新してください。",
+    "description": "Message for the error code \"vault_convert_invalid_state\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertDamaged": {
+    "message": "変換の記録または変換先のファイルが壊れているか、変更されています。破棄してください。元のVaultは変更していません。",
+    "description": "Message for the error code \"vault_convert_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSourceChanged": {
+    "message": "変換元のVaultが、変換を始めたときのファイルではなくなりました。Active Vaultは変更していません。変換したVaultは、切り替えずに保存するか破棄してください。",
+    "description": "Message for the error code \"vault_convert_source_changed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSameAsSource": {
+    "message": "変換先に、変換元のVaultそのものが選ばれました。別の新しいファイル名を選んでください。",
+    "description": "Message for the error code \"vault_convert_same_as_source\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertModeMismatch": {
+    "message": "表示中のVaultの形式（暗号化／平文）が変わりました。表示を更新してから、もう一度お試しください。",
+    "description": "Message for the error code \"vault_convert_mode_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertPlaintextUnacknowledged": {
+    "message": "暗号化を解除すると、閲覧履歴や画像が暗号化されずに保存されます。確認のチェックを入れてから実行してください。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"vault_convert_plaintext_unacknowledged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertVerifyFailed": {
+    "message": "変換したVaultが変換元と一致しませんでした。変換途中のファイルは削除しました。元のVaultは変更していません。",
+    "description": "Message for the error code \"vault_convert_verify_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertFailed": {
+    "message": "変換に失敗しました。変換途中のファイルは削除しました。元のVaultは変更していません。",
+    "description": "Message for the error code \"vault_convert_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultWorkFile": {
+    "message": "作成・復元・変換の途中のファイルは、Vaultとして開けません。",
+    "description": "Message for the error code \"vault_work_file\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationNotPending": {
+    "message": "作成途中の暗号化Vaultが見つかりません。最初から作成し直してください。",
+    "description": "Message for the error code \"vault_creation_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationDamaged": {
+    "message": "作成途中の暗号化Vaultのファイルが壊れているか、見つかりません。破棄して作成し直してください。",
+    "description": "Message for the error code \"vault_creation_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRecoverySpellInvalid": {
+    "message": "ふっかつのじゅもんの形式が正しくありません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"recovery_spell_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRecoverySpellRejected": {
+    "message": "ふっかつのじゅもんが、このVaultのものと一致しません。Vaultも鍵も変更していません。（Vaultファイルが壊れているか改変されている場合も、こう表示されます。）",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"recovery_spell_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultLegacyUnsupported": {
+    "message": "このVaultは、以前の鍵管理方式（「.mckey」ファイルを使う方式）で作られたもので、この版では開けません。ファイルは変更・削除していません。",
+    "description": "Message for the error code \"vault_legacy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupLegacyUnsupported": {
+    "message": "このバックアップは、以前の鍵管理方式で作られたもの（形式BまたはD）で、この版では復元できません。何も変更していません。",
+    "description": "Message for the error code \"backup_legacy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultNotEncrypted": {
+    "message": "このVaultは暗号化されていません。「既存のVaultを開く」で開いてください。",
+    "description": "Message for the error code \"vault_not_encrypted\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyProtectorUnavailable": {
+    "message": "この環境では鍵を保護できない（Windows DPAPIが使えない）ため、暗号化Vaultを作成できません。",
+    "description": "Message for the error code \"key_protector_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyProtectorFailed": {
+    "message": "Windowsで鍵を保護できませんでした。何も作成していません。",
+    "description": "Message for the error code \"key_protector_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRandomUnavailable": {
+    "message": "安全な乱数を取得できませんでした。何も作成していません。",
+    "description": "Message for the error code \"random_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultLocked": {
+    "message": "暗号化Vaultがロックされています。ファイルは変更していません。",
+    "description": "Message for the error code \"vault_locked\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultDecryptFailed": {
+    "message": "暗号化Vaultを復号できません。ファイルは変更していません。",
+    "description": "Message for the error code \"vault_decrypt_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidVaultToken": {
+    "message": "要求が不正です。一覧を更新してください。",
+    "description": "Message for the error code \"invalid_vault_token\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultBusy": {
+    "message": "Vaultが使用中です。しばらくしてからもう一度お試しください。",
+    "description": "Message for the error code \"vault_busy\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorManagementDisabled": {
+    "message": "開発用DB(MEMOCAMPUS_DB)が指定されているため、Vault管理は無効です。",
+    "description": "Message for the error code \"management_disabled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorFileExists": {
+    "message": "同名のファイルが既にあります。上書きはしません。別の名前を選ぶか「既存のVaultを開く」を使ってください。",
+    "description": "Message for the error code \"file_exists\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSidecarExists": {
+    "message": "保存先に同名の -journal / -wal / -shm ファイルが残っているため、安全のため作成を中止しました。",
+    "description": "Message for the error code \"sidecar_exists\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorParentMissing": {
+    "message": "保存先のフォルダが存在しません。",
+    "description": "Message for the error code \"parent_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidPath": {
+    "message": "パスが不正です。ドライブ名から始まる絶対パスを指定してください。",
+    "description": "Message for the error code \"invalid_path\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCancelled": {
+    "message": "キャンセルしました。",
+    "description": "Message for the error code \"cancelled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupFailed": {
+    "message": "バックアップに失敗しました。バックアップは作成されていません。",
+    "description": "Message for the error code \"backup_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLocationRejected": {
+    "message": "この場所はActive Vaultとして使用できません。",
+    "description": "Message for the error code \"location_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLocationNeedsApproval": {
+    "message": "この場所をActive Vaultにするには確認が必要です。",
+    "description": "Message for the error code \"location_needs_approval\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIoError": {
+    "message": "ファイルの読み書きに失敗しました。",
+    "description": "Message for the error code \"io_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidAck": {
+    "message": "Native Hostの応答が不正です。Hostを更新してください。",
+    "description": "Message for the error code \"invalid_ack\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidUrl": {
+    "message": "記録できないURLです。",
+    "description": "Message for the error code \"invalid_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidEvent": {
+    "message": "イベントの形式が不正です。",
+    "description": "Message for the error code \"invalid_event\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidMessage": {
+    "message": "メッセージの形式が不正です。",
+    "description": "Message for the error code \"invalid_message\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorQueueFull": {
+    "message": "送信待ちキューが満杯です。",
+    "description": "Message for the error code \"queue_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorStorageWriteFailed": {
+    "message": "拡張機能のストレージへの保存に失敗しました。",
+    "description": "Message for the error code \"storage_write_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDeadLetterFull": {
+    "message": "隔離領域が満杯のため、送信を一時停止しています。",
+    "description": "Message for the error code \"dead_letter_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDeadLetterWriteFailed": {
+    "message": "隔離領域への保存に失敗したため、送信を一時停止しています。",
+    "description": "Message for the error code \"dead_letter_write_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyNotInitialized": {
+    "message": "プライバシー設定が初期化されていないため、自動記録を停止しています。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_not_initialized\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyInvalid": {
+    "message": "プライバシー設定を読み取れない（欠落・破損・未対応の版）ため、自動記録を停止しています。設定は上書きしていません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyBusy": {
+    "message": "プライバシー設定が使用中のため、自動記録を一時停止しています。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_busy\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyUnavailable": {
+    "message": "プライバシー設定にアクセスできないため、自動記録を停止しています。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyUnsupported": {
+    "message": "プライバシー設定に、このバージョンでは使えないルール（先読み・後読み・後方参照を使う正規表現など）が含まれているため、自動記録を停止しています。設定は上書きしていません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidPolicyBatch": {
+    "message": "Native Hostと拡張機能のバージョンが合わないため、自動記録を停止しています。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_policy_batch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyBatchTooLarge": {
+    "message": "Native Hostと拡張機能のバージョンが合わないため、自動記録を停止しています。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_batch_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyAlreadyInitialized": {
+    "message": "プライバシー設定は初期化済みです。既存の設定は上書きしません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_already_initialized\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoUnknown": {
+    "message": "保存元のウィンドウの種類を確認できないため、保存しませんでした。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"incognito_unknown\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidIncognito": {
+    "message": "保存元のウィンドウの種類を確認できないため、保存しませんでした。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_incognito\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoFixedAtBegin": {
+    "message": "転送手順が不正です。もう一度保存してください。",
+    "description": "Message for the error code \"incognito_fixed_at_begin\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedUrl": {
+    "message": "このURLのホストはルールで指定できません。",
+    "description": "Message for the error code \"unsupported_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorNetworkError": {
+    "message": "画像を取得できませんでした（ネットワークエラー）。",
+    "description": "Message for the error code \"network_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHttpError": {
+    "message": "画像の取得に失敗しました（HTTPエラー）。",
+    "description": "Message for the error code \"http_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPageAccessDenied": {
+    "message": "このページからは画像を取得できません。",
+    "description": "Message for the error code \"page_access_denied\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTooLarge": {
+    "message": "画像が大きすぎます（上限 32 MiB）。",
+    "description": "Message for the error code \"too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorEmptyImage": {
+    "message": "画像データが空です。",
+    "description": "Message for the error code \"empty_image\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSvgNotSupported": {
+    "message": "SVG画像は保存できません。",
+    "description": "Message for the error code \"svg_not_supported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedFormat": {
+    "message": "対応していない画像形式です（PNG・JPEG・GIF・WebP・AVIF・BMPに対応）。",
+    "description": "Message for the error code \"unsupported_format\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDecodeFailed": {
+    "message": "画像を読み込めませんでした。壊れているか、対応していない形式です。",
+    "description": "Message for the error code \"decode_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTransferInterrupted": {
+    "message": "Native Hostとの接続が途中で切れました。保存されていません。",
+    "description": "Message for the error code \"transfer_interrupted\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHostOutdated": {
+    "message": "Native Hostが古いため画像を保存できません。Hostを更新してください。",
+    "description": "Message for the error code \"host_outdated\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveFailed": {
+    "message": "画像の保存に失敗しました。",
+    "description": "Message for the error code \"save_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSavedImageNotFound": {
+    "message": "この保存履歴が見つかりません。一覧を更新してください。",
+    "description": "Message for the error code \"saved_image_not_found\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoNotPublishable": {
+    "message": "シークレット保存のためMCP非公開です。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"incognito_not_publishable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidSavedImageId": {
+    "message": "保存履歴の指定が不正です。",
+    "description": "Message for the error code \"invalid_saved_image_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidMcpPublic": {
+    "message": "公開設定の指定が不正です。",
+    "description": "Message for the error code \"invalid_mcp_public\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHashMismatch": {
+    "message": "転送中に画像データが変化しました。保存されていません。",
+    "description": "Message for the error code \"hash_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLengthMismatch": {
+    "message": "画像データの長さが一致しません。保存されていません。",
+    "description": "Message for the error code \"length_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorMimeMismatch": {
+    "message": "画像の形式が申告と一致しません。",
+    "description": "Message for the error code \"mime_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDimensionMismatch": {
+    "message": "画像の寸法が一致しません。",
+    "description": "Message for the error code \"dimension_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidDimensions": {
+    "message": "画像の寸法が不正です。",
+    "description": "Message for the error code \"invalid_dimensions\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTruncatedImage": {
+    "message": "画像データが途中で切れています。",
+    "description": "Message for the error code \"truncated_image\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidThumbnail": {
+    "message": "サムネイルが不正です。",
+    "description": "Message for the error code \"invalid_thumbnail\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveIdConflict": {
+    "message": "保存IDが重複しています。もう一度保存してください。",
+    "description": "Message for the error code \"save_id_conflict\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBlobMissing": {
+    "message": "保存済みの画像が見つかりません。もう一度保存してください。",
+    "description": "Message for the error code \"blob_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidHash": {
+    "message": "画像のハッシュ値が不正です。",
+    "description": "Message for the error code \"invalid_hash\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidSaveId": {
+    "message": "保存IDが不正です。",
+    "description": "Message for the error code \"invalid_save_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedProtocol": {
+    "message": "Native Hostと拡張機能のバージョンが合いません。",
+    "description": "Message for the error code \"unsupported_protocol\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorNoUpload": {
+    "message": "転送が中断されました。もう一度保存してください。",
+    "description": "Message for the error code \"no_upload\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUploadInProgress": {
+    "message": "別の転送が進行中です。もう一度保存してください。",
+    "description": "Message for the error code \"upload_in_progress\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveIdMismatch": {
+    "message": "転送の対応関係が崩れました。もう一度保存してください。",
+    "description": "Message for the error code \"save_id_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnexpectedChunk": {
+    "message": "転送手順が不正です。もう一度保存してください。",
+    "description": "Message for the error code \"unexpected_chunk\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDuplicateChunk": {
+    "message": "転送データが重複しました。もう一度保存してください。",
+    "description": "Message for the error code \"duplicate_chunk\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorChunkOutOfOrder": {
+    "message": "転送データの順序が乱れました。もう一度保存してください。",
+    "description": "Message for the error code \"chunk_out_of_order\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidChunkSize": {
+    "message": "転送データのサイズが不正です。もう一度保存してください。",
+    "description": "Message for the error code \"invalid_chunk_size\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBase64": {
+    "message": "転送データが壊れています。もう一度保存してください。",
+    "description": "Message for the error code \"invalid_base64\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUploadTooLarge": {
+    "message": "画像データが申告より大きいため中止しました。",
+    "description": "Message for the error code \"upload_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncompleteUpload": {
+    "message": "画像データが揃わないまま確定しようとしました。保存されていません。",
+    "description": "Message for the error code \"incomplete_upload\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidTag": {
+    "message": "タグ名が不正です。1〜64文字で、制御文字や見えない文字は使えません。",
+    "description": "Message for the error code \"invalid_tag\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTooManyTags": {
+    "message": "1枚の画像に付けられるタグは64個までです。",
+    "description": "Message for the error code \"too_many_tags\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyConflict": {
+    "message": "プライバシー設定がほかの画面で変更されました。内容を確認し直してください。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_conflict\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPublishBlocked": {
+    "message": "ほかのルールまたは基本保護によって非公開になっているため、ここからは公開できません。Privacy設定で確認してください。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"publish_blocked\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyLimit": {
+    "message": "ルールの数が上限に達しているため追加できません（1グループ1,000件）。Privacy設定で整理してください。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_limit\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLayerDisabled": {
+    "message": "このグループは無効になっているため、ルールを追加しても効果がありません。Privacy設定でグループを有効にしてください。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"layer_disabled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidExactUrl": {
+    "message": "URLの形式が不正なため、Exact URLルールにできません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_exact_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyMigrationRequired": {
+    "message": "プライバシー設定が旧形式（v1）のため、この操作はできません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_migration_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidAction": {
+    "message": "要求が不正です。",
+    "description": "Message for the error code \"invalid_action\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidScope": {
+    "message": "要求が不正です。",
+    "description": "Message for the error code \"invalid_scope\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidEtag": {
+    "message": "要求が不正です。もう一度確認してください。",
+    "description": "Message for the error code \"invalid_etag\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBlobId": {
+    "message": "画像の指定が不正です。",
+    "description": "Message for the error code \"invalid_blob_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorReadIncomplete": {
+    "message": "画像データを最後まで読み出せませんでした。",
+    "description": "Message for the error code \"read_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorReadHashMismatch": {
+    "message": "読み出した画像データが記録と一致しません（SHA-256）。",
+    "description": "Message for the error code \"read_hash_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardUnavailable": {
+    "message": "このブラウザではクリップボードに画像をコピーできません。",
+    "description": "Message for the error code \"clipboard_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardDenied": {
+    "message": "クリップボードへのコピーが許可されませんでした。サイドパネルをクリックしてから、もう一度お試しください。",
+    "description": "Message for the error code \"clipboard_denied\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardFailed": {
+    "message": "クリップボードにコピーできませんでした。",
+    "description": "Message for the error code \"clipboard_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCopyTooLarge": {
+    "message": "画像の画素数が大きすぎるため、コピーできません。",
+    "description": "Message for the error code \"copy_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCopyConvertFailed": {
+    "message": "画像をPNGに変換できなかったため、コピーできません。",
+    "description": "Message for the error code \"copy_convert_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportFailed": {
+    "message": "ファイルを書き出せませんでした。既存のファイルは変更されていません。",
+    "description": "Message for the error code \"export_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportFileAppeared": {
+    "message": "書き出し中に同名のファイルが作られたため、上書きせずに中止しました。",
+    "description": "Message for the error code \"export_file_appeared\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportInvalidTarget": {
+    "message": "この場所には書き出せません。",
+    "description": "Message for the error code \"export_invalid_target\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "deleteTrashVisit": {
+    "message": "この閲覧履歴を削除",
+    "description": "Side Panel deletion (delete-ui.js). Icon button on one visit in a URL's visit history; deletes only that visit record."
+  },
+  "deleteTrashImage": {
+    "message": "この画像を削除",
+    "description": "Side Panel deletion (delete-ui.js). Icon button on one image tile; deletes that saved image."
+  },
+  "deleteTrashPageSave": {
+    "message": "この保存履歴を削除",
+    "description": "Side Panel deletion (delete-ui.js). Icon button on one saved-page record."
+  },
+  "deleteUrlAll": {
+    "message": "URL全件削除",
+    "description": "Side Panel deletion (delete-ui.js). Button on a URL row; deletes all visits, snapshots and page information of that one URL."
+  },
+  "deleteVisitsFiltered": {
+    "message": "条件に一致する閲覧履歴を削除",
+    "description": "Side Panel deletion (delete-ui.js). Button that deletes the visits matching the current search and date filter (not snapshots)."
+  },
+  "deleteVisitsAll": {
+    "message": "全閲覧履歴を削除",
+    "description": "Side Panel deletion (delete-ui.js). Button that deletes every visit in the Vault (not snapshots)."
+  },
+  "deleteImagesFiltered": {
+    "message": "検索結果をすべて削除",
+    "description": "Side Panel deletion (delete-ui.js). Image tab button that deletes every image matching the tag filter."
+  },
+  "deleteImagesAll": {
+    "message": "全画像を削除",
+    "description": "Side Panel deletion (delete-ui.js). Image tab button that deletes every saved image."
+  },
+  "deleteDialogTitle": {
+    "message": "削除の確認",
+    "description": "Side Panel deletion (delete-ui.js). Title of the deletion confirmation dialog."
+  },
+  "deleteCancel": {
+    "message": "キャンセル",
+    "description": "Side Panel deletion (delete-ui.js). Dialog button that closes without deleting anything."
+  },
+  "deleteClose": {
+    "message": "閉じる",
+    "description": "Side Panel deletion (delete-ui.js). Dialog button shown after a failure; closes the dialog."
+  },
+  "deleteConfirm": {
+    "message": "削除する",
+    "description": "Side Panel deletion (delete-ui.js). Confirmation button; deletes exactly what the dialog listed."
+  },
+  "deleteInProgress": {
+    "message": "削除中…",
+    "description": "Side Panel deletion (delete-ui.js). Confirmation button while the delete request runs."
+  },
+  "deletePreviewing": {
+    "message": "削除対象を確認しています…",
+    "description": "Side Panel deletion (delete-ui.js). Status while the host lists what a deletion would remove."
+  },
+  "deleteErrorItemNotFound": {
+    "message": "削除対象は既に存在しません。削除していません。",
+    "description": "Side Panel deletion (delete-ui.js). Error: must say that nothing was deleted."
+  },
+  "deleteErrorItemTargetsChanged": {
+    "message": "確認後に削除対象が変更されました。何も削除していません。もう一度確認してください。",
+    "description": "Side Panel deletion (delete-ui.js). Error: must say that nothing was deleted."
+  },
+  "deleteErrorInvalidReview": {
+    "message": "削除確認が無効・期限切れです。何も削除していません。もう一度確認してください。",
+    "description": "Side Panel deletion (delete-ui.js). Error: must say that nothing was deleted."
+  },
+  "deleteErrorVaultSwitched": {
+    "message": "Vaultが変更されました。何も削除していません。一覧を読み込み直してください。",
+    "description": "Side Panel deletion (delete-ui.js). Error: another Vault became active; nothing was deleted."
+  },
+  "deleteErrorVaultLocked": {
+    "message": "Vaultがロックされています。設定画面で状態を確認してください。",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorKeyUnavailable": {
+    "message": "Vaultの鍵を使用できません。",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorVaultNotConfigured": {
+    "message": "Vaultが未選択です。",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorVaultSchemaMismatch": {
+    "message": "このVaultのスキーマには対応していません。",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorUnknown": {
+    "message": "削除状態を確認できません。削除要求の結果を確認できませんでした。削除が完了している可能性があります。Vaultの内容を再確認してください（自動では再実行しません）。",
+    "description": "Side Panel deletion (delete-ui.js). A delete request was sent and its outcome is unknown. Must never say that nothing was deleted, nor that it was."
+  },
+  "deleteErrorUnknownOtherVault": {
+    "message": "$message$（以前に開いていたVaultでの削除要求です）",
+    "description": "Side Panel deletion (delete-ui.js). The unknown-outcome notice [message] for a request made in another Vault than the one now shown.",
+    "placeholders": {
+      "message": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteErrorNotSent": {
+    "message": "削除要求は送信されませんでした。何も削除していません。",
+    "description": "Side Panel deletion (delete-ui.js). Error: must say that nothing was deleted."
+  },
+  "deleteErrorTimeout": {
+    "message": "Hostからの応答がありません。削除状態は確認できていません。一覧を読み込み直してください。",
+    "description": "Side Panel deletion (delete-ui.js). Error: the outcome is not known."
+  },
+  "deleteErrorHostUnavailable": {
+    "message": "Native Hostに接続できません。何も削除していません。",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorUnknownType": {
+    "message": "Native Hostがこの削除に対応していません。Hostを更新してください。",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorInvalidTag": {
+    "message": "タグを指定できません。何も削除していません。",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorResponseTooLarge": {
+    "message": "表示データが大きすぎるため取得できません。",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorGeneric": {
+    "message": "削除に失敗しました。成功扱いにせず、一覧を読み込み直して状態を確認してください。",
+    "description": "Side Panel deletion (delete-ui.js). Error for any other code."
+  },
+  "deleteCount": {
+    "message": "$count$件",
+    "description": "Side Panel deletion (delete-ui.js). A count value next to its label in the confirmation (for example: Visits to delete: 3). [count] is a formatted number.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteReviewTarget": {
+    "message": "削除対象",
+    "description": "Side Panel deletion (delete-ui.js). Heading of the first section of the confirmation."
+  },
+  "deleteReviewEffects": {
+    "message": "削除による影響",
+    "description": "Side Panel deletion (delete-ui.js). Heading of the counts section of the confirmation."
+  },
+  "deleteReviewNotes": {
+    "message": "注意事項",
+    "description": "Side Panel deletion (delete-ui.js). Heading of the notes section of the confirmation."
+  },
+  "deleteReviewWarning": {
+    "message": "削除すると元に戻せません。",
+    "description": "Side Panel deletion (delete-ui.js). Warning shown in every confirmation."
+  },
+  "deleteReviewWarningDetail": {
+    "message": "ゴミ箱はありません。バックアップには残る場合があります。Vaultファイルは小さくなりません。",
+    "description": "Side Panel deletion (delete-ui.js). Warning detail shown in every confirmation."
+  },
+  "deleteRowVisits": {
+    "message": "削除する閲覧履歴",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteRowNavigationCensored": {
+    "message": "遷移元が検閲済み（$label$）になる遷移記録",
+    "description": "Side Panel deletion (delete-ui.js). Row label; [label] is the fixed marker shown in place of a deleted source. The records stay; only their source is removed.",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteRowNavigationsDeleted": {
+    "message": "一緒に削除される遷移記録",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteNoteNavigationCensored": {
+    "message": "検閲済みの遷移記録は残りますが、削除した閲覧は復元しません。",
+    "description": "Side Panel deletion (delete-ui.js). Note."
+  },
+  "deleteRowTarget": {
+    "message": "対象",
+    "description": "Side Panel deletion (delete-ui.js). Row label for what is deleted."
+  },
+  "deleteTargetOneVisit": {
+    "message": "閲覧履歴1件",
+    "description": "Side Panel deletion (delete-ui.js). Target value: a single visit."
+  },
+  "deleteRowDateTime": {
+    "message": "日時",
+    "description": "Side Panel deletion (delete-ui.js). Row label."
+  },
+  "deleteRowTitle": {
+    "message": "タイトル",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is the page title as recorded."
+  },
+  "deleteNoTitle": {
+    "message": "（なし）",
+    "description": "Side Panel deletion (delete-ui.js). Value when a visit has no title."
+  },
+  "deleteRowPageInfoOfVisit": {
+    "message": "このイベントが持つページ情報",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteNoteVisitKeepsOthers": {
+    "message": "同じURLの他の閲覧履歴とスナップショットは削除しません。",
+    "description": "Side Panel deletion (delete-ui.js). Note for deleting one visit."
+  },
+  "deleteTargetVisits": {
+    "message": "閲覧履歴",
+    "description": "Side Panel deletion (delete-ui.js). Target value: visits (by condition or all)."
+  },
+  "deleteRowCondition": {
+    "message": "条件",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is the list's filter."
+  },
+  "deleteConditionNoneVisits": {
+    "message": "なし（すべての閲覧履歴）",
+    "description": "Side Panel deletion (delete-ui.js). Condition value when every visit is deleted."
+  },
+  "deleteRowTargetUrls": {
+    "message": "対象のURL",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count of URLs."
+  },
+  "deleteRowPageInfoWith": {
+    "message": "一緒に削除するページ情報",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteNoteCountIsDb": {
+    "message": "件数は表示中のURL数ではなく、DB上の一致した閲覧履歴の件数です。",
+    "description": "Side Panel deletion (delete-ui.js). Note for deleting visits by condition."
+  },
+  "deleteNoteSnapshotsKept": {
+    "message": "スナップショットは対象外です（これらのURLのスナップショット $count$は残ります）。",
+    "description": "Side Panel deletion (delete-ui.js). Note: deleting visits never deletes snapshots. [count] is a count value.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteNoteNonMatchingKept": {
+    "message": "条件に一致しない同じURLの閲覧履歴も残ります。",
+    "description": "Side Panel deletion (delete-ui.js). Note."
+  },
+  "deleteTargetUrlAll": {
+    "message": "URL全件",
+    "description": "Side Panel deletion (delete-ui.js). Target value for deleting a whole URL."
+  },
+  "deleteRowSnapshots": {
+    "message": "削除するスナップショット",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteRowPageInfo": {
+    "message": "削除するページ情報",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteNoteImageSavesKept": {
+    "message": "このURLを含む保存画像の保存履歴 $count$は削除しません。",
+    "description": "Side Panel deletion (delete-ui.js). Note. [count] is a count value.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteNotePolicyUnchanged": {
+    "message": "ポリシーは変更しません。ポリシーが許す限り、次の閲覧は再び記録されます。",
+    "description": "Side Panel deletion (delete-ui.js). Note: deleting history does not add a privacy rule."
+  },
+  "deleteRowImages": {
+    "message": "削除する画像",
+    "description": "Side Panel deletion (delete-ui.js). Row label."
+  },
+  "deleteImagesValue": {
+    "message": "$count$（原本 $bytes$）",
+    "description": "Side Panel deletion (delete-ui.js). Value of the images row: [count] is a count value, [bytes] the size of the originals.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "bytes": {
+        "content": "$2"
+      }
+    }
+  },
+  "deleteRowSaves": {
+    "message": "保存履歴",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteRowThumbnails": {
+    "message": "サムネイル",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteRowTagLinks": {
+    "message": "タグの付与",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteRowTagsRemoved": {
+    "message": "他に使われず消えるタグ",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteTargetImages": {
+    "message": "画像",
+    "description": "Side Panel deletion (delete-ui.js). Target value for deleting images by condition or all."
+  },
+  "deleteConditionTag": {
+    "message": "タグ「$tag$」の付いた画像",
+    "description": "Side Panel deletion (delete-ui.js). Condition value; [tag] is the user's tag name.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteConditionNoneImages": {
+    "message": "なし（すべての画像）",
+    "description": "Side Panel deletion (delete-ui.js). Condition value when every image is deleted."
+  },
+  "deleteTargetOneImage": {
+    "message": "画像1件",
+    "description": "Side Panel deletion (delete-ui.js). Target value: a single image."
+  },
+  "deleteRowContent": {
+    "message": "内容",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value describes the image."
+  },
+  "deleteNoteImagesOnly": {
+    "message": "閲覧履歴・URL・他の画像は削除しません。",
+    "description": "Side Panel deletion (delete-ui.js). Note for deleting images."
+  },
+  "urlHistoryUntitled": {
+    "message": "（タイトルなし）",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Shown for a visit recorded without a page title."
+  },
+  "urlHistoryShow": {
+    "message": "閲覧履歴を表示",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Button that expands the list of visits of the URL."
+  },
+  "urlHistoryHide": {
+    "message": "閲覧履歴を閉じる",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Button that collapses the list of visits."
+  },
+  "urlHistoryDeleteUrlLabel": {
+    "message": "「$label$」のURL全件を削除",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Accessible name of the button that deletes all visits, snapshots and page information of one URL; [label] is the page title or URL.",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      }
+    }
+  },
+  "urlHistoryDeleteUrlTitle": {
+    "message": "$button$: このURLの閲覧履歴・スナップショット・ページ情報をすべて削除します",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Tooltip of that button; [button] is its visible label.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "urlHistoryListLabel": {
+    "message": "このURLの閲覧履歴",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Accessible name of the list of visits."
+  },
+  "urlHistoryMore": {
+    "message": "さらに表示",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Button that loads more visits."
+  },
+  "urlHistoryDeleteVisitLabel": {
+    "message": "$date$の閲覧履歴を削除",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Accessible name of the icon button that deletes one visit; [date] is its full date and time.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "urlHistoryDeleteVisitTitle": {
+    "message": "$button$（$date$）",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Tooltip of that button; [button] is the button's name, [date] the visit's date and time.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      },
+      "date": {
+        "content": "$2"
+      }
+    }
+  },
+  "urlHistoryNote": {
+    "message": "閲覧履歴 $visits$$scope$。スナップショット $snapshots$は個別削除の対象外で、「$button$」で削除されます。",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Note above the visits. [visits] and [snapshots] are counts, [scope] is empty or the filter remark, [button] the label of the whole-URL delete button.",
+    "placeholders": {
+      "visits": {
+        "content": "$1"
+      },
+      "scope": {
+        "content": "$2"
+      },
+      "snapshots": {
+        "content": "$3"
+      },
+      "button": {
+        "content": "$4"
+      }
+    }
+  },
+  "urlHistoryNoteScope": {
+    "message": "（このURL全$total$件のうち、検索・日付の条件に一致するもの）",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Filter remark inserted in the note when only some visits match; [total] is a number.",
+    "placeholders": {
+      "total": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarFilterByDate": {
+    "message": "閲覧日で絞り込み",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Calendar button name and tooltip, and the calendar dialog's name. Narrows the list to one day; changes nothing stored."
+  },
+  "calendarDayDate": {
+    "message": "$month$$day$日（$weekday$）",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Date part of a day's accessible name. [month] is the month name (Japanese: 11月, English: November), [day] the day number, [weekday] the short weekday name.",
+    "placeholders": {
+      "month": {
+        "content": "$1"
+      },
+      "day": {
+        "content": "$2"
+      },
+      "weekday": {
+        "content": "$3"
+      }
+    }
+  },
+  "calendarDayLabel": {
+    "message": "$date$$visits$",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Accessible name of a day button: [date] then [visits] (a count or a state).",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "visits": {
+        "content": "$2"
+      }
+    }
+  },
+  "calendarDayLoading": {
+    "message": "読み込み中",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Part of a day's accessible name while its count is loading."
+  },
+  "calendarDayVisitsOne": {
+    "message": "閲覧$count$件",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Part of a day's accessible name: [count] visits that day (singular form).",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarDayVisitsOther": {
+    "message": "閲覧$count$件",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Part of a day's accessible name: [count] visits that day.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarDayNoVisits": {
+    "message": "閲覧なし",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Part of a day's accessible name for a day without visits."
+  },
+  "calendarDayNote": {
+    "message": "、$note$",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Appends [note] (today, selected) to a day's accessible name.",
+    "placeholders": {
+      "note": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarDayToday": {
+    "message": "今日",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Note in a day's accessible name."
+  },
+  "calendarDaySelected": {
+    "message": "選択中",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Note in a day's accessible name: the day chosen as the filter."
+  },
+  "calendarPrevMonth": {
+    "message": "前の月",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Button."
+  },
+  "calendarNextMonth": {
+    "message": "次の月",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Button."
+  },
+  "calendarPrevYear": {
+    "message": "前の年",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Button in the month list."
+  },
+  "calendarNextYear": {
+    "message": "次の年",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Button in the month list."
+  },
+  "calendarChooseMonth": {
+    "message": "$month$、年と月を選ぶ",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Accessible name of the title button that opens the month list; [month] is the shown month and year.",
+    "placeholders": {
+      "month": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarCloseMonths": {
+    "message": "$year$年、月の一覧を閉じる",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Accessible name of the title button in the month list; [year] is a year number.",
+    "placeholders": {
+      "year": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarReload": {
+    "message": "再読み込み",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Button that loads the month's counts again after a failure."
+  },
+  "calendarLoading": {
+    "message": "閲覧日を読み込んでいます…",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status."
+  },
+  "calendarNoVault": {
+    "message": "Vaultを確認できないため、閲覧日を表示できません。",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status."
+  },
+  "calendarVaultSwitched": {
+    "message": "Vaultが切り替えられたため、閲覧日を表示できません。",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status: counts of another Vault are never shown."
+  },
+  "calendarNoVisitsInMonth": {
+    "message": "この月の閲覧記録はありません。",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status."
+  },
+  "calendarDaysWithVisits": {
+    "message": "閲覧記録のある日: $count$日",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status; [count] is a number of days.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarLoadFailed": {
+    "message": "閲覧日を読み込めませんでした。",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status."
+  },
+  "policyStateAllow": {
+    "message": "公開",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Short state of a URL: recorded and shown to the MCP server."
+  },
+  "policyStateSaveButNoMcp": {
+    "message": "MCPサーバに見せない",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Short state of a URL: recorded in the Vault, never shown to the MCP server."
+  },
+  "policyStateNeverSave": {
+    "message": "保存しない",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Short state of a URL: not recorded automatically and not shown to the MCP server."
+  },
+  "policyStateAllowLong": {
+    "message": "公開（記録し、MCPサーバにも見せる）",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. State of a URL before or after the action."
+  },
+  "policyStateSaveButNoMcpLong": {
+    "message": "MCPサーバに見せない（Vaultには記録する）",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. State of a URL before or after the action."
+  },
+  "policyStateNeverSaveLong": {
+    "message": "保存しない（自動記録せず、MCPサーバにも見せない）",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. State of a URL before or after the action."
+  },
+  "policyActionNeverSave": {
+    "message": "保存しないグループへ追加",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Action in a drop-down and the dialog title: adds a rule to the Never Save group (stop recording, never show to MCP)."
+  },
+  "policyActionSaveButNoMcp": {
+    "message": "MCPサーバに見せないグループへ追加",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Action: adds a rule to the Hide from MCP group (keep recording, never show to MCP)."
+  },
+  "policyActionPublish": {
+    "message": "公開",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Action: removes this URL's own exact-URL rule so that it is shown to the MCP server; never removes rules that apply to other URLs."
+  },
+  "policyConfirmNeverSave": {
+    "message": "保存しないグループへ追加する",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Confirmation button of the Never Save action."
+  },
+  "policyConfirmSaveButNoMcp": {
+    "message": "MCPサーバに見せないグループへ追加する",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Confirmation button of the Hide from MCP action."
+  },
+  "policyConfirmPublish": {
+    "message": "公開する（ルールを外す）",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Confirmation button of the Publish action; removes only this URL's exact-URL rule."
+  },
+  "policySameNeverSave": {
+    "message": "既に保存しない",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Remark after a disabled action whose result is already the state."
+  },
+  "policySameSaveButNoMcp": {
+    "message": "既にMCPサーバに見せない",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Remark after a disabled action whose result is already the state."
+  },
+  "policySamePublish": {
+    "message": "既に公開",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Remark after a disabled action whose result is already the state."
+  },
+  "policyLayerNeverSave": {
+    "message": "保存しないグループ",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Name of the privacy group of rules that stop recording."
+  },
+  "policyLayerSaveButNoMcp": {
+    "message": "MCPサーバに見せないグループ",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Name of the privacy group of rules that keep recording but hide from MCP."
+  },
+  "policyReasonPublishBlocked": {
+    "message": "このURLは、ほかのルールまたは基本保護によっても非公開になっています。ここで外せるのはこのURLだけのルール（Exact URL）で、ほかのURLにも効くルールは変更しません。変更するにはPrivacy設定を開いてください。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why Publish cannot be done here."
+  },
+  "policyReasonLayerDisabled": {
+    "message": "このグループは現在無効です。ルールを追加しても効果がないため、追加しません。Privacy設定でグループを有効にできます。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why the action cannot be done."
+  },
+  "policyReasonPolicyLimit": {
+    "message": "ルールの数が上限に達しているため追加できません（1グループ1,000件）。Privacy設定でルールを整理してください。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why the action cannot be done."
+  },
+  "policyReasonMigrationRequired": {
+    "message": "プライバシー設定が旧形式（v1）のため、ここからは変更できません。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why the action cannot be done."
+  },
+  "policyReasonUnsupportedUrl": {
+    "message": "このURLのホスト（IPv6アドレスなど）はルールで指定できません。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why the action cannot be done."
+  },
+  "policyReasonInvalidUrl": {
+    "message": "このURLはルールの対象にできません（http・https以外、または判定できない形式）。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why the action cannot be done."
+  },
+  "policyTargetUrl": {
+    "message": "対象URL: $url$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. The URL the rule applies to; [url] is the URL as is.",
+    "placeholders": {
+      "url": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyTargetText": {
+    "message": "対象: $label$\n$url$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. The row the action was chosen on: [label] is the page title or URL (or the phrase for this page), [url] the URL. Contains a line break.",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      },
+      "url": {
+        "content": "$2"
+      }
+    }
+  },
+  "policyThisPage": {
+    "message": "このページ",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Label of the only URL choice when the action is chosen on a URL row."
+  },
+  "policyChooseUrl": {
+    "message": "ルールを適用するURLを選んでください。画像そのものではなく、選んだURLにルールが適用されます。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Image tab: an image has several URLs; none is chosen for the person."
+  },
+  "policyCurrentState": {
+    "message": "（現在: $state$）",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. After a URL choice; [state] is a short state.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyCurrentStateUnknown": {
+    "message": "（現在の状態: 不明）",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. After a URL choice whose state is not known."
+  },
+  "policyUrlChoice": {
+    "message": "$label$$state$$unavailable$: $url$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. One URL choice: [label] its kind, [state] the state remark, [unavailable] empty or the reason it cannot be chosen, [url] the URL.",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      },
+      "state": {
+        "content": "$2"
+      },
+      "unavailable": {
+        "content": "$3"
+      },
+      "url": {
+        "content": "$4"
+      }
+    }
+  },
+  "policyUrlUnavailable": {
+    "message": " — $reason$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Reason a URL choice cannot be chosen, appended to it.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyChecking": {
+    "message": "Native Hostで確認しています…",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Status while the host previews the change."
+  },
+  "policyCheckFailed": {
+    "message": "確認できませんでした。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Error: the preview failed; nothing was changed."
+  },
+  "policyRuleAdd": {
+    "message": "追加",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Verb of a rule change line."
+  },
+  "policyRuleRemove": {
+    "message": "削除",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Verb of a rule change line."
+  },
+  "policyRuleLine": {
+    "message": "$verb$: $layer$・$kind$「$pattern$」",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. One rule that will change: [verb] Add or Remove, [layer] the group, [kind] the rule kind (fixed English names), [pattern] the rule text.",
+    "placeholders": {
+      "verb": {
+        "content": "$1"
+      },
+      "layer": {
+        "content": "$2"
+      },
+      "kind": {
+        "content": "$3"
+      },
+      "pattern": {
+        "content": "$4"
+      }
+    }
+  },
+  "policyBlockerBuiltin": {
+    "message": "$layer$: 基本保護（組み込みのカテゴリまたはURL内の認証情報）",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. What keeps a URL private: a built-in protection in group [layer].",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyBlockerRule": {
+    "message": "$layer$: $number$番目のルール（$kind$）",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. What keeps a URL private: rule number [number] of kind [kind] in group [layer].",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      },
+      "number": {
+        "content": "$2"
+      },
+      "kind": {
+        "content": "$3"
+      }
+    }
+  },
+  "policyScopeHost": {
+    "message": "適用範囲: 同じホスト全体（このURL以外にも適用されます）",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. PRIVACY: the rule covers every URL of the host. Must not read narrower than that."
+  },
+  "policyScopeUrl": {
+    "message": "適用範囲: このURLのみ（Exact URL）",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. PRIVACY: the rule covers exactly this URL."
+  },
+  "policyStateBefore": {
+    "message": "現在の状態: $state$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. [state] is a long state.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyStateAfter": {
+    "message": "実行後の状態: $state$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. [state] is a long state.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyChangesHeading": {
+    "message": "変更されるルール:",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Heading of the list of rule changes."
+  },
+  "policyRulesKeepData": {
+    "message": "ルールの追加は、Vaultに保存済みのデータを削除しません。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Note: the action never deletes history."
+  },
+  "policyCannotRun": {
+    "message": "この操作は実行できません。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Fallback reason."
+  },
+  "policyBlockersHeading": {
+    "message": "非公開にしているもの:",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Heading of the list of rules and protections that keep the URL private."
+  },
+  "policyAlreadyPublic": {
+    "message": "このURLは既に公開されています。変更はありません。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Preview result."
+  },
+  "policyRuleExists": {
+    "message": "同じルールが既にあります。変更はありません。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Preview result."
+  },
+  "policyRuleAddedStateSame": {
+    "message": "現在の状態は変わりませんが、このルールが追加されます（ほかのルールを外しても、このルールは残ります）。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Preview result."
+  },
+  "policyAckHost": {
+    "message": "このホストのすべてのURL（ほかのページも含む）に適用されることを確認しました",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. PRIVACY: required checkbox before a host-wide rule can be confirmed."
+  },
+  "policyConflictRetry": {
+    "message": "$message$「$button$」で最新の設定に対して確認し直せます。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. The settings changed meanwhile: [message] is the error, [button] the label of the check-again button. Nothing was changed.",
+    "placeholders": {
+      "message": {
+        "content": "$1"
+      },
+      "button": {
+        "content": "$2"
+      }
+    }
+  },
+  "policyChangeFailed": {
+    "message": "変更できませんでした。",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Error: what is stored is unknown or unchanged; never shown as done."
+  },
+  "policyUrlsHeading": {
+    "message": "ルールを適用するURL",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Legend of the URL choices."
+  },
+  "policyScopeHeading": {
+    "message": "適用範囲",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Legend of the scope choices."
+  },
+  "policyScopeUrlOption": {
+    "message": "このURLのみ",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. PRIVACY: scope choice; the rule covers exactly this URL (internal value url)."
+  },
+  "policyScopeHostOption": {
+    "message": "同じホスト全体（ほかのURLにも適用）",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. PRIVACY: scope choice; the rule covers every URL of the host (internal value host)."
+  },
+  "policyRecheck": {
+    "message": "もう一度確認",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Button that asks the host for a new preview."
+  },
+  "policyOpenPrivacySettings": {
+    "message": "Privacy設定を開く",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Button that opens the Options page."
+  },
+  "policyCancel": {
+    "message": "キャンセル",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Button that closes the dialog without changing anything."
+  },
+  "pageTabName": {
+    "message": "Page",
+    "description": "Side Panel Page tab (page-text.js). Name of the tab of saved pages (a product term, kept in English in both languages)."
+  },
+  "pageSearchPlaceholder": {
+    "message": "保存したPageのURL・タイトルで検索",
+    "description": "Side Panel Page tab (page-text.js). Placeholder and name of the search box."
+  },
+  "pageRefresh": {
+    "message": "更新",
+    "description": "Side Panel Page tab (page-text.js). Button that reloads the list."
+  },
+  "pageMore": {
+    "message": "さらに表示",
+    "description": "Side Panel Page tab (page-text.js). Button that loads more pages."
+  },
+  "pageDeleteMatching": {
+    "message": "検索結果をすべて削除",
+    "description": "Side Panel Page tab (page-text.js). Button that deletes every save event matching the search."
+  },
+  "pageDeleteAll": {
+    "message": "全Pageを削除",
+    "description": "Side Panel Page tab (page-text.js). Button that deletes every saved page."
+  },
+  "pageOpen": {
+    "message": "元のWebページを開く",
+    "description": "Side Panel Page tab (page-text.js). Link that opens the live page (not the saved copy)."
+  },
+  "pageOpenNote": {
+    "message": "現在のWebページへ再訪問します。保存済みMHTMLの表示ではありません。",
+    "description": "Side Panel Page tab (page-text.js). Note about the open link."
+  },
+  "pageGroupDelete": {
+    "message": "URL全件削除",
+    "description": "Side Panel Page tab (page-text.js). Button that deletes all save records of one URL."
+  },
+  "pageGroupDeleteTitle": {
+    "message": "$button$: このURLの保存履歴をすべて削除します",
+    "description": "Side Panel Page tab (page-text.js). Tooltip of that button; [button] is its label.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageItemLabel": {
+    "message": "$label$（$detail$）",
+    "description": "Side Panel Page tab (page-text.js). Accessible name of a delete button: [label] the action, [detail] the date or the page title or URL.",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      },
+      "detail": {
+        "content": "$2"
+      }
+    }
+  },
+  "pageEventDelete": {
+    "message": "この保存履歴を削除",
+    "description": "Side Panel Page tab (page-text.js). Icon button on one save record."
+  },
+  "pageUntitled": {
+    "message": "（タイトルなし）",
+    "description": "Side Panel Page tab (page-text.js). Shown for a page saved without a title."
+  },
+  "pageEventExport": {
+    "message": "MHTMLを書き出す",
+    "description": "Side Panel Page tab (page-text.js). Button that writes the saved MHTML original to a file."
+  },
+  "pageExportNote": {
+    "message": "この保存履歴のMHTML原本を、Windowsの保存ダイアログで選んだ場所へそのまま書き出します。",
+    "description": "Side Panel Page tab (page-text.js). Tooltip of the export button."
+  },
+  "pageExporting": {
+    "message": "保存ダイアログで保存先を選んでください。完了するまでPageの操作は待機します…",
+    "description": "Side Panel Page tab (page-text.js). Status while the save dialog is open."
+  },
+  "pageExportCancelled": {
+    "message": "書き出しをキャンセルしました。ファイルは変更していません。",
+    "description": "Side Panel Page tab (page-text.js). Status."
+  },
+  "pageLoading": {
+    "message": "Pageを読み込んでいます…",
+    "description": "Side Panel Page tab (page-text.js). Status."
+  },
+  "pageEmpty": {
+    "message": "一致する保存済みPageはありません。",
+    "description": "Side Panel Page tab (page-text.js). Empty state."
+  },
+  "pageInitial": {
+    "message": "Pageタブを開くと保存履歴を読み込みます。",
+    "description": "Side Panel Page tab (page-text.js). Status before the tab was opened."
+  },
+  "pageScopeNote": {
+    "message": "URLは完全一致でまとめます。検索はURL・タイトルの部分一致（英字は大文字小文字を区別せず、その他のUnicodeは区別）。検索中の履歴と一括削除は一致する保存イベントのみが対象です。保存履歴ごとにMHTML原本をファイルへ書き出せます。本文検索・MHTML表示は未対応です。",
+    "description": "Side Panel Page tab (page-text.js). Explanation under the search box. DELETION: the bulk delete covers only matching save events."
+  },
+  "pageNewItems": {
+    "message": "新しい保存があります。更新してください。",
+    "description": "Side Panel Page tab (page-text.js). Status."
+  },
+  "pageConfirmTitle": {
+    "message": "Pageの削除確認",
+    "description": "Side Panel Page tab (page-text.js). Title of the deletion dialog."
+  },
+  "pageCancel": {
+    "message": "キャンセル",
+    "description": "Side Panel Page tab (page-text.js). Dialog button; deletes nothing."
+  },
+  "pageConfirm": {
+    "message": "削除する",
+    "description": "Side Panel Page tab (page-text.js). Dialog button; deletes exactly what was listed."
+  },
+  "pageDeleting": {
+    "message": "削除中…",
+    "description": "Side Panel Page tab (page-text.js). Dialog button while deleting."
+  },
+  "pageDeleted": {
+    "message": "確認した保存履歴を削除しました。",
+    "description": "Side Panel Page tab (page-text.js). Status after deletion."
+  },
+  "pageRetry": {
+    "message": "再読込",
+    "description": "Side Panel Page tab (page-text.js). Button that loads the list again."
+  },
+  "pageClose": {
+    "message": "閉じる",
+    "description": "Side Panel Page tab (page-text.js). Dialog button after a failure."
+  },
+  "pageErrorVaultLocked": {
+    "message": "Vaultがロックされています。設定画面で状態を確認してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorKeyUnavailable": {
+    "message": "Vaultの鍵を使用できません。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorVaultNotConfigured": {
+    "message": "Vaultが未選択です。設定画面で作成・選択してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorVaultSwitched": {
+    "message": "Vaultが変更されました。表示と削除確認を無効化しました。更新して確認し直してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorTargetsChanged": {
+    "message": "削除対象または共有参照が変更されました。削除していません。再確認してください。",
+    "description": "Side Panel Page tab error (page-text.js). Must say that nothing was deleted."
+  },
+  "pageErrorListChanged": {
+    "message": "保存履歴が変更されたため続きは取得できません。更新してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorInvalidCursor": {
+    "message": "一覧の続きが無効・期限切れです。更新してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorInvalidReview": {
+    "message": "削除確認が無効・期限切れです。確認し直してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorNotFound": {
+    "message": "対象の保存履歴は既に存在しません。更新してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorTimeout": {
+    "message": "Hostからの応答がありません。更新して再確認してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorHostUnavailable": {
+    "message": "Native Hostに接続できません。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorUnknownType": {
+    "message": "Native HostがPage管理に対応していません。Hostを更新してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorSchemaMismatch": {
+    "message": "このVaultのスキーマには対応していません。旧Vaultは変更しません。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorDeleteUnknown": {
+    "message": "削除状態未確定です。自動再削除はしません。一覧を再読込して確認してください。",
+    "description": "Side Panel Page tab error (page-text.js). The outcome of a sent delete is unknown; must not say that nothing was deleted."
+  },
+  "pageErrorExportChanged": {
+    "message": "対象の保存履歴が変更・削除されたため、書き出しを中止しました。ファイルは変更していません。更新して確認してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportUnknown": {
+    "message": "書き出し状態未確定です。自動では再実行しません。保存先のファイルを確認し、必要ならもう一度書き出してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorBlobCorrupt": {
+    "message": "保存済みMHTML原本の検証に失敗したため、書き出していません。ファイルは変更していません。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportFileAppeared": {
+    "message": "保存先に同名のファイルが作られたため、上書きせずに中止しました。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportTargetBusy": {
+    "message": "上書き先のファイルを他のプログラムが使用中のため、変更せずに中止しました。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportTargetReadonly": {
+    "message": "上書き先のファイルは読み取り専用のため、変更せずに中止しました。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportInvalidTarget": {
+    "message": "この保存先・ファイル名には書き出せません。別の場所や名前を選んでください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorParentMissing": {
+    "message": "保存先のフォルダーが見つかりません。ファイルは作成していません。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportFailed": {
+    "message": "書き出しに失敗しました。保存先のファイルは変更していません。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportVerifyFailed": {
+    "message": "書き出したファイルを検証できなかったため取り消しました。保存先は書き出し前の状態です。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportRecoveryNeeded": {
+    "message": "書き出しを完了できませんでした。置き換え前のファイルは、同じフォルダーに「.memocampus-old」で終わる名前で残っています。保存先を確認してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorInvalidQuery": {
+    "message": "検索文字列は200文字以内で入力してください。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorResponseTooLarge": {
+    "message": "表示データが大きすぎるため取得できません。",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorGeneric": {
+    "message": "Pageの処理に失敗しました。変更を成功扱いにせず、更新して状態を確認してください。",
+    "description": "Side Panel Page tab error (page-text.js). Any other code."
+  },
+  "pageHistoryLabel": {
+    "message": "保存履歴 $matched$件 / 全$total$件",
+    "description": "Side Panel Page tab (page-text.js). Count of a URL group: [matched] matching save records of [total] in all.",
+    "placeholders": {
+      "matched": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "pageSummary": {
+    "message": "読み込み済み $count$ URL",
+    "description": "Side Panel Page tab (page-text.js). Summary; [count] is a number.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageExported": {
+    "message": "「$file$」にMHTML原本を書き出しました。",
+    "description": "Side Panel Page tab (page-text.js). Status; [file] is the file name.",
+    "placeholders": {
+      "file": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageExportedOldLeft": {
+    "message": "「$file$」にMHTML原本を書き出しました。置き換え前のファイルは削除できず、同じフォルダーに「.memocampus-old」で終わる名前で残っています。",
+    "description": "Side Panel Page tab (page-text.js). Status; [file] is the file name.",
+    "placeholders": {
+      "file": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageCount": {
+    "message": "$count$件",
+    "description": "Side Panel Page tab (page-text.js). Count value next to its label in the deletion dialog.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageRowTarget": {
+    "message": "対象",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label."
+  },
+  "pageTargetEvent": {
+    "message": "個別履歴",
+    "description": "Side Panel Page tab (page-text.js). Deletion target value."
+  },
+  "pageRowDateTime": {
+    "message": "日時",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label."
+  },
+  "pageRowTitle": {
+    "message": "タイトル",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label."
+  },
+  "pageTargetUrl": {
+    "message": "URL全体",
+    "description": "Side Panel Page tab (page-text.js). Deletion target value: every save record of one URL."
+  },
+  "pageTargetAll": {
+    "message": "全Pageの保存イベント（フィルターなし）",
+    "description": "Side Panel Page tab (page-text.js). Deletion target value: everything."
+  },
+  "pageTargetMatching": {
+    "message": "検索に一致するPageの保存履歴",
+    "description": "Side Panel Page tab (page-text.js). Deletion target value."
+  },
+  "pageRowQuery": {
+    "message": "検索条件",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label; the value is the search text."
+  },
+  "pageRowEvents": {
+    "message": "保存イベント",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label; the value is a count."
+  },
+  "pageRowBlobsRemoved": {
+    "message": "原本削除",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label; the value is a count."
+  },
+  "pageRowBlobsKept": {
+    "message": "共有原本保持",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label; originals other records still use."
+  },
+  "pageRowBytesRemoved": {
+    "message": "削除原本",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label; the value is a size in bytes."
+  },
+  "pageNoteDbScope": {
+    "message": "画面の読み込み範囲ではなく、DB上の一致全件が対象です。",
+    "description": "Side Panel Page tab (page-text.js). DELETION note for a search-based delete."
+  },
+  "pageNoteSharedKept": {
+    "message": "共有されるMHTML原本は他の履歴が参照している限り残ります。",
+    "description": "Side Panel Page tab (page-text.js). Deletion note."
+  },
+  "imageEmpty": {
+    "message": "保存された画像はまだありません。ページ上の画像を右クリックして「$menu$」を選ぶと、ここに表示されます。",
+    "description": "Side Panel Image tab (image-gallery.js). Empty state; [menu] is the context menu item's label.",
+    "placeholders": {
+      "menu": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageErrorBlobMissing": {
+    "message": "この画像がVaultに見つかりません。一覧を更新してください。",
+    "description": "Side Panel Image tab (image-gallery.js). Error of a tag request."
+  },
+  "imageRefreshNew": {
+    "message": "新しい画像があります",
+    "description": "Side Panel Image tab (image-gallery.js). Name and tooltip of the refresh button when newer images exist."
+  },
+  "imageRefresh": {
+    "message": "画像一覧を更新",
+    "description": "Side Panel Image tab (image-gallery.js). Name and tooltip of the refresh button."
+  },
+  "imageSummary": {
+    "message": "$count$件",
+    "description": "Side Panel Image tab (image-gallery.js). Number of images loaded.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageSummaryMore": {
+    "message": "$count$件以上",
+    "description": "Side Panel Image tab (image-gallery.js). Number of images loaded when more exist.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageDeleteFilteredLabel": {
+    "message": "$button$（タグ「$tag$」の付いた画像すべて）",
+    "description": "Side Panel Image tab (image-gallery.js). DELETION: name of the button that deletes every image with tag [tag]; [button] is its label.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      },
+      "tag": {
+        "content": "$2"
+      }
+    }
+  },
+  "imageDeleteAllLabel": {
+    "message": "$button$（保存した画像すべて）",
+    "description": "Side Panel Image tab (image-gallery.js). DELETION: name of the button that deletes every saved image.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageDeleted": {
+    "message": "画像を削除しました。",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageDeletedCount": {
+    "message": "画像$count$件を削除しました。",
+    "description": "Side Panel Image tab (image-gallery.js). Status; [count] is a number.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageDeleteVaultSwitched": {
+    "message": "Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しました。",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageLoadFailed": {
+    "message": "画像を読み込めませんでした。",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageTileLabel": {
+    "message": "$type$ $width$×$height$、最終保存 $saved$、保存$count$回",
+    "description": "Side Panel Image tab (image-gallery.js). Accessible description of an image tile: [type] the image type, [saved] a date, [count] how often it was saved.",
+    "placeholders": {
+      "type": {
+        "content": "$1"
+      },
+      "width": {
+        "content": "$2"
+      },
+      "height": {
+        "content": "$3"
+      },
+      "saved": {
+        "content": "$4"
+      },
+      "count": {
+        "content": "$5"
+      }
+    }
+  },
+  "imageCopying": {
+    "message": "画像をコピーしています…",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageCopied": {
+    "message": "画像をクリップボードにコピーしました。",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageChooseExport": {
+    "message": "書き出し先を選んでください…",
+    "description": "Side Panel Image tab (image-gallery.js). Status while the save dialog is open."
+  },
+  "imageExportCancelled": {
+    "message": "書き出しをキャンセルしました。",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageExported": {
+    "message": "「$file$」として書き出しました。",
+    "description": "Side Panel Image tab (image-gallery.js). Status; [file] is the file name.",
+    "placeholders": {
+      "file": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageActionFailed": {
+    "message": "操作に失敗しました。",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageKindImageUrl": {
+    "message": "画像URL",
+    "description": "Side Panel Image tab (image-gallery.js). Kind of a URL of a save record: the image's own URL."
+  },
+  "imageKindPageUrl": {
+    "message": "ページURL",
+    "description": "Side Panel Image tab (image-gallery.js). Kind of a URL of a save record: the page it was saved from."
+  },
+  "imageKindFrameUrl": {
+    "message": "フレームURL",
+    "description": "Side Panel Image tab (image-gallery.js). Kind of a URL of a save record: the frame it was saved from."
+  },
+  "imageKindSeparator": {
+    "message": "・",
+    "description": "Side Panel Image tab (image-gallery.js). Separator between URL kinds."
+  },
+  "imageCandidate": {
+    "message": "$kinds$（保存$count$件）",
+    "description": "Side Panel Image tab (image-gallery.js). A URL a rule can be for: [kinds] its kinds, [count] how many saves name it.",
+    "placeholders": {
+      "kinds": {
+        "content": "$1"
+      },
+      "count": {
+        "content": "$2"
+      }
+    }
+  },
+  "imagePublicationRule": {
+    "message": "MCPサーバに画像が出るのは、保存履歴で「MCPへの公開を許可」がONで、その保存の画像URL・ページURL・フレームURLがすべて公開のときだけです。",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: the rule for when an image reaches MCP. Must not read wider."
+  },
+  "imagePublicationNone": {
+    "message": "この画像には公開を許可した保存履歴がないため、URLを公開してもMCPサーバには出ません（公開の許可はここでは変更しません）。",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: follows the rule above."
+  },
+  "imagePublicationSome": {
+    "message": "この画像で公開を許可した保存履歴: $allowed$/$total$件。",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: follows the rule above.",
+    "placeholders": {
+      "allowed": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "imageManageUpdateHost": {
+    "message": "Native Hostを更新すると、ここから画像の管理（削除・ルールの追加・公開）ができます。",
+    "description": "Side Panel Image tab (image-gallery.js). Note."
+  },
+  "imageNoTargetUrls": {
+    "message": "対象にできるURLがありません",
+    "description": "Side Panel Image tab (image-gallery.js). Remark after a disabled action."
+  },
+  "imageAllUrlsSame": {
+    "message": "すべてのURLが$state$",
+    "description": "Side Panel Image tab (image-gallery.js). Remark after a disabled action; [state] is a remark such as already public.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageActionRemark": {
+    "message": "$action$（$reason$）",
+    "description": "Side Panel Image tab (image-gallery.js). A disabled action with its reason.",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      },
+      "reason": {
+        "content": "$2"
+      }
+    }
+  },
+  "imageStatesUnknown": {
+    "message": "状態を確認できません",
+    "description": "Side Panel Image tab (image-gallery.js). Part of the manage note."
+  },
+  "imageStatesTally": {
+    "message": "公開 $allow$・MCPサーバに見せない $hidden$・保存しない $never$",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: counts of the image's URLs per state.",
+    "placeholders": {
+      "allow": {
+        "content": "$1"
+      },
+      "hidden": {
+        "content": "$2"
+      },
+      "never": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageNoRuleUrls": {
+    "message": "この画像の保存履歴には、ルールの対象にできるURLがありません。",
+    "description": "Side Panel Image tab (image-gallery.js). Note."
+  },
+  "imageUrlsStates": {
+    "message": "この画像のURL（$range$）: $states$",
+    "description": "Side Panel Image tab (image-gallery.js). Manage note: [range] says which save records were read, [states] the counts.",
+    "placeholders": {
+      "range": {
+        "content": "$1"
+      },
+      "states": {
+        "content": "$2"
+      }
+    }
+  },
+  "imageRangeLoaded": {
+    "message": "読み込んだ保存履歴の範囲",
+    "description": "Side Panel Image tab (image-gallery.js). Range in the manage note."
+  },
+  "imageRangeAll": {
+    "message": "保存履歴のすべて",
+    "description": "Side Panel Image tab (image-gallery.js). Range in the manage note."
+  },
+  "imageCheckingUrls": {
+    "message": "保存履歴のURLを確認しています…",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageTooManySources": {
+    "message": "保存履歴が多すぎるため、ここからはルールを追加できません。Privacy設定でURLを指定してください。",
+    "description": "Side Panel Image tab (image-gallery.js). Note."
+  },
+  "imageSourcesCheckFailed": {
+    "message": "保存履歴を確認できませんでした。",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageAllUrlsAlready": {
+    "message": "この画像のURLはすべて$state$です。",
+    "description": "Side Panel Image tab (image-gallery.js). Note; [state] is a remark such as already public.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "imagePolicyTarget": {
+    "message": "対象: $image$\nルールは画像ではなく、選んだURLに適用されます。",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: the rule is for a URL, never for the image. [image] describes the image. Contains a line break.",
+    "placeholders": {
+      "image": {
+        "content": "$1"
+      }
+    }
+  },
+  "imagePolicyTargetFallback": {
+    "message": "画像",
+    "description": "Side Panel Image tab (image-gallery.js). [image] when the image is not known."
+  },
+  "imagePolicyApplied": {
+    "message": "「$action$」を実行しました（$url$）。現在の状態: $state$",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: status after the host confirmed a rule change.",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      },
+      "url": {
+        "content": "$2"
+      },
+      "state": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageIncognitoNotPublic": {
+    "message": "シークレット保存のためMCP非公開",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: label of a save record from an Incognito window; never public."
+  },
+  "imageAllowMcp": {
+    "message": "MCPへの公開を許可（プライバシー設定が常に優先。MCPは未実装）",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: checkbox of a save record; the privacy settings still decide."
+  },
+  "imagePublicationFailed": {
+    "message": "公開設定を変更できませんでした。",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: error; the checkbox returns to its stored value."
+  },
+  "imageIncognito": {
+    "message": "シークレット",
+    "description": "Side Panel Image tab (image-gallery.js). Marks a save record made in an Incognito window."
+  },
+  "imageSourceImage": {
+    "message": "画像",
+    "description": "Side Panel Image tab (image-gallery.js). Label of the image URL of a save record."
+  },
+  "imageSourcePage": {
+    "message": "ページ",
+    "description": "Side Panel Image tab (image-gallery.js). Label of the page URL of a save record."
+  },
+  "imageSourceFrame": {
+    "message": "フレーム",
+    "description": "Side Panel Image tab (image-gallery.js). Label of the frame URL of a save record."
+  },
+  "imageSourcesFailed": {
+    "message": "保存履歴を読み込めませんでした。",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageDetailsMeta": {
+    "message": "$type$（$mime$）・$width$×$height$・$size$ KB・保存$count$回・最終保存 $saved$",
+    "description": "Side Panel Image tab (image-gallery.js). Details line of a selected image.",
+    "placeholders": {
+      "type": {
+        "content": "$1"
+      },
+      "mime": {
+        "content": "$2"
+      },
+      "width": {
+        "content": "$3"
+      },
+      "height": {
+        "content": "$4"
+      },
+      "size": {
+        "content": "$5"
+      },
+      "count": {
+        "content": "$6"
+      },
+      "saved": {
+        "content": "$7"
+      }
+    }
+  },
+  "imageTagsLoading": {
+    "message": "タグを読み込んでいます…",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageTagRemove": {
+    "message": "タグ「$tag$」を外す",
+    "description": "Side Panel Image tab (image-gallery.js). Name and tooltip of a tag's remove button; [tag] is the user's tag.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagsLoadFailed": {
+    "message": "タグを読み込めませんでした。",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageTagRequired": {
+    "message": "タグを入力してください。",
+    "description": "Side Panel Image tab (image-gallery.js). Validation."
+  },
+  "imageTagAdding": {
+    "message": "タグを追加しています…",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageTagRemoving": {
+    "message": "タグを外しています…",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageTagAdded": {
+    "message": "タグ「$tag$」を付けました。",
+    "description": "Side Panel Image tab (image-gallery.js). Status.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagAlready": {
+    "message": "タグ「$tag$」は既に付いています。",
+    "description": "Side Panel Image tab (image-gallery.js). Status.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagRemoved": {
+    "message": "タグ「$tag$」を外しました。",
+    "description": "Side Panel Image tab (image-gallery.js). Status.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagNotThere": {
+    "message": "タグ「$tag$」は付いていません。",
+    "description": "Side Panel Image tab (image-gallery.js). Status.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagChangeFailed": {
+    "message": "タグを変更できませんでした。",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageNoTaggedImages": {
+    "message": "タグ「$tag$」の付いた画像はありません。",
+    "description": "Side Panel Image tab (image-gallery.js). Empty state of a tag filter.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageFilterName": {
+    "message": "タグ: $tag$",
+    "description": "Side Panel Image tab (image-gallery.js). The active tag filter.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageFilterByTag": {
+    "message": "タグで絞り込み",
+    "description": "Side Panel Image tab (image-gallery.js). Button and tag picker title."
+  },
+  "imageChooseTag": {
+    "message": "既存のタグから選ぶ",
+    "description": "Side Panel Image tab (image-gallery.js). Button and tag picker title."
+  },
+  "imageTagOwned": {
+    "message": "$tag$（付与済み）",
+    "description": "Side Panel Image tab (image-gallery.js). Accessible name of a tag in the picker that the image has.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagWithCount": {
+    "message": "$tag$、$count$件",
+    "description": "Side Panel Image tab (image-gallery.js). Accessible name of a tag in the picker; [count] images have it.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      },
+      "count": {
+        "content": "$2"
+      }
+    }
+  },
+  "imageNoTags": {
+    "message": "登録済みのタグはまだありません。",
+    "description": "Side Panel Image tab (image-gallery.js). Empty tag picker."
+  },
+  "imageTagListFailed": {
+    "message": "タグの一覧を読み込めませんでした。",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageSourceNone": {
+    "message": "（記録なし）",
+    "description": "Side Panel Image tab (image-gallery.js). A save record without that URL (image-client.js)."
+  },
+  "imageSourceEmbedded": {
+    "message": "$url$（ページ内に埋め込まれた画像）",
+    "description": "Side Panel Image tab (image-gallery.js). A data: URL of a save record (image-client.js).",
+    "placeholders": {
+      "url": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTypeGeneric": {
+    "message": "画像",
+    "description": "Side Panel Image tab (image-gallery.js). Type label of an image whose type has no short name (image-client.js)."
+  },
+  "panelDeleteWithdrawnVaultChanged": {
+    "message": "Vaultが変更されたため、削除の確認を取り消しました。",
+    "description": "Side Panel URL tab (sidepanel.js). Status; nothing was deleted."
+  },
+  "panelHistoryOpenFailed": {
+    "message": "Historyを開けませんでした。",
+    "description": "Side Panel URL tab (sidepanel.js). Status."
+  },
+  "panelSettings": {
+    "message": "設定",
+    "description": "Side Panel URL tab (sidepanel.js). Name and tooltip of the settings tab (icon only)."
+  },
+  "panelSettingsAttention": {
+    "message": "設定（Vaultの確認が必要です）",
+    "description": "Side Panel URL tab (sidepanel.js). Name and tooltip of the settings tab when the Vault needs attention."
+  },
+  "searchFailed": {
+    "message": "検索に失敗しました。",
+    "description": "Side Panel URL tab (sidepanel.js). Error."
+  },
+  "searchInProgress": {
+    "message": "検索中…",
+    "description": "Side Panel URL tab (sidepanel.js). Summary while searching."
+  },
+  "searchSummary": {
+    "message": "$count$件",
+    "description": "Side Panel URL tab (sidepanel.js). Number of results shown.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchSummaryRecent": {
+    "message": "$count$件（最近の順）",
+    "description": "Side Panel URL tab (sidepanel.js). Number of results without a search term, newest first (keep it short: it shares a row with buttons in a narrow panel).",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchSummaryMore": {
+    "message": "$count$件以上",
+    "description": "Side Panel URL tab (sidepanel.js). Number of results when more exist.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchSummaryDay": {
+    "message": "$count$件（$date$）",
+    "description": "Side Panel URL tab (sidepanel.js). Number of results for the chosen day [date].",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "date": {
+        "content": "$2"
+      }
+    }
+  },
+  "searchSummaryDayMore": {
+    "message": "$count$件以上（$date$）",
+    "description": "Side Panel URL tab (sidepanel.js). Number of results for the chosen day [date] when more exist.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "date": {
+        "content": "$2"
+      }
+    }
+  },
+  "dateFilterClear": {
+    "message": "日付の絞り込みを解除",
+    "description": "Side Panel URL tab (sidepanel.js). Name and tooltip of the × on the date chip."
+  },
+  "dateFilterClearWith": {
+    "message": "日付の絞り込みを解除（$date$）",
+    "description": "Side Panel URL tab (sidepanel.js). Name and tooltip of the × on the date chip; [date] is the chosen day.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateFilterDroppedVaultSwitched": {
+    "message": "Vaultが切り替えられたため、日付の絞り込みを解除しました。",
+    "description": "Side Panel URL tab (sidepanel.js). Status."
+  },
+  "calendarUnsupported": {
+    "message": "Native Hostが閲覧日カレンダーに対応していません。Hostを更新してください。",
+    "description": "Side Panel URL tab (sidepanel.js). Tooltip of the disabled calendar button."
+  },
+  "calendarCheckingHost": {
+    "message": "Native Hostの対応状況を確認しています。",
+    "description": "Side Panel URL tab (sidepanel.js). Tooltip of the disabled calendar button."
+  },
+  "calendarNoVaultList": {
+    "message": "Vaultを読み込めないため、閲覧日で絞り込めません。",
+    "description": "Side Panel URL tab (sidepanel.js). Tooltip of the disabled calendar button."
+  },
+  "resultVisited": {
+    "message": "閲覧",
+    "description": "Side Panel URL tab (sidepanel.js). Prefix of a result's last visit time (for example: Visited Today 9:05 AM)."
+  },
+  "resultSnapshot": {
+    "message": "スナップショット",
+    "description": "Side Panel URL tab (sidepanel.js). Prefix of a result's last snapshot time."
+  },
+  "rowStateUnknown": {
+    "message": "状態不明",
+    "description": "Side Panel URL tab (sidepanel.js). PRIVACY: badge of a result whose privacy state the host could not tell."
+  },
+  "rowStateChecking": {
+    "message": "確認中…",
+    "description": "Side Panel URL tab (sidepanel.js). Badge of a result while its privacy state is checked."
+  },
+  "rowActionRemark": {
+    "message": "$action$（$state$）",
+    "description": "Side Panel URL tab (sidepanel.js). A disabled action with the remark that it is already the state.",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      },
+      "state": {
+        "content": "$2"
+      }
+    }
+  },
+  "rowActionsLabel": {
+    "message": "「$title$」の操作",
+    "description": "Side Panel URL tab (sidepanel.js). Accessible name of a result's action drop-down; [title] is the page title or URL.",
+    "placeholders": {
+      "title": {
+        "content": "$1"
+      }
+    }
+  },
+  "rowChooseAction": {
+    "message": "操作を選択…",
+    "description": "Side Panel URL tab (sidepanel.js). First option of an action drop-down (no action)."
+  },
+  "panelVisitDeleted": {
+    "message": "閲覧履歴$count$件を削除しました。同じURLのスナップショットと他の閲覧履歴は残っています。",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION status after deleting one visit.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "panelDeleteVaultSwitched": {
+    "message": "Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しています。",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION status."
+  },
+  "panelDeleteVisitsFilteredLabel": {
+    "message": "$button$（現在の検索・日付の条件に一致する閲覧履歴。スナップショットは対象外）",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION: name and tooltip of the range delete button; [button] is its label.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "panelDeleteVisitsAllLabel": {
+    "message": "$button$（スナップショットは対象外）",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION: name and tooltip of the delete-all-visits button.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "filterSearch": {
+    "message": "検索「$query$」",
+    "description": "Side Panel URL tab (sidepanel.js). Condition in the deletion dialog; [query] is the search text.",
+    "placeholders": {
+      "query": {
+        "content": "$1"
+      }
+    }
+  },
+  "filterDate": {
+    "message": "閲覧日 $date$",
+    "description": "Side Panel URL tab (sidepanel.js). Condition in the deletion dialog; [date] is the chosen day.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "filterBoth": {
+    "message": "$search$ かつ $date$",
+    "description": "Side Panel URL tab (sidepanel.js). Both conditions in the deletion dialog.",
+    "placeholders": {
+      "search": {
+        "content": "$1"
+      },
+      "date": {
+        "content": "$2"
+      }
+    }
+  },
+  "panelVisitsDeleted": {
+    "message": "閲覧履歴$count$件を削除しました（スナップショットは削除していません）。",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION status.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "panelUrlDeleted": {
+    "message": "URL全件を削除しました（閲覧履歴$visits$件・スナップショット$snapshots$件）。",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION status.",
+    "placeholders": {
+      "visits": {
+        "content": "$1"
+      },
+      "snapshots": {
+        "content": "$2"
+      }
+    }
+  },
+  "panelPolicyApplied": {
+    "message": "「$action$」を実行しました。現在の状態: $state$",
+    "description": "Side Panel URL tab (sidepanel.js). PRIVACY status after the host confirmed a rule change; [state] is the host's new decision.",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      },
+      "state": {
+        "content": "$2"
+      }
+    }
+  },
+  "searchEmptyQueryDay": {
+    "message": "「$query$」に一致する、$date$に閲覧したページはありません。",
+    "description": "Side Panel URL tab (sidepanel.js). Empty state.",
+    "placeholders": {
+      "query": {
+        "content": "$1"
+      },
+      "date": {
+        "content": "$2"
+      }
+    }
+  },
+  "searchEmptyDay": {
+    "message": "$date$に閲覧したページはありません。",
+    "description": "Side Panel URL tab (sidepanel.js). Empty state.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchEmptyQuery": {
+    "message": "「$query$」に一致するページはありません。",
+    "description": "Side Panel URL tab (sidepanel.js). Empty state.",
+    "placeholders": {
+      "query": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchEmptyNone": {
+    "message": "まだ記録されたページがありません。",
+    "description": "Side Panel URL tab (sidepanel.js). Empty state."
+  },
+  "searchLoadingMore": {
+    "message": "読み込み中…",
+    "description": "Side Panel URL tab (sidepanel.js). Load-more button while loading."
+  },
+  "searchLoadMore": {
+    "message": "さらに読み込む",
+    "description": "Side Panel URL tab (sidepanel.js). Button that loads more results."
+  },
+  "panelTabOpenFailed": {
+    "message": "タブを開けませんでした。",
+    "description": "Side Panel URL tab (sidepanel.js). Error."
+  },
+  "panelRecording": {
+    "message": "記録中…",
+    "description": "Side Panel URL tab (sidepanel.js). Status while all tabs are recorded."
+  },
+  "searchPlaceholder": {
+    "message": "タイトル・URLで検索",
+    "description": "Side Panel (sidepanel.html). URL tab: placeholder of the search box."
+  },
+  "searchLabel": {
+    "message": "閲覧履歴を検索",
+    "description": "Side Panel (sidepanel.html). URL tab: accessible name of the search box."
+  },
+  "panelOpenHistoryTitle": {
+    "message": "フルページのHistoryを新しいタブで開く",
+    "description": "Side Panel (sidepanel.html). URL tab: tooltip of the History button (the button label History is a product term)."
+  },
+  "panelOpenHistoryLabel": {
+    "message": "Historyを新しいタブで開く",
+    "description": "Side Panel (sidepanel.html). URL tab: accessible name of the History button."
+  },
+  "panelRecordTabs": {
+    "message": "全タブを記録",
+    "description": "Side Panel (sidepanel.html). URL tab: button that records the open tabs of normal windows now (as the privacy settings allow)."
+  },
+  "panelPolicyInitialize": {
+    "message": "初回案内を開く",
+    "description": "Side Panel (sidepanel.html). URL tab: button shown when the privacy settings were never set up."
+  },
+  "panelPolicyRecheck": {
+    "message": "再確認",
+    "description": "Side Panel (sidepanel.html). URL tab: button that asks the privacy settings' state again."
+  },
+  "panelRetry": {
+    "message": "再試行",
+    "description": "Side Panel (sidepanel.html). Button after a loading error."
+  },
+  "panelOpenVaultSettings": {
+    "message": "Vault設定を開く",
+    "description": "Side Panel (sidepanel.html). Button after an error caused by the Vault; opens the settings tab."
+  },
+  "searchResultsLabel": {
+    "message": "検索結果",
+    "description": "Side Panel (sidepanel.html). URL tab: accessible name of the result list."
+  },
+  "imageFilterClear": {
+    "message": "絞り込みを解除",
+    "description": "Side Panel (sidepanel.html). Image tab: name and tooltip of the × on the tag filter chip."
+  },
+  "imageGridLabel": {
+    "message": "保存した画像",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the image grid."
+  },
+  "imageLoadMore": {
+    "message": "さらに読み込む",
+    "description": "Side Panel (sidepanel.html). Image tab: button that loads more images."
+  },
+  "imageDetailsTitle": {
+    "message": "画像の詳細",
+    "description": "Side Panel (sidepanel.html). Image tab: heading of the details of a selected image."
+  },
+  "imageClose": {
+    "message": "閉じる",
+    "description": "Side Panel (sidepanel.html). Image tab: closes the details or the tag picker."
+  },
+  "imageTagsHeading": {
+    "message": "タグ",
+    "description": "Side Panel (sidepanel.html). Image tab: heading."
+  },
+  "imageTagsLabel": {
+    "message": "この画像のタグ",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the tag list."
+  },
+  "imageTagsEmpty": {
+    "message": "タグはまだありません。",
+    "description": "Side Panel (sidepanel.html). Image tab: empty tag list."
+  },
+  "imageTagPlaceholder": {
+    "message": "タグを入力",
+    "description": "Side Panel (sidepanel.html). Image tab: placeholder of the tag input."
+  },
+  "imageTagInputLabel": {
+    "message": "追加するタグ",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the tag input."
+  },
+  "imageTagAdd": {
+    "message": "追加",
+    "description": "Side Panel (sidepanel.html). Image tab: adds the typed tag."
+  },
+  "imageManageHeading": {
+    "message": "管理",
+    "description": "Side Panel (sidepanel.html). Image tab: heading of the privacy actions of an image."
+  },
+  "imageManageLabel": {
+    "message": "この画像の操作",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the action drop-down."
+  },
+  "imageSourcesHeading": {
+    "message": "保存履歴",
+    "description": "Side Panel (sidepanel.html). Image tab: heading of the save records of an image."
+  },
+  "imageShowMore": {
+    "message": "さらに表示",
+    "description": "Side Panel (sidepanel.html). Image tab: loads more save records or tags."
+  },
+  "imageTagNamePlaceholder": {
+    "message": "タグ名を入力",
+    "description": "Side Panel (sidepanel.html). Image tab: placeholder of the tag picker input."
+  },
+  "imageTagFilterLabel": {
+    "message": "絞り込むタグ",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the tag picker input."
+  },
+  "imageTagApply": {
+    "message": "絞り込む",
+    "description": "Side Panel (sidepanel.html). Image tab: applies the typed tag as the filter."
+  },
+  "imageTagListLabel": {
+    "message": "登録済みのタグ",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the tag picker list."
+  },
+  "imageMenuLabel": {
+    "message": "画像の操作",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the right-click menu of a tile."
+  },
+  "imageMenuCopy": {
+    "message": "画像をコピー",
+    "description": "Side Panel (sidepanel.html). Image tab: copies the original image to the clipboard."
+  },
+  "imageMenuExport": {
+    "message": "ファイルとして書き出す",
+    "description": "Side Panel (sidepanel.html). Image tab: writes the original image to a file."
+  },
+  "imageTrashLabel": {
+    "message": "$button$（$image$）",
+    "description": "Side Panel (sidepanel.html). Image tab: name of a tile's delete button; [image] describes the image.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      },
+      "image": {
+        "content": "$2"
+      }
+    }
+  },
+  "panelPrivacyHeading": {
+    "message": "プライバシー",
+    "description": "Side Panel (sidepanel.html). Settings tab: heading of the privacy section."
+  },
+  "panelPrivacyNote": {
+    "message": "保存しないグループ・MCPサーバに見せないグループ・基本保護を、別のタブで確認します。",
+    "description": "Side Panel (sidepanel.html). Settings tab: what the Privacy settings button opens."
+  },
+  "panelPrivacySettings": {
+    "message": "Privacy設定",
+    "description": "Side Panel (sidepanel.html). Settings tab: opens the Options page."
+  }
+}

@@ -1,0 +1,3221 @@
+{
+  "langTag": {
+    "message": "en",
+    "description": "Language of this catalog (BCP 47). Read by i18n.js and i18n-dom.js to know which catalog Chrome actually used; sets <html lang> and the Intl locale. Must equal the folder name."
+  },
+  "extDescription": {
+    "message": "Local-first web memory capture.",
+    "description": "manifest.json description shown on chrome://extensions and in the Chrome Web Store. At most 132 characters. No dollar signs (manifest messages are not substituted)."
+  },
+  "menuSaveImage": {
+    "message": "Save to Memocampus",
+    "description": "Context menu item shown on images. Saves the clicked image to the Vault."
+  },
+  "menuSavePage": {
+    "message": "Save page to Memocampus",
+    "description": "Context menu item shown on pages. Saves the tab that was clicked in (not a link target) as MHTML to the Vault."
+  },
+  "imageSavedTitle": {
+    "message": "Saved to Memocampus",
+    "description": "Notification title after an image was saved."
+  },
+  "imageSavedMessage": {
+    "message": "Image $width$×$height$, $size$",
+    "description": "Notification body after an image was saved: pixel size and file size.",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSavedMessageReplayed": {
+    "message": "Image $width$×$height$, $size$ (this save operation was already completed)",
+    "description": "Notification body when the same save action was already committed (a retry).",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSavedMessageDeduplicated": {
+    "message": "Image $width$×$height$, $size$ (the same image was already saved, so a save record was added)",
+    "description": "Notification body when identical image bytes were already in the Vault and only a save record was added.",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSaveFailedTitle": {
+    "message": "Could not save to Memocampus",
+    "description": "Notification title when saving an image failed."
+  },
+  "imageSaveFailedHttp": {
+    "message": "Fetching the image failed (HTTP $status$).",
+    "description": "Notification body when the image server answered with an HTTP error status.",
+    "placeholders": {
+      "status": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageSavedTitle": {
+    "message": "Page saved to Memocampus",
+    "description": "Notification title after a page was saved."
+  },
+  "pageSavedMessage": {
+    "message": "Saved the original MHTML and its save record to the Vault. It is not published to MCP.",
+    "description": "Privacy: notification body after a page was saved. Must keep saying that saved pages are not published to MCP."
+  },
+  "pageSaveFailedTitle": {
+    "message": "Could not save the page",
+    "description": "Notification title when saving a page failed."
+  },
+  "pageSaveErrorUnsupportedUrl": {
+    "message": "Only HTTP(S) pages can be saved. The tab you clicked in is saved, not the link target.",
+    "description": "Notification body when saving a page failed with \"unsupported_url\"."
+  },
+  "pageSaveErrorIncognitoNotAllowed": {
+    "message": "Saving pages from Incognito windows is not supported.",
+    "description": "Notification body when saving a page failed with \"incognito_not_allowed\"."
+  },
+  "pageSaveErrorNavigationChanged": {
+    "message": "Stopped because the page changed while it was being saved. Try again after the page has finished loading.",
+    "description": "Notification body when saving a page failed with \"navigation_changed\"."
+  },
+  "pageSaveErrorVaultSwitched": {
+    "message": "Saving was stopped because the Vault was changed.",
+    "description": "Notification body when saving a page failed with \"vault_switched\"."
+  },
+  "pageSaveErrorInvalidPageSize": {
+    "message": "The MHTML is empty or exceeds the 128 MiB limit.",
+    "description": "Notification body when saving a page failed with \"invalid_page_size\"."
+  },
+  "pageSaveErrorPageUploadBusy": {
+    "message": "Another page is being saved. Try again when it has finished.",
+    "description": "Notification body when saving a page failed with \"page_upload_busy\"."
+  },
+  "pageSaveErrorVaultNotConfigured": {
+    "message": "First create or choose a Vault in the settings.",
+    "description": "Notification body when saving a page failed with \"vault_not_configured\"."
+  },
+  "pageSaveErrorVaultSchemaMismatch": {
+    "message": "This Vault's schema is not supported. Explicitly create a new Schema 8 Vault. The old Vault is not changed.",
+    "description": "Notification body when saving a page failed with \"vault_schema_mismatch\"."
+  },
+  "pageSaveErrorSaveStateUnknown": {
+    "message": "Whether the page was saved is unconfirmed. It is not saved again automatically. Check the state to avoid duplicates.",
+    "description": "Notification body when saving a page failed with \"save_state_unknown\"."
+  },
+  "pageSaveErrorTimeout": {
+    "message": "Saving timed out.",
+    "description": "Notification body when saving a page failed with \"timeout\"."
+  },
+  "pageSaveErrorTransferInterrupted": {
+    "message": "Could not save because the connection to the Native Host was lost.",
+    "description": "Notification body when saving a page failed with \"transfer_interrupted\"."
+  },
+  "pageSaveErrorCaptureFailed": {
+    "message": "Chrome failed to capture the MHTML. Possible technical limits include pages or frames that cannot be captured, or the page disappearing.",
+    "description": "Notification body when saving a page failed with \"capture_failed\"."
+  },
+  "pageSaveErrorVaultLocked": {
+    "message": "Cannot save because the Vault is locked. Check its state in the settings.",
+    "description": "Notification body when saving a page failed with \"vault_locked\"."
+  },
+  "pageSaveErrorKeyUnavailable": {
+    "message": "Cannot save because the Vault's key cannot be used.",
+    "description": "Notification body when saving a page failed with \"key_unavailable\"."
+  },
+  "pageSaveErrorVaultReselectRequired": {
+    "message": "Explicitly choose the Vault again in the settings, then save.",
+    "description": "Notification body when saving a page failed with \"vault_reselect_required\"."
+  },
+  "pageSaveErrorSaveIdConflict": {
+    "message": "Stopped because the save operation ID matched a different existing save record.",
+    "description": "Notification body when saving a page failed with \"save_id_conflict\"."
+  },
+  "pageSaveErrorDbError": {
+    "message": "The save to the Vault could not be confirmed. It is not saved again automatically.",
+    "description": "Notification body when saving a page failed with \"db_error\"."
+  },
+  "pageSaveErrorGeneric": {
+    "message": "Capturing the page or saving it to the Vault failed. Some pages cannot be captured because of Chrome's technical limits.",
+    "description": "Notification body when saving a page failed for any other reason."
+  },
+  "badgeEventsNotRecorded": {
+    "message": "Events not recorded: $deadLetters$, discarded: $dropped$",
+    "description": "Toolbar tooltip part: quarantined and discarded events.",
+    "placeholders": {
+      "deadLetters": {
+        "content": "$1"
+      },
+      "dropped": {
+        "content": "$2"
+      }
+    }
+  },
+  "badgeNavigationLost": {
+    "message": "Visits whose navigation details could not be saved: $count$",
+    "description": "Toolbar tooltip part.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "badgeImageFailure": {
+    "message": "Could not save an image: $reason$",
+    "description": "Toolbar tooltip part after a failed image save. [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "badgePageFailure": {
+    "message": "Page save: $reason$",
+    "description": "Toolbar tooltip part after a failed page save. [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueErrorFull": {
+    "message": "Not recorded because the send queue is full (nothing was added).",
+    "description": "Result of \"record all tabs\"."
+  },
+  "queueErrorStorage": {
+    "message": "Not recorded because saving to the queue failed (nothing was added).",
+    "description": "Result of \"record all tabs\"."
+  },
+  "queueErrorWithReason": {
+    "message": "$reason$ (nothing was added)",
+    "description": "Result of \"record all tabs\" refused for a reason; [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueErrorGeneric": {
+    "message": "Recording failed.",
+    "description": "Result of \"record all tabs\" when nothing more specific is known."
+  },
+  "recordFailed": {
+    "message": "Recording failed.\n$detail$",
+    "description": "Side panel result of \"record all tabs\"; [detail] is the reason on its own line.",
+    "placeholders": {
+      "detail": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordFailedDetail": {
+    "message": "Saving failed.",
+    "description": "Reason used by recordFailed when none was given."
+  },
+  "recordNoTabs": {
+    "message": "There are no tabs in normal windows (http/https) that can be recorded.",
+    "description": "Result of \"record all tabs\". Incognito tabs are never recorded."
+  },
+  "recordStoredAllOne": {
+    "message": "Saved $count$ tab to SQLite. The tab was not closed.",
+    "description": "Result of \"record all tabs\", singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordStoredAllOther": {
+    "message": "Saved $count$ tabs to SQLite. The tabs were not closed.",
+    "description": "Result of \"record all tabs\", plural form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordQueuedOne": {
+    "message": "Added $count$ tab to the send queue. The tab was not closed.",
+    "description": "Result of \"record all tabs\" when not everything is stored yet, singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordQueuedOther": {
+    "message": "Added $count$ tabs to the send queue. The tabs were not closed.",
+    "description": "Result of \"record all tabs\" when not everything is stored yet, plural form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordStoredCount": {
+    "message": "Saved to SQLite: $count$",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordPendingCount": {
+    "message": "Not saved yet (waiting to send, retried automatically): $count$",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordPendingReason": {
+    "message": "Reason: $reason$",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordDeadLetteredCount": {
+    "message": "Not recorded, quarantined: $count$",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyStatusUnknown": {
+    "message": "The state of the privacy settings cannot be checked, so automatic recording may be stopped.",
+    "description": "Privacy: side panel notice when the policy state is unknown. Recording fails closed."
+  },
+  "policyStatusStopped": {
+    "message": "Automatic recording is stopped.",
+    "description": "Privacy: side panel notice when the policy is not ready."
+  },
+  "queuePending": {
+    "message": "Waiting to send: $count$",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queuePendingReason": {
+    "message": "Waiting to send: $count$ ($reason$)",
+    "description": "Side panel queue status line with the reason sending is blocked.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "reason": {
+        "content": "$2"
+      }
+    }
+  },
+  "queueDeadLetters": {
+    "message": "Events quarantined because they could not be recorded: $count$",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueDropped": {
+    "message": "Events discarded because they could not be queued: $count$",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueNavigationInvalid": {
+    "message": "Visits whose navigation details the host refused: $count$ (the visits are saved)",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueNavigationNotStored": {
+    "message": "Visits whose navigation details could not be saved because the host does not support them: $count$ (the visits are saved)",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateToday": {
+    "message": "Today $time$",
+    "description": "Short date for a time today; [time] is the local time.",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateYesterday": {
+    "message": "Yesterday $time$",
+    "description": "Short date for a time yesterday; [time] is the local time.",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateWithTime": {
+    "message": "$date$ $time$",
+    "description": "Short date for older times; [date] is the localized date, [time] the local time.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "time": {
+        "content": "$2"
+      }
+    }
+  },
+  "errorGeneric": {
+    "message": "The operation failed.",
+    "description": "Error message for an error code that has no message of its own."
+  },
+  "errorHostUnavailable": {
+    "message": "Cannot connect to the Native Host. Check that it is installed and registered.",
+    "description": "Message for the error code \"host_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTimeout": {
+    "message": "The Native Host did not respond. The host may be outdated or stopped.",
+    "description": "Message for the error code \"timeout\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidResponse": {
+    "message": "Received an invalid response from the Native Host.",
+    "description": "Message for the error code \"invalid_response\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDbError": {
+    "message": "The database operation failed.",
+    "description": "Message for the error code \"db_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorQueryTooLong": {
+    "message": "Enter a search term of $max$ characters or fewer.",
+    "description": "Message for the error code \"query_too_long\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip.",
+    "placeholders": {
+      "max": {
+        "content": "$1"
+      }
+    }
+  },
+  "errorInvalidQuery": {
+    "message": "The search conditions are invalid.",
+    "description": "Message for the error code \"invalid_query\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidLimit": {
+    "message": "The search conditions are invalid.",
+    "description": "Message for the error code \"invalid_limit\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidOffset": {
+    "message": "No more results can be loaded.",
+    "description": "Message for the error code \"invalid_offset\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidRequestId": {
+    "message": "The request is invalid.",
+    "description": "Message for the error code \"invalid_request_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBounds": {
+    "message": "The date range is invalid.",
+    "description": "Message for the error code \"invalid_bounds\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnknownType": {
+    "message": "The Native Host does not support this operation. Update the host.",
+    "description": "Message for the error code \"unknown_type\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorAppDirUnavailable": {
+    "message": "Vault settings cannot be read or written because %LOCALAPPDATA% cannot be determined.",
+    "description": "Message for the error code \"app_dir_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultNotConfigured": {
+    "message": "No Vault is set up. In Vault settings, create a new Vault or open an existing one.",
+    "description": "Message for the error code \"vault_not_configured\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultMissing": {
+    "message": "The Vault file cannot be found. Check that it has not been moved or deleted, then open the Vault again.",
+    "description": "Message for the error code \"vault_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultInvalid": {
+    "message": "This file cannot be used as a Memocampus Vault.",
+    "description": "Message for the error code \"vault_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultSchemaMismatch": {
+    "message": "This Vault's format is not supported by this version. It is not converted automatically (this Vault was not changed).",
+    "description": "Message for the error code \"vault_schema_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorConfigInvalid": {
+    "message": "The settings file (config.json) cannot be read. Creating or opening a Vault again rewrites the settings.",
+    "description": "Message for the error code \"config_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultSwitched": {
+    "message": "The Vault was switched. Please try again.",
+    "description": "Message for the error code \"vault_switched\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultModeMismatch": {
+    "message": "The Vault file does not match the configured format (encrypted / plaintext). The file was not changed.",
+    "description": "Message for the error code \"vault_mode_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultEncryptionUnsupported": {
+    "message": "Encrypted Vaults cannot be opened in this environment. The file was not changed.",
+    "description": "Message for the error code \"vault_encryption_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyUnavailable": {
+    "message": "The key for the encrypted Vault cannot be obtained for this Windows user. The file was not changed.",
+    "description": "Message for the error code \"key_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultBackupEncryptedUnsupported": {
+    "message": "Backups of an encrypted Vault cannot be created yet (planned for a future version). No plaintext copy is created.",
+    "description": "Message for the error code \"vault_backup_encrypted_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordRequired": {
+    "message": "Enter a password.",
+    "description": "Message for the error code \"backup_password_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordTooShort": {
+    "message": "Use a password of at least 8 characters.",
+    "description": "Message for the error code \"backup_password_too_short\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordTooLong": {
+    "message": "The password is too long.",
+    "description": "Message for the error code \"backup_password_too_long\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordRejected": {
+    "message": "The password is incorrect. Nothing was created.",
+    "description": "Message for the error code \"backup_password_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPathRequired": {
+    "message": "Choose the backup file to restore.",
+    "description": "Message for the error code \"backup_path_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupUnsupportedFormat": {
+    "message": "This file is not a Memocampus backup.",
+    "description": "Message for the error code \"backup_unsupported_format\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupUnsupportedVersion": {
+    "message": "This backup version is not supported. Update Memocampus.",
+    "description": "Message for the error code \"backup_unsupported_version\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupMalformed": {
+    "message": "The backup file is malformed (modified or damaged). Nothing was created.",
+    "description": "Message for the error code \"backup_malformed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupIncomplete": {
+    "message": "The backup file is truncated or has extra data appended. Nothing was created.",
+    "description": "Message for the error code \"backup_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupTampered": {
+    "message": "The backup contents have been modified or damaged. The partially restored file was deleted.",
+    "description": "Message for the error code \"backup_tampered\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupDamaged": {
+    "message": "The backup contents or its recovery information are damaged. The partially restored file was deleted.",
+    "description": "Message for the error code \"backup_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupSchemaMismatch": {
+    "message": "The Vault format in this backup is not supported.",
+    "description": "Message for the error code \"backup_schema_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupVaultInvalid": {
+    "message": "This file cannot be used as a Memocampus Vault backup.",
+    "description": "Message for the error code \"backup_vault_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestorePending": {
+    "message": "There is a restored Vault that is not in use yet (or an interrupted restore). Start using it or discard it, then try again.",
+    "description": "Message for the error code \"vault_restore_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreNotPending": {
+    "message": "There is no restored Vault waiting to be put into use.",
+    "description": "Message for the error code \"vault_restore_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreIncomplete": {
+    "message": "The restore was interrupted. Discard it, then restore again.",
+    "description": "Message for the error code \"vault_restore_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreDamaged": {
+    "message": "The restore record or the restored file is damaged or has been changed. Discard it.",
+    "description": "Message for the error code \"vault_restore_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRestoreFailed": {
+    "message": "The restore failed. The partially restored file was deleted.",
+    "description": "Message for the error code \"restore_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDiskFull": {
+    "message": "There is not enough free space at the destination. The partially created file was deleted.",
+    "description": "Message for the error code \"disk_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupWalUnsupported": {
+    "message": "This Vault uses WAL mode, so a password-protected backup cannot be created. Use a regular backup. Nothing was created.",
+    "description": "Message for the error code \"backup_wal_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidRequest": {
+    "message": "The request is invalid.",
+    "description": "Message for the error code \"invalid_request\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationPending": {
+    "message": "There is a partially created encrypted Vault. Discard it, then create it again.",
+    "description": "Message for the error code \"vault_creation_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertPending": {
+    "message": "There is a Vault being converted (or not yet in use). Start using it, save it and finish, or discard it, then try again.",
+    "description": "Message for the error code \"vault_convert_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertNotPending": {
+    "message": "There is no converted Vault waiting to be put into use.",
+    "description": "Message for the error code \"vault_convert_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertIncomplete": {
+    "message": "The conversion was interrupted. Discard it, then convert again. The original Vault was not changed.",
+    "description": "Message for the error code \"vault_convert_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSpellUnconfirmed": {
+    "message": "You cannot start using the new Vault until its Recovery Spell has been confirmed.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"vault_convert_spell_unconfirmed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertInvalidState": {
+    "message": "This operation is not possible at the current stage of the conversion. Refresh the view.",
+    "description": "Message for the error code \"vault_convert_invalid_state\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertDamaged": {
+    "message": "The conversion record or the converted file is damaged or has been changed. Discard it. The original Vault was not changed.",
+    "description": "Message for the error code \"vault_convert_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSourceChanged": {
+    "message": "The source Vault is no longer the file it was when the conversion started. The Active Vault was not changed. Save the converted Vault without switching to it, or discard it.",
+    "description": "Message for the error code \"vault_convert_source_changed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSameAsSource": {
+    "message": "The source Vault itself was chosen as the destination. Choose a different, new file name.",
+    "description": "Message for the error code \"vault_convert_same_as_source\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertModeMismatch": {
+    "message": "The format (encrypted / plaintext) of the displayed Vault has changed. Refresh the view, then try again.",
+    "description": "Message for the error code \"vault_convert_mode_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertPlaintextUnacknowledged": {
+    "message": "Removing encryption stores browsing history and images without encryption. Select the confirmation checkbox before continuing.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"vault_convert_plaintext_unacknowledged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertVerifyFailed": {
+    "message": "The converted Vault did not match the source. The partially converted file was deleted. The original Vault was not changed.",
+    "description": "Message for the error code \"vault_convert_verify_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertFailed": {
+    "message": "The conversion failed. The partially converted file was deleted. The original Vault was not changed.",
+    "description": "Message for the error code \"vault_convert_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultWorkFile": {
+    "message": "A file in the middle of being created, restored or converted cannot be opened as a Vault.",
+    "description": "Message for the error code \"vault_work_file\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationNotPending": {
+    "message": "The partially created encrypted Vault cannot be found. Start the creation over.",
+    "description": "Message for the error code \"vault_creation_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationDamaged": {
+    "message": "The partially created encrypted Vault file is damaged or missing. Discard it and create it again.",
+    "description": "Message for the error code \"vault_creation_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRecoverySpellInvalid": {
+    "message": "The Recovery Spell is not in the correct format.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"recovery_spell_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRecoverySpellRejected": {
+    "message": "The Recovery Spell does not match this Vault. Neither the Vault nor the key was changed. (This is also shown if the Vault file is damaged or has been modified.)",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"recovery_spell_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultLegacyUnsupported": {
+    "message": "This Vault was created with the earlier key management method (using a \".mckey\" file) and cannot be opened in this version. The file was not changed or deleted.",
+    "description": "Message for the error code \"vault_legacy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupLegacyUnsupported": {
+    "message": "This backup was created with the earlier key management method (format B or D) and cannot be restored in this version. Nothing was changed.",
+    "description": "Message for the error code \"backup_legacy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultNotEncrypted": {
+    "message": "This Vault is not encrypted. Open it with \"Open existing Vault\".",
+    "description": "Message for the error code \"vault_not_encrypted\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyProtectorUnavailable": {
+    "message": "An encrypted Vault cannot be created because the key cannot be protected in this environment (Windows DPAPI is unavailable).",
+    "description": "Message for the error code \"key_protector_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyProtectorFailed": {
+    "message": "Windows could not protect the key. Nothing was created.",
+    "description": "Message for the error code \"key_protector_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRandomUnavailable": {
+    "message": "Secure random numbers could not be obtained. Nothing was created.",
+    "description": "Message for the error code \"random_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultLocked": {
+    "message": "The encrypted Vault is locked. The file was not changed.",
+    "description": "Message for the error code \"vault_locked\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultDecryptFailed": {
+    "message": "The encrypted Vault cannot be decrypted. The file was not changed.",
+    "description": "Message for the error code \"vault_decrypt_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidVaultToken": {
+    "message": "The request is invalid. Refresh the list.",
+    "description": "Message for the error code \"invalid_vault_token\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultBusy": {
+    "message": "The Vault is in use. Wait a moment, then try again.",
+    "description": "Message for the error code \"vault_busy\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorManagementDisabled": {
+    "message": "Vault management is disabled because a development database (MEMOCAMPUS_DB) is specified.",
+    "description": "Message for the error code \"management_disabled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorFileExists": {
+    "message": "A file with the same name already exists. It is not overwritten. Choose a different name or use \"Open existing Vault\".",
+    "description": "Message for the error code \"file_exists\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSidecarExists": {
+    "message": "Creation was stopped for safety because -journal / -wal / -shm files with the same name remain at the destination.",
+    "description": "Message for the error code \"sidecar_exists\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorParentMissing": {
+    "message": "The destination folder does not exist.",
+    "description": "Message for the error code \"parent_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidPath": {
+    "message": "The path is invalid. Specify an absolute path that starts with a drive letter.",
+    "description": "Message for the error code \"invalid_path\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCancelled": {
+    "message": "Cancelled.",
+    "description": "Message for the error code \"cancelled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupFailed": {
+    "message": "The backup failed. No backup was created.",
+    "description": "Message for the error code \"backup_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLocationRejected": {
+    "message": "This location cannot be used as the Active Vault.",
+    "description": "Message for the error code \"location_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLocationNeedsApproval": {
+    "message": "Confirmation is required to make this location the Active Vault.",
+    "description": "Message for the error code \"location_needs_approval\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIoError": {
+    "message": "Reading or writing the file failed.",
+    "description": "Message for the error code \"io_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidAck": {
+    "message": "The Native Host's response is invalid. Update the host.",
+    "description": "Message for the error code \"invalid_ack\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidUrl": {
+    "message": "This URL cannot be recorded.",
+    "description": "Message for the error code \"invalid_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidEvent": {
+    "message": "The event format is invalid.",
+    "description": "Message for the error code \"invalid_event\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidMessage": {
+    "message": "The message format is invalid.",
+    "description": "Message for the error code \"invalid_message\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorQueueFull": {
+    "message": "The send queue is full.",
+    "description": "Message for the error code \"queue_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorStorageWriteFailed": {
+    "message": "Saving to the extension's storage failed.",
+    "description": "Message for the error code \"storage_write_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDeadLetterFull": {
+    "message": "Sending is paused because the quarantine area is full.",
+    "description": "Message for the error code \"dead_letter_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDeadLetterWriteFailed": {
+    "message": "Sending is paused because saving to the quarantine area failed.",
+    "description": "Message for the error code \"dead_letter_write_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyNotInitialized": {
+    "message": "Automatic recording is stopped because the privacy settings have not been initialized.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_not_initialized\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyInvalid": {
+    "message": "Automatic recording is stopped because the privacy settings cannot be read (missing, damaged or an unsupported version). The settings were not overwritten.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyBusy": {
+    "message": "Automatic recording is paused because the privacy settings are in use.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_busy\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyUnavailable": {
+    "message": "Automatic recording is stopped because the privacy settings cannot be accessed.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyUnsupported": {
+    "message": "Automatic recording is stopped because the privacy settings contain rules this version cannot use (such as regular expressions with lookahead, lookbehind or backreferences). The settings were not overwritten.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidPolicyBatch": {
+    "message": "Automatic recording is stopped because the versions of the Native Host and the extension do not match.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_policy_batch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyBatchTooLarge": {
+    "message": "Automatic recording is stopped because the versions of the Native Host and the extension do not match.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_batch_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyAlreadyInitialized": {
+    "message": "The privacy settings are already initialized. The existing settings are not overwritten.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_already_initialized\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoUnknown": {
+    "message": "Not saved because the type of the source window could not be determined.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"incognito_unknown\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidIncognito": {
+    "message": "Not saved because the type of the source window could not be determined.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_incognito\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoFixedAtBegin": {
+    "message": "The transfer sequence is invalid. Save again.",
+    "description": "Message for the error code \"incognito_fixed_at_begin\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedUrl": {
+    "message": "The host of this URL cannot be specified in a rule.",
+    "description": "Message for the error code \"unsupported_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorNetworkError": {
+    "message": "The image could not be fetched (network error).",
+    "description": "Message for the error code \"network_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHttpError": {
+    "message": "Fetching the image failed (HTTP error).",
+    "description": "Message for the error code \"http_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPageAccessDenied": {
+    "message": "Images cannot be fetched from this page.",
+    "description": "Message for the error code \"page_access_denied\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTooLarge": {
+    "message": "The image is too large (limit: 32 MiB).",
+    "description": "Message for the error code \"too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorEmptyImage": {
+    "message": "The image data is empty.",
+    "description": "Message for the error code \"empty_image\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSvgNotSupported": {
+    "message": "SVG images cannot be saved.",
+    "description": "Message for the error code \"svg_not_supported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedFormat": {
+    "message": "This image format is not supported (PNG, JPEG, GIF, WebP, AVIF and BMP are supported).",
+    "description": "Message for the error code \"unsupported_format\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDecodeFailed": {
+    "message": "The image could not be read. It is damaged or in an unsupported format.",
+    "description": "Message for the error code \"decode_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTransferInterrupted": {
+    "message": "The connection to the Native Host was interrupted. Nothing was saved.",
+    "description": "Message for the error code \"transfer_interrupted\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHostOutdated": {
+    "message": "The image cannot be saved because the Native Host is outdated. Update the host.",
+    "description": "Message for the error code \"host_outdated\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveFailed": {
+    "message": "Saving the image failed.",
+    "description": "Message for the error code \"save_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSavedImageNotFound": {
+    "message": "This save record cannot be found. Refresh the list.",
+    "description": "Message for the error code \"saved_image_not_found\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoNotPublishable": {
+    "message": "Saved from an Incognito window, so it is not published to MCP.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"incognito_not_publishable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidSavedImageId": {
+    "message": "The specified save record is invalid.",
+    "description": "Message for the error code \"invalid_saved_image_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidMcpPublic": {
+    "message": "The specified publication setting is invalid.",
+    "description": "Message for the error code \"invalid_mcp_public\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHashMismatch": {
+    "message": "The image data changed during the transfer. Nothing was saved.",
+    "description": "Message for the error code \"hash_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLengthMismatch": {
+    "message": "The length of the image data does not match. Nothing was saved.",
+    "description": "Message for the error code \"length_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorMimeMismatch": {
+    "message": "The image format does not match what was declared.",
+    "description": "Message for the error code \"mime_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDimensionMismatch": {
+    "message": "The image dimensions do not match.",
+    "description": "Message for the error code \"dimension_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidDimensions": {
+    "message": "The image dimensions are invalid.",
+    "description": "Message for the error code \"invalid_dimensions\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTruncatedImage": {
+    "message": "The image data is truncated.",
+    "description": "Message for the error code \"truncated_image\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidThumbnail": {
+    "message": "The thumbnail is invalid.",
+    "description": "Message for the error code \"invalid_thumbnail\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveIdConflict": {
+    "message": "The save ID is a duplicate. Save again.",
+    "description": "Message for the error code \"save_id_conflict\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBlobMissing": {
+    "message": "The saved image cannot be found. Save again.",
+    "description": "Message for the error code \"blob_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidHash": {
+    "message": "The image hash is invalid.",
+    "description": "Message for the error code \"invalid_hash\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidSaveId": {
+    "message": "The save ID is invalid.",
+    "description": "Message for the error code \"invalid_save_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedProtocol": {
+    "message": "The versions of the Native Host and the extension do not match.",
+    "description": "Message for the error code \"unsupported_protocol\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorNoUpload": {
+    "message": "The transfer was interrupted. Save again.",
+    "description": "Message for the error code \"no_upload\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUploadInProgress": {
+    "message": "Another transfer is in progress. Save again.",
+    "description": "Message for the error code \"upload_in_progress\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveIdMismatch": {
+    "message": "The transfer got out of step. Save again.",
+    "description": "Message for the error code \"save_id_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnexpectedChunk": {
+    "message": "The transfer sequence is invalid. Save again.",
+    "description": "Message for the error code \"unexpected_chunk\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDuplicateChunk": {
+    "message": "Transfer data was duplicated. Save again.",
+    "description": "Message for the error code \"duplicate_chunk\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorChunkOutOfOrder": {
+    "message": "Transfer data arrived out of order. Save again.",
+    "description": "Message for the error code \"chunk_out_of_order\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidChunkSize": {
+    "message": "The size of the transfer data is invalid. Save again.",
+    "description": "Message for the error code \"invalid_chunk_size\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBase64": {
+    "message": "The transfer data is corrupted. Save again.",
+    "description": "Message for the error code \"invalid_base64\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUploadTooLarge": {
+    "message": "Stopped because the image data is larger than declared.",
+    "description": "Message for the error code \"upload_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncompleteUpload": {
+    "message": "An attempt was made to finish before all the image data had arrived. Nothing was saved.",
+    "description": "Message for the error code \"incomplete_upload\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidTag": {
+    "message": "The tag name is invalid. Use 1 to 64 characters, without control or invisible characters.",
+    "description": "Message for the error code \"invalid_tag\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTooManyTags": {
+    "message": "An image can have at most 64 tags.",
+    "description": "Message for the error code \"too_many_tags\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyConflict": {
+    "message": "The privacy settings were changed in another screen. Review them again.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_conflict\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPublishBlocked": {
+    "message": "This cannot be published from here because another rule or a basic protection keeps it private. Check the Privacy settings.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"publish_blocked\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyLimit": {
+    "message": "The rule cannot be added because the number of rules has reached the limit (1,000 per group). Tidy up the rules in the Privacy settings.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_limit\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLayerDisabled": {
+    "message": "This group is turned off, so adding a rule has no effect. Turn the group on in the Privacy settings.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"layer_disabled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidExactUrl": {
+    "message": "The URL format is invalid, so it cannot be made into an Exact URL rule.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_exact_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyMigrationRequired": {
+    "message": "This operation is not possible because the privacy settings are in the old format (v1).",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_migration_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidAction": {
+    "message": "The request is invalid.",
+    "description": "Message for the error code \"invalid_action\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidScope": {
+    "message": "The request is invalid.",
+    "description": "Message for the error code \"invalid_scope\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidEtag": {
+    "message": "The request is invalid. Check again.",
+    "description": "Message for the error code \"invalid_etag\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBlobId": {
+    "message": "The specified image is invalid.",
+    "description": "Message for the error code \"invalid_blob_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorReadIncomplete": {
+    "message": "The image data could not be read to the end.",
+    "description": "Message for the error code \"read_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorReadHashMismatch": {
+    "message": "The image data that was read does not match the record (SHA-256).",
+    "description": "Message for the error code \"read_hash_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardUnavailable": {
+    "message": "This browser cannot copy images to the clipboard.",
+    "description": "Message for the error code \"clipboard_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardDenied": {
+    "message": "Copying to the clipboard was not allowed. Click the side panel, then try again.",
+    "description": "Message for the error code \"clipboard_denied\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardFailed": {
+    "message": "Could not copy to the clipboard.",
+    "description": "Message for the error code \"clipboard_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCopyTooLarge": {
+    "message": "The image cannot be copied because it has too many pixels.",
+    "description": "Message for the error code \"copy_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCopyConvertFailed": {
+    "message": "The image cannot be copied because it could not be converted to PNG.",
+    "description": "Message for the error code \"copy_convert_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportFailed": {
+    "message": "The file could not be written. Existing files were not changed.",
+    "description": "Message for the error code \"export_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportFileAppeared": {
+    "message": "A file with the same name was created during the export, so it was stopped without overwriting.",
+    "description": "Message for the error code \"export_file_appeared\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportInvalidTarget": {
+    "message": "Cannot export to this location.",
+    "description": "Message for the error code \"export_invalid_target\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "deleteTrashVisit": {
+    "message": "Delete this visit",
+    "description": "Side Panel deletion (delete-ui.js). Icon button on one visit in a URL's visit history; deletes only that visit record."
+  },
+  "deleteTrashImage": {
+    "message": "Delete this image",
+    "description": "Side Panel deletion (delete-ui.js). Icon button on one image tile; deletes that saved image."
+  },
+  "deleteTrashPageSave": {
+    "message": "Delete this save record",
+    "description": "Side Panel deletion (delete-ui.js). Icon button on one saved-page record."
+  },
+  "deleteUrlAll": {
+    "message": "Delete everything for this URL",
+    "description": "Side Panel deletion (delete-ui.js). Button on a URL row; deletes all visits, snapshots and page information of that one URL."
+  },
+  "deleteVisitsFiltered": {
+    "message": "Delete matching visits",
+    "description": "Side Panel deletion (delete-ui.js). Button that deletes the visits matching the current search and date filter (not snapshots)."
+  },
+  "deleteVisitsAll": {
+    "message": "Delete all visits",
+    "description": "Side Panel deletion (delete-ui.js). Button that deletes every visit in the Vault (not snapshots)."
+  },
+  "deleteImagesFiltered": {
+    "message": "Delete all matching images",
+    "description": "Side Panel deletion (delete-ui.js). Image tab button that deletes every image matching the tag filter."
+  },
+  "deleteImagesAll": {
+    "message": "Delete all images",
+    "description": "Side Panel deletion (delete-ui.js). Image tab button that deletes every saved image."
+  },
+  "deleteDialogTitle": {
+    "message": "Confirm deletion",
+    "description": "Side Panel deletion (delete-ui.js). Title of the deletion confirmation dialog."
+  },
+  "deleteCancel": {
+    "message": "Cancel",
+    "description": "Side Panel deletion (delete-ui.js). Dialog button that closes without deleting anything."
+  },
+  "deleteClose": {
+    "message": "Close",
+    "description": "Side Panel deletion (delete-ui.js). Dialog button shown after a failure; closes the dialog."
+  },
+  "deleteConfirm": {
+    "message": "Delete",
+    "description": "Side Panel deletion (delete-ui.js). Confirmation button; deletes exactly what the dialog listed."
+  },
+  "deleteInProgress": {
+    "message": "Deleting…",
+    "description": "Side Panel deletion (delete-ui.js). Confirmation button while the delete request runs."
+  },
+  "deletePreviewing": {
+    "message": "Checking what will be deleted…",
+    "description": "Side Panel deletion (delete-ui.js). Status while the host lists what a deletion would remove."
+  },
+  "deleteErrorItemNotFound": {
+    "message": "The item to delete no longer exists. Nothing was deleted.",
+    "description": "Side Panel deletion (delete-ui.js). Error: must say that nothing was deleted."
+  },
+  "deleteErrorItemTargetsChanged": {
+    "message": "What would be deleted changed after the confirmation. Nothing was deleted. Check again.",
+    "description": "Side Panel deletion (delete-ui.js). Error: must say that nothing was deleted."
+  },
+  "deleteErrorInvalidReview": {
+    "message": "The deletion confirmation is invalid or has expired. Nothing was deleted. Check again.",
+    "description": "Side Panel deletion (delete-ui.js). Error: must say that nothing was deleted."
+  },
+  "deleteErrorVaultSwitched": {
+    "message": "The Vault was changed. Nothing was deleted. Reload the list.",
+    "description": "Side Panel deletion (delete-ui.js). Error: another Vault became active; nothing was deleted."
+  },
+  "deleteErrorVaultLocked": {
+    "message": "The Vault is locked. Check its state in the settings.",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorKeyUnavailable": {
+    "message": "The Vault's key cannot be used.",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorVaultNotConfigured": {
+    "message": "No Vault is selected.",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorVaultSchemaMismatch": {
+    "message": "This Vault's schema is not supported.",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorUnknown": {
+    "message": "The deletion state cannot be confirmed. The result of the delete request could not be confirmed, and the deletion may have completed. Check the contents of the Vault again (the request is not retried automatically).",
+    "description": "Side Panel deletion (delete-ui.js). A delete request was sent and its outcome is unknown. Must never say that nothing was deleted, nor that it was."
+  },
+  "deleteErrorUnknownOtherVault": {
+    "message": "$message$ (This delete request was made in a previously opened Vault.)",
+    "description": "Side Panel deletion (delete-ui.js). The unknown-outcome notice [message] for a request made in another Vault than the one now shown.",
+    "placeholders": {
+      "message": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteErrorNotSent": {
+    "message": "The delete request was not sent. Nothing was deleted.",
+    "description": "Side Panel deletion (delete-ui.js). Error: must say that nothing was deleted."
+  },
+  "deleteErrorTimeout": {
+    "message": "No response from the host. Whether anything was deleted has not been confirmed. Reload the list.",
+    "description": "Side Panel deletion (delete-ui.js). Error: the outcome is not known."
+  },
+  "deleteErrorHostUnavailable": {
+    "message": "Cannot connect to the Native Host. Nothing was deleted.",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorUnknownType": {
+    "message": "The Native Host does not support this deletion. Update the host.",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorInvalidTag": {
+    "message": "This tag cannot be used. Nothing was deleted.",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorResponseTooLarge": {
+    "message": "The data to display is too large to retrieve.",
+    "description": "Side Panel deletion (delete-ui.js). Error."
+  },
+  "deleteErrorGeneric": {
+    "message": "Deletion failed. Do not assume it succeeded; reload the list and check the state.",
+    "description": "Side Panel deletion (delete-ui.js). Error for any other code."
+  },
+  "deleteCount": {
+    "message": "$count$",
+    "description": "Side Panel deletion (delete-ui.js). A count value next to its label in the confirmation (for example: Visits to delete: 3). [count] is a formatted number.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteReviewTarget": {
+    "message": "What will be deleted",
+    "description": "Side Panel deletion (delete-ui.js). Heading of the first section of the confirmation."
+  },
+  "deleteReviewEffects": {
+    "message": "Effects of the deletion",
+    "description": "Side Panel deletion (delete-ui.js). Heading of the counts section of the confirmation."
+  },
+  "deleteReviewNotes": {
+    "message": "Notes",
+    "description": "Side Panel deletion (delete-ui.js). Heading of the notes section of the confirmation."
+  },
+  "deleteReviewWarning": {
+    "message": "Deletion cannot be undone.",
+    "description": "Side Panel deletion (delete-ui.js). Warning shown in every confirmation."
+  },
+  "deleteReviewWarningDetail": {
+    "message": "There is no trash. Copies may remain in backups. The Vault file does not get smaller.",
+    "description": "Side Panel deletion (delete-ui.js). Warning detail shown in every confirmation."
+  },
+  "deleteRowVisits": {
+    "message": "Visits to delete",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteRowNavigationCensored": {
+    "message": "Navigation records whose source becomes censored ($label$)",
+    "description": "Side Panel deletion (delete-ui.js). Row label; [label] is the fixed marker shown in place of a deleted source. The records stay; only their source is removed.",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteRowNavigationsDeleted": {
+    "message": "Navigation records deleted with them",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteNoteNavigationCensored": {
+    "message": "The censored navigation records remain, but the deleted visits cannot be restored from them.",
+    "description": "Side Panel deletion (delete-ui.js). Note."
+  },
+  "deleteRowTarget": {
+    "message": "Target",
+    "description": "Side Panel deletion (delete-ui.js). Row label for what is deleted."
+  },
+  "deleteTargetOneVisit": {
+    "message": "1 visit",
+    "description": "Side Panel deletion (delete-ui.js). Target value: a single visit."
+  },
+  "deleteRowDateTime": {
+    "message": "Date and time",
+    "description": "Side Panel deletion (delete-ui.js). Row label."
+  },
+  "deleteRowTitle": {
+    "message": "Title",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is the page title as recorded."
+  },
+  "deleteNoTitle": {
+    "message": "(none)",
+    "description": "Side Panel deletion (delete-ui.js). Value when a visit has no title."
+  },
+  "deleteRowPageInfoOfVisit": {
+    "message": "Page information of this visit",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteNoteVisitKeepsOthers": {
+    "message": "Other visits and snapshots of the same URL are not deleted.",
+    "description": "Side Panel deletion (delete-ui.js). Note for deleting one visit."
+  },
+  "deleteTargetVisits": {
+    "message": "Visits",
+    "description": "Side Panel deletion (delete-ui.js). Target value: visits (by condition or all)."
+  },
+  "deleteRowCondition": {
+    "message": "Condition",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is the list's filter."
+  },
+  "deleteConditionNoneVisits": {
+    "message": "None (all visits)",
+    "description": "Side Panel deletion (delete-ui.js). Condition value when every visit is deleted."
+  },
+  "deleteRowTargetUrls": {
+    "message": "URLs affected",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count of URLs."
+  },
+  "deleteRowPageInfoWith": {
+    "message": "Page information deleted with them",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteNoteCountIsDb": {
+    "message": "The count is the number of matching visits in the database, not the number of URLs shown.",
+    "description": "Side Panel deletion (delete-ui.js). Note for deleting visits by condition."
+  },
+  "deleteNoteSnapshotsKept": {
+    "message": "Snapshots are not included (the snapshots of these URLs remain: $count$).",
+    "description": "Side Panel deletion (delete-ui.js). Note: deleting visits never deletes snapshots. [count] is a count value.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteNoteNonMatchingKept": {
+    "message": "Visits of the same URLs that do not match the condition also remain.",
+    "description": "Side Panel deletion (delete-ui.js). Note."
+  },
+  "deleteTargetUrlAll": {
+    "message": "Everything for this URL",
+    "description": "Side Panel deletion (delete-ui.js). Target value for deleting a whole URL."
+  },
+  "deleteRowSnapshots": {
+    "message": "Snapshots to delete",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteRowPageInfo": {
+    "message": "Page information to delete",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteNoteImageSavesKept": {
+    "message": "Save records of saved images that include this URL are not deleted: $count$.",
+    "description": "Side Panel deletion (delete-ui.js). Note. [count] is a count value.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteNotePolicyUnchanged": {
+    "message": "The privacy policy is not changed. As far as the policy allows, the next visit will be recorded again.",
+    "description": "Side Panel deletion (delete-ui.js). Note: deleting history does not add a privacy rule."
+  },
+  "deleteRowImages": {
+    "message": "Images to delete",
+    "description": "Side Panel deletion (delete-ui.js). Row label."
+  },
+  "deleteImagesValue": {
+    "message": "$count$ (originals: $bytes$)",
+    "description": "Side Panel deletion (delete-ui.js). Value of the images row: [count] is a count value, [bytes] the size of the originals.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "bytes": {
+        "content": "$2"
+      }
+    }
+  },
+  "deleteRowSaves": {
+    "message": "Save records",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteRowThumbnails": {
+    "message": "Thumbnails",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteRowTagLinks": {
+    "message": "Tag assignments",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteRowTagsRemoved": {
+    "message": "Tags removed because no other image uses them",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value is a count."
+  },
+  "deleteTargetImages": {
+    "message": "Images",
+    "description": "Side Panel deletion (delete-ui.js). Target value for deleting images by condition or all."
+  },
+  "deleteConditionTag": {
+    "message": "Images tagged “$tag$”",
+    "description": "Side Panel deletion (delete-ui.js). Condition value; [tag] is the user's tag name.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "deleteConditionNoneImages": {
+    "message": "None (all images)",
+    "description": "Side Panel deletion (delete-ui.js). Condition value when every image is deleted."
+  },
+  "deleteTargetOneImage": {
+    "message": "1 image",
+    "description": "Side Panel deletion (delete-ui.js). Target value: a single image."
+  },
+  "deleteRowContent": {
+    "message": "Details",
+    "description": "Side Panel deletion (delete-ui.js). Row label; the value describes the image."
+  },
+  "deleteNoteImagesOnly": {
+    "message": "Visits, URLs and other images are not deleted.",
+    "description": "Side Panel deletion (delete-ui.js). Note for deleting images."
+  },
+  "urlHistoryUntitled": {
+    "message": "(untitled)",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Shown for a visit recorded without a page title."
+  },
+  "urlHistoryShow": {
+    "message": "Show visits",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Button that expands the list of visits of the URL."
+  },
+  "urlHistoryHide": {
+    "message": "Hide visits",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Button that collapses the list of visits."
+  },
+  "urlHistoryDeleteUrlLabel": {
+    "message": "Delete everything for “$label$”",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Accessible name of the button that deletes all visits, snapshots and page information of one URL; [label] is the page title or URL.",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      }
+    }
+  },
+  "urlHistoryDeleteUrlTitle": {
+    "message": "$button$: deletes all visits, snapshots and page information of this URL",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Tooltip of that button; [button] is its visible label.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "urlHistoryListLabel": {
+    "message": "Visits of this URL",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Accessible name of the list of visits."
+  },
+  "urlHistoryMore": {
+    "message": "Show more",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Button that loads more visits."
+  },
+  "urlHistoryDeleteVisitLabel": {
+    "message": "Delete the visit of $date$",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Accessible name of the icon button that deletes one visit; [date] is its full date and time.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "urlHistoryDeleteVisitTitle": {
+    "message": "$button$ ($date$)",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Tooltip of that button; [button] is the button's name, [date] the visit's date and time.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      },
+      "date": {
+        "content": "$2"
+      }
+    }
+  },
+  "urlHistoryNote": {
+    "message": "Visits: $visits$$scope$. Snapshots ($snapshots$) cannot be deleted one by one; “$button$” deletes them.",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Note above the visits. [visits] and [snapshots] are counts, [scope] is empty or the filter remark, [button] the label of the whole-URL delete button.",
+    "placeholders": {
+      "visits": {
+        "content": "$1"
+      },
+      "scope": {
+        "content": "$2"
+      },
+      "snapshots": {
+        "content": "$3"
+      },
+      "button": {
+        "content": "$4"
+      }
+    }
+  },
+  "urlHistoryNoteScope": {
+    "message": " (matching the search and date filters, out of $total$ visits for this URL)",
+    "description": "Side Panel URL tab, visit history of one URL (url-history.js). Filter remark inserted in the note when only some visits match; [total] is a number.",
+    "placeholders": {
+      "total": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarFilterByDate": {
+    "message": "Filter by visit date",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Calendar button name and tooltip, and the calendar dialog's name. Narrows the list to one day; changes nothing stored."
+  },
+  "calendarDayDate": {
+    "message": "$weekday$, $month$ $day$",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Date part of a day's accessible name. [month] is the month name (Japanese: 11月, English: November), [day] the day number, [weekday] the short weekday name.",
+    "placeholders": {
+      "month": {
+        "content": "$1"
+      },
+      "day": {
+        "content": "$2"
+      },
+      "weekday": {
+        "content": "$3"
+      }
+    }
+  },
+  "calendarDayLabel": {
+    "message": "$date$: $visits$",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Accessible name of a day button: [date] then [visits] (a count or a state).",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "visits": {
+        "content": "$2"
+      }
+    }
+  },
+  "calendarDayLoading": {
+    "message": "loading",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Part of a day's accessible name while its count is loading."
+  },
+  "calendarDayVisitsOne": {
+    "message": "$count$ visit",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Part of a day's accessible name: [count] visits that day (singular form).",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarDayVisitsOther": {
+    "message": "$count$ visits",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Part of a day's accessible name: [count] visits that day.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarDayNoVisits": {
+    "message": "no visits",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Part of a day's accessible name for a day without visits."
+  },
+  "calendarDayNote": {
+    "message": ", $note$",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Appends [note] (today, selected) to a day's accessible name.",
+    "placeholders": {
+      "note": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarDayToday": {
+    "message": "today",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Note in a day's accessible name."
+  },
+  "calendarDaySelected": {
+    "message": "selected",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Note in a day's accessible name: the day chosen as the filter."
+  },
+  "calendarPrevMonth": {
+    "message": "Previous month",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Button."
+  },
+  "calendarNextMonth": {
+    "message": "Next month",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Button."
+  },
+  "calendarPrevYear": {
+    "message": "Previous year",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Button in the month list."
+  },
+  "calendarNextYear": {
+    "message": "Next year",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Button in the month list."
+  },
+  "calendarChooseMonth": {
+    "message": "$month$, choose year and month",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Accessible name of the title button that opens the month list; [month] is the shown month and year.",
+    "placeholders": {
+      "month": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarCloseMonths": {
+    "message": "$year$, close the month list",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Accessible name of the title button in the month list; [year] is a year number.",
+    "placeholders": {
+      "year": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarReload": {
+    "message": "Reload",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Button that loads the month's counts again after a failure."
+  },
+  "calendarLoading": {
+    "message": "Loading visit days…",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status."
+  },
+  "calendarNoVault": {
+    "message": "Visit days cannot be shown because the Vault cannot be checked.",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status."
+  },
+  "calendarVaultSwitched": {
+    "message": "Visit days cannot be shown because the Vault was switched.",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status: counts of another Vault are never shown."
+  },
+  "calendarNoVisitsInMonth": {
+    "message": "No visits were recorded in this month.",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status."
+  },
+  "calendarDaysWithVisits": {
+    "message": "Days with visits: $count$",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status; [count] is a number of days.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "calendarLoadFailed": {
+    "message": "Visit days could not be loaded.",
+    "description": "Visit calendar (visit-calendar.js), used in the Side Panel URL tab and the History page. Status."
+  },
+  "policyStateAllow": {
+    "message": "Visible to MCP",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Short state of a URL: recorded and shown to the MCP server."
+  },
+  "policyStateSaveButNoMcp": {
+    "message": "Hidden from MCP server",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Short state of a URL: recorded in the Vault, never shown to the MCP server."
+  },
+  "policyStateNeverSave": {
+    "message": "Not recorded automatically",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Short state of a URL: not recorded automatically and not shown to the MCP server."
+  },
+  "policyStateAllowLong": {
+    "message": "Visible to MCP (recorded and also shown to the MCP server)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. State of a URL before or after the action."
+  },
+  "policyStateSaveButNoMcpLong": {
+    "message": "Hidden from the MCP server (still recorded in the Vault)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. State of a URL before or after the action."
+  },
+  "policyStateNeverSaveLong": {
+    "message": "Not recorded automatically (and not shown to the MCP server)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. State of a URL before or after the action."
+  },
+  "policyActionNeverSave": {
+    "message": "Add to the Never Save group",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Action in a drop-down and the dialog title: adds a rule to the Never Save group (stop recording, never show to MCP)."
+  },
+  "policyActionSaveButNoMcp": {
+    "message": "Add to the Hide from MCP group",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Action: adds a rule to the Hide from MCP group (keep recording, never show to MCP)."
+  },
+  "policyActionPublish": {
+    "message": "Allow MCP access",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Action: removes this URL's own exact-URL rule so that it is shown to the MCP server; never removes rules that apply to other URLs."
+  },
+  "policyConfirmNeverSave": {
+    "message": "Add to the Never Save group",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Confirmation button of the Never Save action."
+  },
+  "policyConfirmSaveButNoMcp": {
+    "message": "Add to the Hide from MCP group",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Confirmation button of the Hide from MCP action."
+  },
+  "policyConfirmPublish": {
+    "message": "Allow MCP access (remove the rule)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Confirmation button of the Publish action; removes only this URL's exact-URL rule."
+  },
+  "policySameNeverSave": {
+    "message": "already not recorded automatically",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Remark after a disabled action whose result is already the state."
+  },
+  "policySameSaveButNoMcp": {
+    "message": "already hidden from MCP server",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Remark after a disabled action whose result is already the state."
+  },
+  "policySamePublish": {
+    "message": "already visible to MCP",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Remark after a disabled action whose result is already the state."
+  },
+  "policyLayerNeverSave": {
+    "message": "Never Save group",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Name of the privacy group of rules that stop recording."
+  },
+  "policyLayerSaveButNoMcp": {
+    "message": "Hide from MCP group",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Name of the privacy group of rules that keep recording but hide from MCP."
+  },
+  "policyReasonPublishBlocked": {
+    "message": "This URL is also kept hidden from MCP by another rule or by a basic protection. Only the rule for this URL alone (Exact URL) can be removed here; rules that also apply to other URLs are not changed. To change them, open the Privacy settings.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why Publish cannot be done here."
+  },
+  "policyReasonLayerDisabled": {
+    "message": "This group is currently turned off. Adding a rule would have no effect, so it is not added. You can turn the group on in the Privacy settings.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why the action cannot be done."
+  },
+  "policyReasonPolicyLimit": {
+    "message": "The rule cannot be added because the number of rules has reached the limit (1,000 per group). Tidy up the rules in the Privacy settings.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why the action cannot be done."
+  },
+  "policyReasonMigrationRequired": {
+    "message": "The privacy settings are in the old format (v1), so they cannot be changed from here.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why the action cannot be done."
+  },
+  "policyReasonUnsupportedUrl": {
+    "message": "The host of this URL (such as an IPv6 address) cannot be named in a rule.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why the action cannot be done."
+  },
+  "policyReasonInvalidUrl": {
+    "message": "This URL cannot be the target of a rule (not http or https, or a form that cannot be judged).",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Why the action cannot be done."
+  },
+  "policyTargetUrl": {
+    "message": "Target URL: $url$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. The URL the rule applies to; [url] is the URL as is.",
+    "placeholders": {
+      "url": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyTargetText": {
+    "message": "Target: $label$\n$url$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. The row the action was chosen on: [label] is the page title or URL (or the phrase for this page), [url] the URL. Contains a line break.",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      },
+      "url": {
+        "content": "$2"
+      }
+    }
+  },
+  "policyThisPage": {
+    "message": "This page",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Label of the only URL choice when the action is chosen on a URL row."
+  },
+  "policyChooseUrl": {
+    "message": "Choose the URL to apply the rule to. The rule applies to the chosen URL, not to the image itself.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Image tab: an image has several URLs; none is chosen for the person."
+  },
+  "policyCurrentState": {
+    "message": " (now: $state$)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. After a URL choice; [state] is a short state.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyCurrentStateUnknown": {
+    "message": " (current state: unknown)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. After a URL choice whose state is not known."
+  },
+  "policyUrlChoice": {
+    "message": "$label$$state$$unavailable$: $url$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. One URL choice: [label] its kind, [state] the state remark, [unavailable] empty or the reason it cannot be chosen, [url] the URL.",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      },
+      "state": {
+        "content": "$2"
+      },
+      "unavailable": {
+        "content": "$3"
+      },
+      "url": {
+        "content": "$4"
+      }
+    }
+  },
+  "policyUrlUnavailable": {
+    "message": " — $reason$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Reason a URL choice cannot be chosen, appended to it.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyChecking": {
+    "message": "Checking with the Native Host…",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Status while the host previews the change."
+  },
+  "policyCheckFailed": {
+    "message": "Could not be checked.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Error: the preview failed; nothing was changed."
+  },
+  "policyRuleAdd": {
+    "message": "Add",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Verb of a rule change line."
+  },
+  "policyRuleRemove": {
+    "message": "Remove",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Verb of a rule change line."
+  },
+  "policyRuleLine": {
+    "message": "$verb$: $layer$, $kind$ “$pattern$”",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. One rule that will change: [verb] Add or Remove, [layer] the group, [kind] the rule kind (fixed English names), [pattern] the rule text.",
+    "placeholders": {
+      "verb": {
+        "content": "$1"
+      },
+      "layer": {
+        "content": "$2"
+      },
+      "kind": {
+        "content": "$3"
+      },
+      "pattern": {
+        "content": "$4"
+      }
+    }
+  },
+  "policyBlockerBuiltin": {
+    "message": "$layer$: basic protection (a built-in category or credentials in the URL)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. What keeps a URL private: a built-in protection in group [layer].",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyBlockerRule": {
+    "message": "$layer$: rule $number$ ($kind$)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. What keeps a URL private: rule number [number] of kind [kind] in group [layer].",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      },
+      "number": {
+        "content": "$2"
+      },
+      "kind": {
+        "content": "$3"
+      }
+    }
+  },
+  "policyScopeHost": {
+    "message": "Scope: the whole host (also applies to URLs other than this one)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. PRIVACY: the rule covers every URL of the host. Must not read narrower than that."
+  },
+  "policyScopeUrl": {
+    "message": "Scope: this URL only (Exact URL)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. PRIVACY: the rule covers exactly this URL."
+  },
+  "policyStateBefore": {
+    "message": "Current state: $state$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. [state] is a long state.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyStateAfter": {
+    "message": "State after the change: $state$",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. [state] is a long state.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyChangesHeading": {
+    "message": "Rules that will change:",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Heading of the list of rule changes."
+  },
+  "policyRulesKeepData": {
+    "message": "Adding a rule does not delete data already saved in the Vault.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Note: the action never deletes history."
+  },
+  "policyCannotRun": {
+    "message": "This action cannot be performed.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Fallback reason."
+  },
+  "policyBlockersHeading": {
+    "message": "What keeps it hidden from MCP:",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Heading of the list of rules and protections that keep the URL private."
+  },
+  "policyAlreadyPublic": {
+    "message": "This URL is already visible to MCP. Nothing changes.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Preview result."
+  },
+  "policyRuleExists": {
+    "message": "The same rule already exists. Nothing changes.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Preview result."
+  },
+  "policyRuleAddedStateSame": {
+    "message": "The current state does not change, but this rule is added (it stays even if other rules are removed).",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Preview result."
+  },
+  "policyAckHost": {
+    "message": "I understand that this applies to every URL of this host (including other pages)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. PRIVACY: required checkbox before a host-wide rule can be confirmed."
+  },
+  "policyConflictRetry": {
+    "message": "$message$ Use “$button$” to check again against the latest settings.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. The settings changed meanwhile: [message] is the error, [button] the label of the check-again button. Nothing was changed.",
+    "placeholders": {
+      "message": {
+        "content": "$1"
+      },
+      "button": {
+        "content": "$2"
+      }
+    }
+  },
+  "policyChangeFailed": {
+    "message": "The change could not be made.",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Error: what is stored is unknown or unchanged; never shown as done."
+  },
+  "policyUrlsHeading": {
+    "message": "URL to apply the rule to",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Legend of the URL choices."
+  },
+  "policyScopeHeading": {
+    "message": "Scope",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Legend of the scope choices."
+  },
+  "policyScopeUrlOption": {
+    "message": "This URL only",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. PRIVACY: scope choice; the rule covers exactly this URL (internal value url)."
+  },
+  "policyScopeHostOption": {
+    "message": "The whole host (also applies to other URLs)",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. PRIVACY: scope choice; the rule covers every URL of the host (internal value host)."
+  },
+  "policyRecheck": {
+    "message": "Check again",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Button that asks the host for a new preview."
+  },
+  "policyOpenPrivacySettings": {
+    "message": "Open Privacy settings",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Button that opens the Options page."
+  },
+  "policyCancel": {
+    "message": "Cancel",
+    "description": "Side Panel privacy action dialog (item-dialog.js). PRIVACY/MCP: the host previews the change; nothing is changed until the person confirms. Button that closes the dialog without changing anything."
+  },
+  "pageTabName": {
+    "message": "Page",
+    "description": "Side Panel Page tab (page-text.js). Name of the tab of saved pages (a product term, kept in English in both languages)."
+  },
+  "pageSearchPlaceholder": {
+    "message": "Search saved pages by URL or title",
+    "description": "Side Panel Page tab (page-text.js). Placeholder and name of the search box."
+  },
+  "pageRefresh": {
+    "message": "Refresh",
+    "description": "Side Panel Page tab (page-text.js). Button that reloads the list."
+  },
+  "pageMore": {
+    "message": "Show more",
+    "description": "Side Panel Page tab (page-text.js). Button that loads more pages."
+  },
+  "pageDeleteMatching": {
+    "message": "Delete all matching saves",
+    "description": "Side Panel Page tab (page-text.js). Button that deletes every save event matching the search."
+  },
+  "pageDeleteAll": {
+    "message": "Delete all pages",
+    "description": "Side Panel Page tab (page-text.js). Button that deletes every saved page."
+  },
+  "pageOpen": {
+    "message": "Open the original web page",
+    "description": "Side Panel Page tab (page-text.js). Link that opens the live page (not the saved copy)."
+  },
+  "pageOpenNote": {
+    "message": "Opens the current web page again. It does not show the saved MHTML.",
+    "description": "Side Panel Page tab (page-text.js). Note about the open link."
+  },
+  "pageGroupDelete": {
+    "message": "Delete everything for this URL",
+    "description": "Side Panel Page tab (page-text.js). Button that deletes all save records of one URL."
+  },
+  "pageGroupDeleteTitle": {
+    "message": "$button$: deletes all save records of this URL",
+    "description": "Side Panel Page tab (page-text.js). Tooltip of that button; [button] is its label.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageItemLabel": {
+    "message": "$label$ ($detail$)",
+    "description": "Side Panel Page tab (page-text.js). Accessible name of a delete button: [label] the action, [detail] the date or the page title or URL.",
+    "placeholders": {
+      "label": {
+        "content": "$1"
+      },
+      "detail": {
+        "content": "$2"
+      }
+    }
+  },
+  "pageEventDelete": {
+    "message": "Delete this save record",
+    "description": "Side Panel Page tab (page-text.js). Icon button on one save record."
+  },
+  "pageUntitled": {
+    "message": "(untitled)",
+    "description": "Side Panel Page tab (page-text.js). Shown for a page saved without a title."
+  },
+  "pageEventExport": {
+    "message": "Export MHTML",
+    "description": "Side Panel Page tab (page-text.js). Button that writes the saved MHTML original to a file."
+  },
+  "pageExportNote": {
+    "message": "Writes the original MHTML of this save record, unchanged, to the place chosen in the Windows save dialog.",
+    "description": "Side Panel Page tab (page-text.js). Tooltip of the export button."
+  },
+  "pageExporting": {
+    "message": "Choose where to save in the save dialog. Page actions wait until it is finished…",
+    "description": "Side Panel Page tab (page-text.js). Status while the save dialog is open."
+  },
+  "pageExportCancelled": {
+    "message": "The export was cancelled. No file was changed.",
+    "description": "Side Panel Page tab (page-text.js). Status."
+  },
+  "pageLoading": {
+    "message": "Loading pages…",
+    "description": "Side Panel Page tab (page-text.js). Status."
+  },
+  "pageEmpty": {
+    "message": "No saved pages match.",
+    "description": "Side Panel Page tab (page-text.js). Empty state."
+  },
+  "pageInitial": {
+    "message": "Save records are loaded when the Page tab is opened.",
+    "description": "Side Panel Page tab (page-text.js). Status before the tab was opened."
+  },
+  "pageScopeNote": {
+    "message": "Pages are grouped by exact URL. Search matches part of the URL or title (English letters ignore case; other Unicode characters do not). While searching, the history and the bulk delete cover only the matching save events. The original MHTML of each save record can be exported to a file. Full-text search and viewing MHTML are not supported.",
+    "description": "Side Panel Page tab (page-text.js). Explanation under the search box. DELETION: the bulk delete covers only matching save events."
+  },
+  "pageNewItems": {
+    "message": "There are new saves. Refresh the list.",
+    "description": "Side Panel Page tab (page-text.js). Status."
+  },
+  "pageConfirmTitle": {
+    "message": "Confirm page deletion",
+    "description": "Side Panel Page tab (page-text.js). Title of the deletion dialog."
+  },
+  "pageCancel": {
+    "message": "Cancel",
+    "description": "Side Panel Page tab (page-text.js). Dialog button; deletes nothing."
+  },
+  "pageConfirm": {
+    "message": "Delete",
+    "description": "Side Panel Page tab (page-text.js). Dialog button; deletes exactly what was listed."
+  },
+  "pageDeleting": {
+    "message": "Deleting…",
+    "description": "Side Panel Page tab (page-text.js). Dialog button while deleting."
+  },
+  "pageDeleted": {
+    "message": "The confirmed save records were deleted.",
+    "description": "Side Panel Page tab (page-text.js). Status after deletion."
+  },
+  "pageRetry": {
+    "message": "Reload",
+    "description": "Side Panel Page tab (page-text.js). Button that loads the list again."
+  },
+  "pageClose": {
+    "message": "Close",
+    "description": "Side Panel Page tab (page-text.js). Dialog button after a failure."
+  },
+  "pageErrorVaultLocked": {
+    "message": "The Vault is locked. Check its state in the settings.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorKeyUnavailable": {
+    "message": "The Vault's key cannot be used.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorVaultNotConfigured": {
+    "message": "No Vault is selected. Create or choose one in the settings.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorVaultSwitched": {
+    "message": "The Vault was changed. The list and the deletion confirmation were withdrawn. Refresh and check again.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorTargetsChanged": {
+    "message": "What would be deleted or its shared references changed. Nothing was deleted. Check again.",
+    "description": "Side Panel Page tab error (page-text.js). Must say that nothing was deleted."
+  },
+  "pageErrorListChanged": {
+    "message": "The save records changed, so the rest of the list cannot be loaded. Refresh the list.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorInvalidCursor": {
+    "message": "The rest of the list is invalid or has expired. Refresh the list.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorInvalidReview": {
+    "message": "The deletion confirmation is invalid or has expired. Check again.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorNotFound": {
+    "message": "The save record no longer exists. Refresh the list.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorTimeout": {
+    "message": "No response from the host. Refresh and check again.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorHostUnavailable": {
+    "message": "Cannot connect to the Native Host.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorUnknownType": {
+    "message": "The Native Host does not support managing pages. Update the host.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorSchemaMismatch": {
+    "message": "This Vault's schema is not supported. The old Vault is not changed.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorDeleteUnknown": {
+    "message": "Whether anything was deleted is not confirmed. It is not deleted again automatically. Reload the list and check.",
+    "description": "Side Panel Page tab error (page-text.js). The outcome of a sent delete is unknown; must not say that nothing was deleted."
+  },
+  "pageErrorExportChanged": {
+    "message": "The export was stopped because the save record was changed or deleted. No file was changed. Refresh and check.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportUnknown": {
+    "message": "Whether the export finished is not confirmed. It is not retried automatically. Check the file at the destination and export again if needed.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorBlobCorrupt": {
+    "message": "The saved MHTML original failed verification, so it was not exported. No file was changed.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportFileAppeared": {
+    "message": "A file with the same name appeared at the destination, so the export stopped without overwriting it.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportTargetBusy": {
+    "message": "The file to overwrite is in use by another program, so the export stopped without changing it.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportTargetReadonly": {
+    "message": "The file to overwrite is read-only, so the export stopped without changing it.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportInvalidTarget": {
+    "message": "Cannot export to this location or file name. Choose another location or name.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorParentMissing": {
+    "message": "The destination folder was not found. No file was created.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportFailed": {
+    "message": "The export failed. The file at the destination was not changed.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportVerifyFailed": {
+    "message": "The exported file could not be verified, so the export was undone. The destination is as it was before.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorExportRecoveryNeeded": {
+    "message": "The export could not be completed. The file it was replacing remains in the same folder with a name ending in “.memocampus-old”. Check the destination.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorInvalidQuery": {
+    "message": "Enter a search term of 200 characters or fewer.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorResponseTooLarge": {
+    "message": "The data to display is too large to retrieve.",
+    "description": "Side Panel Page tab error (page-text.js)."
+  },
+  "pageErrorGeneric": {
+    "message": "The page operation failed. Do not assume any change succeeded; refresh and check the state.",
+    "description": "Side Panel Page tab error (page-text.js). Any other code."
+  },
+  "pageHistoryLabel": {
+    "message": "Save records: $matched$ of $total$",
+    "description": "Side Panel Page tab (page-text.js). Count of a URL group: [matched] matching save records of [total] in all.",
+    "placeholders": {
+      "matched": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "pageSummary": {
+    "message": "Loaded: $count$ URLs",
+    "description": "Side Panel Page tab (page-text.js). Summary; [count] is a number.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageExported": {
+    "message": "Exported the original MHTML to “$file$”.",
+    "description": "Side Panel Page tab (page-text.js). Status; [file] is the file name.",
+    "placeholders": {
+      "file": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageExportedOldLeft": {
+    "message": "Exported the original MHTML to “$file$”. The file it replaced could not be deleted and remains in the same folder with a name ending in “.memocampus-old”.",
+    "description": "Side Panel Page tab (page-text.js). Status; [file] is the file name.",
+    "placeholders": {
+      "file": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageCount": {
+    "message": "$count$",
+    "description": "Side Panel Page tab (page-text.js). Count value next to its label in the deletion dialog.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageRowTarget": {
+    "message": "Target",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label."
+  },
+  "pageTargetEvent": {
+    "message": "One save record",
+    "description": "Side Panel Page tab (page-text.js). Deletion target value."
+  },
+  "pageRowDateTime": {
+    "message": "Date and time",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label."
+  },
+  "pageRowTitle": {
+    "message": "Title",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label."
+  },
+  "pageTargetUrl": {
+    "message": "The whole URL",
+    "description": "Side Panel Page tab (page-text.js). Deletion target value: every save record of one URL."
+  },
+  "pageTargetAll": {
+    "message": "Save events of all pages (no filter)",
+    "description": "Side Panel Page tab (page-text.js). Deletion target value: everything."
+  },
+  "pageTargetMatching": {
+    "message": "Page save records matching the search",
+    "description": "Side Panel Page tab (page-text.js). Deletion target value."
+  },
+  "pageRowQuery": {
+    "message": "Search",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label; the value is the search text."
+  },
+  "pageRowEvents": {
+    "message": "Save events",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label; the value is a count."
+  },
+  "pageRowBlobsRemoved": {
+    "message": "Originals deleted",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label; the value is a count."
+  },
+  "pageRowBlobsKept": {
+    "message": "Shared originals kept",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label; originals other records still use."
+  },
+  "pageRowBytesRemoved": {
+    "message": "Size of deleted originals",
+    "description": "Side Panel Page tab (page-text.js). Deletion dialog row label; the value is a size in bytes."
+  },
+  "pageNoteDbScope": {
+    "message": "Every match in the database is deleted, not only what is loaded on screen.",
+    "description": "Side Panel Page tab (page-text.js). DELETION note for a search-based delete."
+  },
+  "pageNoteSharedKept": {
+    "message": "A shared MHTML original remains as long as other records refer to it.",
+    "description": "Side Panel Page tab (page-text.js). Deletion note."
+  },
+  "imageEmpty": {
+    "message": "No images saved yet. Right-click an image on a page and choose “$menu$” to show it here.",
+    "description": "Side Panel Image tab (image-gallery.js). Empty state; [menu] is the context menu item's label.",
+    "placeholders": {
+      "menu": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageErrorBlobMissing": {
+    "message": "This image was not found in the Vault. Refresh the list.",
+    "description": "Side Panel Image tab (image-gallery.js). Error of a tag request."
+  },
+  "imageRefreshNew": {
+    "message": "There are new images",
+    "description": "Side Panel Image tab (image-gallery.js). Name and tooltip of the refresh button when newer images exist."
+  },
+  "imageRefresh": {
+    "message": "Refresh the image list",
+    "description": "Side Panel Image tab (image-gallery.js). Name and tooltip of the refresh button."
+  },
+  "imageSummary": {
+    "message": "Images: $count$",
+    "description": "Side Panel Image tab (image-gallery.js). Number of images loaded.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageSummaryMore": {
+    "message": "Images: $count$+",
+    "description": "Side Panel Image tab (image-gallery.js). Number of images loaded when more exist.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageDeleteFilteredLabel": {
+    "message": "$button$ (every image tagged “$tag$”)",
+    "description": "Side Panel Image tab (image-gallery.js). DELETION: name of the button that deletes every image with tag [tag]; [button] is its label.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      },
+      "tag": {
+        "content": "$2"
+      }
+    }
+  },
+  "imageDeleteAllLabel": {
+    "message": "$button$ (every saved image)",
+    "description": "Side Panel Image tab (image-gallery.js). DELETION: name of the button that deletes every saved image.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageDeleted": {
+    "message": "The image was deleted.",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageDeletedCount": {
+    "message": "Deleted images: $count$.",
+    "description": "Side Panel Image tab (image-gallery.js). Status; [count] is a number.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageDeleteVaultSwitched": {
+    "message": "Nothing was deleted because the Vault was switched. The list was reloaded.",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageLoadFailed": {
+    "message": "The images could not be loaded.",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageTileLabel": {
+    "message": "$type$ $width$×$height$, last saved $saved$, times saved: $count$",
+    "description": "Side Panel Image tab (image-gallery.js). Accessible description of an image tile: [type] the image type, [saved] a date, [count] how often it was saved.",
+    "placeholders": {
+      "type": {
+        "content": "$1"
+      },
+      "width": {
+        "content": "$2"
+      },
+      "height": {
+        "content": "$3"
+      },
+      "saved": {
+        "content": "$4"
+      },
+      "count": {
+        "content": "$5"
+      }
+    }
+  },
+  "imageCopying": {
+    "message": "Copying the image…",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageCopied": {
+    "message": "The image was copied to the clipboard.",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageChooseExport": {
+    "message": "Choose where to export…",
+    "description": "Side Panel Image tab (image-gallery.js). Status while the save dialog is open."
+  },
+  "imageExportCancelled": {
+    "message": "The export was cancelled.",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageExported": {
+    "message": "Exported as “$file$”.",
+    "description": "Side Panel Image tab (image-gallery.js). Status; [file] is the file name.",
+    "placeholders": {
+      "file": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageActionFailed": {
+    "message": "The operation failed.",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageKindImageUrl": {
+    "message": "Image URL",
+    "description": "Side Panel Image tab (image-gallery.js). Kind of a URL of a save record: the image's own URL."
+  },
+  "imageKindPageUrl": {
+    "message": "Page URL",
+    "description": "Side Panel Image tab (image-gallery.js). Kind of a URL of a save record: the page it was saved from."
+  },
+  "imageKindFrameUrl": {
+    "message": "Frame URL",
+    "description": "Side Panel Image tab (image-gallery.js). Kind of a URL of a save record: the frame it was saved from."
+  },
+  "imageKindSeparator": {
+    "message": " / ",
+    "description": "Side Panel Image tab (image-gallery.js). Separator between URL kinds."
+  },
+  "imageCandidate": {
+    "message": "$kinds$ (saves: $count$)",
+    "description": "Side Panel Image tab (image-gallery.js). A URL a rule can be for: [kinds] its kinds, [count] how many saves name it.",
+    "placeholders": {
+      "kinds": {
+        "content": "$1"
+      },
+      "count": {
+        "content": "$2"
+      }
+    }
+  },
+  "imagePublicationRule": {
+    "message": "An image is shown to the MCP server only when “Allow publishing to MCP” is on for a save record and that save's image URL, page URL and frame URL are all visible to MCP.",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: the rule for when an image reaches MCP. Must not read wider."
+  },
+  "imagePublicationNone": {
+    "message": "This image has no save record that allows MCP access, so making its URLs visible to MCP does not expose the image to the MCP server (this does not change the save record's publishing permission).",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: follows the rule above."
+  },
+  "imagePublicationSome": {
+    "message": "Save records of this image that allow publishing to MCP: $allowed$ of $total$.",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: follows the rule above.",
+    "placeholders": {
+      "allowed": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "imageManageUpdateHost": {
+    "message": "Update the Native Host to manage images here (delete, add rules, allow MCP access).",
+    "description": "Side Panel Image tab (image-gallery.js). Note."
+  },
+  "imageNoTargetUrls": {
+    "message": "no URL can be a target",
+    "description": "Side Panel Image tab (image-gallery.js). Remark after a disabled action."
+  },
+  "imageAllUrlsSame": {
+    "message": "every URL is $state$",
+    "description": "Side Panel Image tab (image-gallery.js). Remark after a disabled action; [state] is a remark such as already public.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageActionRemark": {
+    "message": "$action$ ($reason$)",
+    "description": "Side Panel Image tab (image-gallery.js). A disabled action with its reason.",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      },
+      "reason": {
+        "content": "$2"
+      }
+    }
+  },
+  "imageStatesUnknown": {
+    "message": "the state cannot be checked",
+    "description": "Side Panel Image tab (image-gallery.js). Part of the manage note."
+  },
+  "imageStatesTally": {
+    "message": "visible to MCP $allow$, hidden from MCP $hidden$, not recorded automatically $never$",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: counts of the image's URLs per state.",
+    "placeholders": {
+      "allow": {
+        "content": "$1"
+      },
+      "hidden": {
+        "content": "$2"
+      },
+      "never": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageNoRuleUrls": {
+    "message": "The save records of this image have no URL a rule can be for.",
+    "description": "Side Panel Image tab (image-gallery.js). Note."
+  },
+  "imageUrlsStates": {
+    "message": "URLs of this image ($range$): $states$",
+    "description": "Side Panel Image tab (image-gallery.js). Manage note: [range] says which save records were read, [states] the counts.",
+    "placeholders": {
+      "range": {
+        "content": "$1"
+      },
+      "states": {
+        "content": "$2"
+      }
+    }
+  },
+  "imageRangeLoaded": {
+    "message": "the save records loaded so far",
+    "description": "Side Panel Image tab (image-gallery.js). Range in the manage note."
+  },
+  "imageRangeAll": {
+    "message": "all save records",
+    "description": "Side Panel Image tab (image-gallery.js). Range in the manage note."
+  },
+  "imageCheckingUrls": {
+    "message": "Checking the URLs of the save records…",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageTooManySources": {
+    "message": "There are too many save records to add a rule from here. Specify the URL in the Privacy settings.",
+    "description": "Side Panel Image tab (image-gallery.js). Note."
+  },
+  "imageSourcesCheckFailed": {
+    "message": "The save records could not be checked.",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageAllUrlsAlready": {
+    "message": "Every URL of this image is $state$.",
+    "description": "Side Panel Image tab (image-gallery.js). Note; [state] is a remark such as already public.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "imagePolicyTarget": {
+    "message": "Target: $image$\nThe rule applies to the chosen URL, not to the image.",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: the rule is for a URL, never for the image. [image] describes the image. Contains a line break.",
+    "placeholders": {
+      "image": {
+        "content": "$1"
+      }
+    }
+  },
+  "imagePolicyTargetFallback": {
+    "message": "Image",
+    "description": "Side Panel Image tab (image-gallery.js). [image] when the image is not known."
+  },
+  "imagePolicyApplied": {
+    "message": "“$action$” was done ($url$). Current state: $state$",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: status after the host confirmed a rule change.",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      },
+      "url": {
+        "content": "$2"
+      },
+      "state": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageIncognitoNotPublic": {
+    "message": "Not visible to MCP because it was saved from Incognito",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: label of a save record from an Incognito window; never public."
+  },
+  "imageAllowMcp": {
+    "message": "Allow publishing to MCP (privacy settings always take precedence; MCP is not implemented yet)",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: checkbox of a save record; the privacy settings still decide."
+  },
+  "imagePublicationFailed": {
+    "message": "The MCP publishing setting could not be changed.",
+    "description": "Side Panel Image tab (image-gallery.js). PRIVACY/MCP: error; the checkbox returns to its stored value."
+  },
+  "imageIncognito": {
+    "message": "Incognito",
+    "description": "Side Panel Image tab (image-gallery.js). Marks a save record made in an Incognito window."
+  },
+  "imageSourceImage": {
+    "message": "Image",
+    "description": "Side Panel Image tab (image-gallery.js). Label of the image URL of a save record."
+  },
+  "imageSourcePage": {
+    "message": "Page",
+    "description": "Side Panel Image tab (image-gallery.js). Label of the page URL of a save record."
+  },
+  "imageSourceFrame": {
+    "message": "Frame",
+    "description": "Side Panel Image tab (image-gallery.js). Label of the frame URL of a save record."
+  },
+  "imageSourcesFailed": {
+    "message": "The save records could not be loaded.",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageDetailsMeta": {
+    "message": "$type$ ($mime$), $width$×$height$, $size$ KB, times saved: $count$, last saved $saved$",
+    "description": "Side Panel Image tab (image-gallery.js). Details line of a selected image.",
+    "placeholders": {
+      "type": {
+        "content": "$1"
+      },
+      "mime": {
+        "content": "$2"
+      },
+      "width": {
+        "content": "$3"
+      },
+      "height": {
+        "content": "$4"
+      },
+      "size": {
+        "content": "$5"
+      },
+      "count": {
+        "content": "$6"
+      },
+      "saved": {
+        "content": "$7"
+      }
+    }
+  },
+  "imageTagsLoading": {
+    "message": "Loading tags…",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageTagRemove": {
+    "message": "Remove the tag “$tag$”",
+    "description": "Side Panel Image tab (image-gallery.js). Name and tooltip of a tag's remove button; [tag] is the user's tag.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagsLoadFailed": {
+    "message": "The tags could not be loaded.",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageTagRequired": {
+    "message": "Enter a tag.",
+    "description": "Side Panel Image tab (image-gallery.js). Validation."
+  },
+  "imageTagAdding": {
+    "message": "Adding the tag…",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageTagRemoving": {
+    "message": "Removing the tag…",
+    "description": "Side Panel Image tab (image-gallery.js). Status."
+  },
+  "imageTagAdded": {
+    "message": "Tagged with “$tag$”.",
+    "description": "Side Panel Image tab (image-gallery.js). Status.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagAlready": {
+    "message": "The tag “$tag$” is already there.",
+    "description": "Side Panel Image tab (image-gallery.js). Status.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagRemoved": {
+    "message": "Removed the tag “$tag$”.",
+    "description": "Side Panel Image tab (image-gallery.js). Status.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagNotThere": {
+    "message": "The tag “$tag$” is not there.",
+    "description": "Side Panel Image tab (image-gallery.js). Status.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagChangeFailed": {
+    "message": "The tags could not be changed.",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageNoTaggedImages": {
+    "message": "No images are tagged “$tag$”.",
+    "description": "Side Panel Image tab (image-gallery.js). Empty state of a tag filter.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageFilterName": {
+    "message": "Tag: $tag$",
+    "description": "Side Panel Image tab (image-gallery.js). The active tag filter.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageFilterByTag": {
+    "message": "Filter by tag",
+    "description": "Side Panel Image tab (image-gallery.js). Button and tag picker title."
+  },
+  "imageChooseTag": {
+    "message": "Choose an existing tag",
+    "description": "Side Panel Image tab (image-gallery.js). Button and tag picker title."
+  },
+  "imageTagOwned": {
+    "message": "$tag$ (already added)",
+    "description": "Side Panel Image tab (image-gallery.js). Accessible name of a tag in the picker that the image has.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTagWithCount": {
+    "message": "$tag$, images: $count$",
+    "description": "Side Panel Image tab (image-gallery.js). Accessible name of a tag in the picker; [count] images have it.",
+    "placeholders": {
+      "tag": {
+        "content": "$1"
+      },
+      "count": {
+        "content": "$2"
+      }
+    }
+  },
+  "imageNoTags": {
+    "message": "There are no tags yet.",
+    "description": "Side Panel Image tab (image-gallery.js). Empty tag picker."
+  },
+  "imageTagListFailed": {
+    "message": "The tag list could not be loaded.",
+    "description": "Side Panel Image tab (image-gallery.js). Error."
+  },
+  "imageSourceNone": {
+    "message": "(not recorded)",
+    "description": "Side Panel Image tab (image-gallery.js). A save record without that URL (image-client.js)."
+  },
+  "imageSourceEmbedded": {
+    "message": "$url$ (image embedded in the page)",
+    "description": "Side Panel Image tab (image-gallery.js). A data: URL of a save record (image-client.js).",
+    "placeholders": {
+      "url": {
+        "content": "$1"
+      }
+    }
+  },
+  "imageTypeGeneric": {
+    "message": "Image",
+    "description": "Side Panel Image tab (image-gallery.js). Type label of an image whose type has no short name (image-client.js)."
+  },
+  "panelDeleteWithdrawnVaultChanged": {
+    "message": "The deletion confirmation was withdrawn because the Vault was changed.",
+    "description": "Side Panel URL tab (sidepanel.js). Status; nothing was deleted."
+  },
+  "panelHistoryOpenFailed": {
+    "message": "History could not be opened.",
+    "description": "Side Panel URL tab (sidepanel.js). Status."
+  },
+  "panelSettings": {
+    "message": "Settings",
+    "description": "Side Panel URL tab (sidepanel.js). Name and tooltip of the settings tab (icon only)."
+  },
+  "panelSettingsAttention": {
+    "message": "Settings (the Vault needs attention)",
+    "description": "Side Panel URL tab (sidepanel.js). Name and tooltip of the settings tab when the Vault needs attention."
+  },
+  "searchFailed": {
+    "message": "The search failed.",
+    "description": "Side Panel URL tab (sidepanel.js). Error."
+  },
+  "searchInProgress": {
+    "message": "Searching…",
+    "description": "Side Panel URL tab (sidepanel.js). Summary while searching."
+  },
+  "searchSummary": {
+    "message": "$count$ found",
+    "description": "Side Panel URL tab (sidepanel.js). Number of results shown.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchSummaryRecent": {
+    "message": "$count$ · newest first",
+    "description": "Side Panel URL tab (sidepanel.js). Number of results without a search term, newest first (keep it short: it shares a row with buttons in a narrow panel).",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchSummaryMore": {
+    "message": "$count$+ found",
+    "description": "Side Panel URL tab (sidepanel.js). Number of results when more exist.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchSummaryDay": {
+    "message": "$count$ on $date$",
+    "description": "Side Panel URL tab (sidepanel.js). Number of results for the chosen day [date].",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "date": {
+        "content": "$2"
+      }
+    }
+  },
+  "searchSummaryDayMore": {
+    "message": "$count$+ on $date$",
+    "description": "Side Panel URL tab (sidepanel.js). Number of results for the chosen day [date] when more exist.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "date": {
+        "content": "$2"
+      }
+    }
+  },
+  "dateFilterClear": {
+    "message": "Clear the date filter",
+    "description": "Side Panel URL tab (sidepanel.js). Name and tooltip of the × on the date chip."
+  },
+  "dateFilterClearWith": {
+    "message": "Clear the date filter ($date$)",
+    "description": "Side Panel URL tab (sidepanel.js). Name and tooltip of the × on the date chip; [date] is the chosen day.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateFilterDroppedVaultSwitched": {
+    "message": "The date filter was cleared because the Vault was switched.",
+    "description": "Side Panel URL tab (sidepanel.js). Status."
+  },
+  "calendarUnsupported": {
+    "message": "The Native Host does not support the visit calendar. Update the host.",
+    "description": "Side Panel URL tab (sidepanel.js). Tooltip of the disabled calendar button."
+  },
+  "calendarCheckingHost": {
+    "message": "Checking what the Native Host supports.",
+    "description": "Side Panel URL tab (sidepanel.js). Tooltip of the disabled calendar button."
+  },
+  "calendarNoVaultList": {
+    "message": "Cannot filter by visit date because the Vault cannot be read.",
+    "description": "Side Panel URL tab (sidepanel.js). Tooltip of the disabled calendar button."
+  },
+  "resultVisited": {
+    "message": "Visited",
+    "description": "Side Panel URL tab (sidepanel.js). Prefix of a result's last visit time (for example: Visited Today 9:05 AM)."
+  },
+  "resultSnapshot": {
+    "message": "Snapshot",
+    "description": "Side Panel URL tab (sidepanel.js). Prefix of a result's last snapshot time."
+  },
+  "rowStateUnknown": {
+    "message": "State unknown",
+    "description": "Side Panel URL tab (sidepanel.js). PRIVACY: badge of a result whose privacy state the host could not tell."
+  },
+  "rowStateChecking": {
+    "message": "Checking…",
+    "description": "Side Panel URL tab (sidepanel.js). Badge of a result while its privacy state is checked."
+  },
+  "rowActionRemark": {
+    "message": "$action$ ($state$)",
+    "description": "Side Panel URL tab (sidepanel.js). A disabled action with the remark that it is already the state.",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      },
+      "state": {
+        "content": "$2"
+      }
+    }
+  },
+  "rowActionsLabel": {
+    "message": "Actions for “$title$”",
+    "description": "Side Panel URL tab (sidepanel.js). Accessible name of a result's action drop-down; [title] is the page title or URL.",
+    "placeholders": {
+      "title": {
+        "content": "$1"
+      }
+    }
+  },
+  "rowChooseAction": {
+    "message": "Choose an action…",
+    "description": "Side Panel URL tab (sidepanel.js). First option of an action drop-down (no action)."
+  },
+  "panelVisitDeleted": {
+    "message": "Deleted visits: $count$. The snapshots and other visits of the same URL remain.",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION status after deleting one visit.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "panelDeleteVaultSwitched": {
+    "message": "Nothing was deleted because the Vault was switched. Reloading the list.",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION status."
+  },
+  "panelDeleteVisitsFilteredLabel": {
+    "message": "$button$ (visits matching the current search and date filter; snapshots are not included)",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION: name and tooltip of the range delete button; [button] is its label.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "panelDeleteVisitsAllLabel": {
+    "message": "$button$ (snapshots are not included)",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION: name and tooltip of the delete-all-visits button.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "filterSearch": {
+    "message": "search “$query$”",
+    "description": "Side Panel URL tab (sidepanel.js). Condition in the deletion dialog; [query] is the search text.",
+    "placeholders": {
+      "query": {
+        "content": "$1"
+      }
+    }
+  },
+  "filterDate": {
+    "message": "visit date $date$",
+    "description": "Side Panel URL tab (sidepanel.js). Condition in the deletion dialog; [date] is the chosen day.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "filterBoth": {
+    "message": "$search$ and $date$",
+    "description": "Side Panel URL tab (sidepanel.js). Both conditions in the deletion dialog.",
+    "placeholders": {
+      "search": {
+        "content": "$1"
+      },
+      "date": {
+        "content": "$2"
+      }
+    }
+  },
+  "panelVisitsDeleted": {
+    "message": "Deleted visits: $count$ (snapshots were not deleted).",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION status.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "panelUrlDeleted": {
+    "message": "Deleted everything for the URL (visits: $visits$, snapshots: $snapshots$).",
+    "description": "Side Panel URL tab (sidepanel.js). DELETION status.",
+    "placeholders": {
+      "visits": {
+        "content": "$1"
+      },
+      "snapshots": {
+        "content": "$2"
+      }
+    }
+  },
+  "panelPolicyApplied": {
+    "message": "“$action$” was done. Current state: $state$",
+    "description": "Side Panel URL tab (sidepanel.js). PRIVACY status after the host confirmed a rule change; [state] is the host's new decision.",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      },
+      "state": {
+        "content": "$2"
+      }
+    }
+  },
+  "searchEmptyQueryDay": {
+    "message": "No pages visited on $date$ match “$query$”.",
+    "description": "Side Panel URL tab (sidepanel.js). Empty state.",
+    "placeholders": {
+      "query": {
+        "content": "$1"
+      },
+      "date": {
+        "content": "$2"
+      }
+    }
+  },
+  "searchEmptyDay": {
+    "message": "No pages were visited on $date$.",
+    "description": "Side Panel URL tab (sidepanel.js). Empty state.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchEmptyQuery": {
+    "message": "No pages match “$query$”.",
+    "description": "Side Panel URL tab (sidepanel.js). Empty state.",
+    "placeholders": {
+      "query": {
+        "content": "$1"
+      }
+    }
+  },
+  "searchEmptyNone": {
+    "message": "No pages have been recorded yet.",
+    "description": "Side Panel URL tab (sidepanel.js). Empty state."
+  },
+  "searchLoadingMore": {
+    "message": "Loading…",
+    "description": "Side Panel URL tab (sidepanel.js). Load-more button while loading."
+  },
+  "searchLoadMore": {
+    "message": "Load more",
+    "description": "Side Panel URL tab (sidepanel.js). Button that loads more results."
+  },
+  "panelTabOpenFailed": {
+    "message": "The tab could not be opened.",
+    "description": "Side Panel URL tab (sidepanel.js). Error."
+  },
+  "panelRecording": {
+    "message": "Recording…",
+    "description": "Side Panel URL tab (sidepanel.js). Status while all tabs are recorded."
+  },
+  "searchPlaceholder": {
+    "message": "Search by title or URL",
+    "description": "Side Panel (sidepanel.html). URL tab: placeholder of the search box."
+  },
+  "searchLabel": {
+    "message": "Search browsing history",
+    "description": "Side Panel (sidepanel.html). URL tab: accessible name of the search box."
+  },
+  "panelOpenHistoryTitle": {
+    "message": "Open the full-page History in a new tab",
+    "description": "Side Panel (sidepanel.html). URL tab: tooltip of the History button (the button label History is a product term)."
+  },
+  "panelOpenHistoryLabel": {
+    "message": "Open History in a new tab",
+    "description": "Side Panel (sidepanel.html). URL tab: accessible name of the History button."
+  },
+  "panelRecordTabs": {
+    "message": "Record all tabs",
+    "description": "Side Panel (sidepanel.html). URL tab: button that records the open tabs of normal windows now (as the privacy settings allow)."
+  },
+  "panelPolicyInitialize": {
+    "message": "Open the first-run guide",
+    "description": "Side Panel (sidepanel.html). URL tab: button shown when the privacy settings were never set up."
+  },
+  "panelPolicyRecheck": {
+    "message": "Check again",
+    "description": "Side Panel (sidepanel.html). URL tab: button that asks the privacy settings' state again."
+  },
+  "panelRetry": {
+    "message": "Retry",
+    "description": "Side Panel (sidepanel.html). Button after a loading error."
+  },
+  "panelOpenVaultSettings": {
+    "message": "Open Vault settings",
+    "description": "Side Panel (sidepanel.html). Button after an error caused by the Vault; opens the settings tab."
+  },
+  "searchResultsLabel": {
+    "message": "Search results",
+    "description": "Side Panel (sidepanel.html). URL tab: accessible name of the result list."
+  },
+  "imageFilterClear": {
+    "message": "Clear the filter",
+    "description": "Side Panel (sidepanel.html). Image tab: name and tooltip of the × on the tag filter chip."
+  },
+  "imageGridLabel": {
+    "message": "Saved images",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the image grid."
+  },
+  "imageLoadMore": {
+    "message": "Load more",
+    "description": "Side Panel (sidepanel.html). Image tab: button that loads more images."
+  },
+  "imageDetailsTitle": {
+    "message": "Image details",
+    "description": "Side Panel (sidepanel.html). Image tab: heading of the details of a selected image."
+  },
+  "imageClose": {
+    "message": "Close",
+    "description": "Side Panel (sidepanel.html). Image tab: closes the details or the tag picker."
+  },
+  "imageTagsHeading": {
+    "message": "Tags",
+    "description": "Side Panel (sidepanel.html). Image tab: heading."
+  },
+  "imageTagsLabel": {
+    "message": "Tags of this image",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the tag list."
+  },
+  "imageTagsEmpty": {
+    "message": "No tags yet.",
+    "description": "Side Panel (sidepanel.html). Image tab: empty tag list."
+  },
+  "imageTagPlaceholder": {
+    "message": "Enter a tag",
+    "description": "Side Panel (sidepanel.html). Image tab: placeholder of the tag input."
+  },
+  "imageTagInputLabel": {
+    "message": "Tag to add",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the tag input."
+  },
+  "imageTagAdd": {
+    "message": "Add",
+    "description": "Side Panel (sidepanel.html). Image tab: adds the typed tag."
+  },
+  "imageManageHeading": {
+    "message": "Manage",
+    "description": "Side Panel (sidepanel.html). Image tab: heading of the privacy actions of an image."
+  },
+  "imageManageLabel": {
+    "message": "Actions for this image",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the action drop-down."
+  },
+  "imageSourcesHeading": {
+    "message": "Save history",
+    "description": "Side Panel (sidepanel.html). Image tab: heading of the save records of an image."
+  },
+  "imageShowMore": {
+    "message": "Show more",
+    "description": "Side Panel (sidepanel.html). Image tab: loads more save records or tags."
+  },
+  "imageTagNamePlaceholder": {
+    "message": "Enter a tag name",
+    "description": "Side Panel (sidepanel.html). Image tab: placeholder of the tag picker input."
+  },
+  "imageTagFilterLabel": {
+    "message": "Tag to filter by",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the tag picker input."
+  },
+  "imageTagApply": {
+    "message": "Filter",
+    "description": "Side Panel (sidepanel.html). Image tab: applies the typed tag as the filter."
+  },
+  "imageTagListLabel": {
+    "message": "Existing tags",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the tag picker list."
+  },
+  "imageMenuLabel": {
+    "message": "Image actions",
+    "description": "Side Panel (sidepanel.html). Image tab: accessible name of the right-click menu of a tile."
+  },
+  "imageMenuCopy": {
+    "message": "Copy image",
+    "description": "Side Panel (sidepanel.html). Image tab: copies the original image to the clipboard."
+  },
+  "imageMenuExport": {
+    "message": "Export as a file",
+    "description": "Side Panel (sidepanel.html). Image tab: writes the original image to a file."
+  },
+  "imageTrashLabel": {
+    "message": "$button$ ($image$)",
+    "description": "Side Panel (sidepanel.html). Image tab: name of a tile's delete button; [image] describes the image.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      },
+      "image": {
+        "content": "$2"
+      }
+    }
+  },
+  "panelPrivacyHeading": {
+    "message": "Privacy",
+    "description": "Side Panel (sidepanel.html). Settings tab: heading of the privacy section."
+  },
+  "panelPrivacyNote": {
+    "message": "Review the Never Save group, the Hide from MCP group and the basic protections in a separate tab.",
+    "description": "Side Panel (sidepanel.html). Settings tab: what the Privacy settings button opens."
+  },
+  "panelPrivacySettings": {
+    "message": "Privacy settings",
+    "description": "Side Panel (sidepanel.html). Settings tab: opens the Options page."
+  }
+}

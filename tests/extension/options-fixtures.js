@@ -7,6 +7,7 @@ import path from "node:path";
 import { createDocument, extensionDir, settle } from "./fake-dom.js";
 import { startOptionsPage } from "../../extension/options-page.js";
 import { CATEGORY_KEYS } from "../../extension/options-state.js";
+import { chromeI18n } from "./i18n-mock.js";
 
 export const html = readFileSync(path.join(extensionDir, "options.html"), "utf8");
 /** The text of an element as options.html writes it (the fake DOM does not read the page). */
@@ -216,14 +217,14 @@ export async function guarded(body) {
   for (const method of methods) console[method] = (...args) => logged.push(args);
   const savedStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("localStorage used"); } });
-  globalThis.chrome = { storage: new Proxy({}, { get() { throw new Error("chrome.storage used"); } }) };
+  globalThis.chrome = { i18n: chromeI18n, storage: new Proxy({}, { get() { throw new Error("chrome.storage used"); } }) };
   try {
     await body();
   } finally {
     methods.forEach((method, index) => { console[method] = saved[index]; });
     if (savedStorage) Object.defineProperty(globalThis, "localStorage", savedStorage);
     else delete globalThis.localStorage;
-    delete globalThis.chrome;
+    globalThis.chrome = { i18n: chromeI18n };
   }
   assert.deepEqual(logged, [], "nothing is logged");
 }

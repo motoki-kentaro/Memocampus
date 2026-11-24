@@ -22,6 +22,7 @@ import {
   shapePageMetadata,
 } from "../../extension/page-metadata.js";
 import { extensionDir, settle } from "./fake-dom.js";
+import { chromeI18n } from "./i18n-mock.js";
 
 const vectors = JSON.parse(readFileSync(new URL("../page-metadata/vectors.json", import.meta.url), "utf8"));
 const PAGE_URL = "https://news.test/article?id=7&utm_source=keep";
@@ -267,6 +268,7 @@ async function startWorker({ host = fakeHost(), tabs = {}, data = new Map(), pag
   const scripts = [];
   const writes = [];
   globalThis.chrome = {
+    i18n: chromeI18n,
     runtime: {
       onStartup: on("startup"),
       onInstalled: on("installed"),

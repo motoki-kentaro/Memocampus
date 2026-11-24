@@ -1,4 +1,5 @@
 import { createPageClient } from "./page-client.js";
+import { t } from "./i18n.js";
 import { PAGE_TEXT as T, pageErrorText, pageDate, pageBytes, historyLabel, summaryText, deletionModel, exportedText } from "./page-text.js";
 import { isWebUrl } from "./search-client.js";
 import { createTrashButton, renderDeletion, setDangerLabel } from "./delete-ui.js";
@@ -82,7 +83,7 @@ export function createPagePanel({ connect, runtime, isActive, openUrl, document:
       const li=node("li","","page-event");
       li.append(node("time",pageDate(item.savedAt)),node("span",item.title||T.untitled,"page-event-title"),node("small",pageBytes(item.byteLength)));
       const save=button(T.eventExport,()=>void exportEvent(item,save)); save.className="secondary page-event-export"; save.title=T.exportNote;
-      const remove=createTrashButton({document:doc,label:`${T.eventDelete}（${pageDate(item.savedAt)}）`,onClick:()=>void ask({scope:"event",id:item.id},remove)}); remove.title=T.eventDelete;
+      const remove=createTrashButton({document:doc,label:t("pageItemLabel",T.eventDelete,pageDate(item.savedAt)),onClick:()=>void ask({scope:"event",id:item.id},remove)}); remove.title=T.eventDelete;
       li.append(save,remove); group.exports.push(save); group.deletions.push(remove); group.history.append(li);
     }
   }
@@ -102,7 +103,7 @@ export function createPagePanel({ connect, runtime, isActive, openUrl, document:
     const expand=button(item.title||T.untitled,()=>{const open=expand.getAttribute("aria-expanded")!=="true";expand.setAttribute("aria-expanded",String(open));body.hidden=!open;if(open&&!group.loaded)void history(group);});
     expand.className="page-expand";expand.setAttribute("aria-expanded","false");
     const body=node("div","","page-history");body.id=`page-history-${item.id}`;body.hidden=true;expand.setAttribute("aria-controls",body.id);
-    const remove=createTrashButton({document:doc,label:`${T.groupDelete}（${item.title||item.url}）`,text:T.groupDelete,onClick:()=>void ask({scope:"url",url:item.url},remove)}); remove.className+=" page-group-delete"; remove.title=`${T.groupDelete}: このURLの保存履歴をすべて削除します`;
+    const remove=createTrashButton({document:doc,label:t("pageItemLabel",T.groupDelete,item.title||item.url),text:T.groupDelete,onClick:()=>void ask({scope:"url",url:item.url},remove)}); remove.className+=" page-group-delete"; remove.title=t("pageGroupDeleteTitle",T.groupDelete);
     const visit=button(T.open,()=>{if(isWebUrl(item.url))openUrl(item.url);});visit.disabled=!isWebUrl(item.url);visit.title=T.openNote;
     const historyList=node("ol","","page-events"), next=button(T.more,()=>void history(group,true));next.hidden=true;
     const group={url:item.url,history:historyList,more:next,cursor:null,loaded:false,busy:false,deletions:[remove],exports:[],body};

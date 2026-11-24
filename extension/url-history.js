@@ -3,10 +3,10 @@
 // as `url_delete` did. Tab snapshots are not visits: they are counted, never listed or deleted one by one.
 import { formatFullDate } from "./format.js";
 import { DELETE_TEXT, createTrashButton } from "./delete-ui.js";
+import { formatNumber, t } from "./i18n.js";
 
-const UNTITLED = "（タイトルなし）";
 const safeDate = (iso) => { try { return formatFullDate(iso); } catch { return iso; } };
-const n = (value) => Number(value).toLocaleString("ja-JP");
+const n = (value) => formatNumber(Number(value));
 
 /**
  * `context()`: the list as shown ({ query, visited: {visitedFrom, visitedTo} | null, vaultToken }). A group lists the
@@ -38,13 +38,13 @@ export function createUrlHistory({ client, dialog, context, onVisitDeleted, onUr
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "secondary";
-    toggle.textContent = "閲覧履歴を表示";
+    toggle.textContent = t("urlHistoryShow");
     toggle.setAttribute("aria-expanded", "false");
     toggle.id = `visit-toggle-${counter}`;
     const bodyId = `visit-history-${counter}`;
     toggle.setAttribute("aria-controls", bodyId);
-    const urlDelete = createTrashButton({ label: `「${label}」のURL全件を削除`, text: DELETE_TEXT.urlAll, onClick: () => deleteUrl(row) });
-    urlDelete.title = `${DELETE_TEXT.urlAll}: このURLの閲覧履歴・スナップショット・ページ情報をすべて削除します`;
+    const urlDelete = createTrashButton({ label: t("urlHistoryDeleteUrlLabel", label), text: DELETE_TEXT.urlAll, onClick: () => deleteUrl(row) });
+    urlDelete.title = t("urlHistoryDeleteUrlTitle", DELETE_TEXT.urlAll);
     tools.append(toggle, urlDelete);
     const body = document.createElement("div");
     body.className = "visit-history";
@@ -55,11 +55,11 @@ export function createUrlHistory({ client, dialog, context, onVisitDeleted, onUr
     note.setAttribute("role", "status");
     const list = document.createElement("ol");
     list.className = "visit-events";
-    list.setAttribute("aria-label", "このURLの閲覧履歴");
+    list.setAttribute("aria-label", t("urlHistoryListLabel"));
     const more = document.createElement("button");
     more.type = "button";
     more.className = "secondary";
-    more.textContent = "さらに表示";
+    more.textContent = t("urlHistoryMore");
     more.hidden = true;
     body.append(note, list, more);
     Object.assign(row, { tools, toggle, body, note, list, more, urlDelete });
@@ -73,7 +73,7 @@ export function createUrlHistory({ client, dialog, context, onVisitDeleted, onUr
   function setOpen(row, open) {
     row.open = open;
     row.toggle.setAttribute("aria-expanded", String(open));
-    row.toggle.textContent = open ? "閲覧履歴を閉じる" : "閲覧履歴を表示";
+    row.toggle.textContent = t(open ? "urlHistoryHide" : "urlHistoryShow");
     row.body.hidden = !open;
     if (open && !row.loaded) void load(row, false);
   }
@@ -89,10 +89,10 @@ export function createUrlHistory({ client, dialog, context, onVisitDeleted, onUr
       time.textContent = safeDate(item.visitedAt);
       const title = document.createElement("span");
       title.className = "visit-event-title";
-      title.textContent = item.title || UNTITLED;
+      title.textContent = item.title || t("urlHistoryUntitled");
       text.append(time, title);
-      const trash = createTrashButton({ label: `${safeDate(item.visitedAt)}の閲覧履歴を削除`, onClick: () => deleteVisit(row, item, trash) });
-      trash.title = `${DELETE_TEXT.trashEvent}（${safeDate(item.visitedAt)}）`;
+      const trash = createTrashButton({ label: t("urlHistoryDeleteVisitLabel", safeDate(item.visitedAt)), onClick: () => deleteVisit(row, item, trash) });
+      trash.title = t("urlHistoryDeleteVisitTitle", DELETE_TEXT.trashEvent, safeDate(item.visitedAt));
       event.append(text, trash);
       row.list.append(event);
     }
@@ -113,7 +113,8 @@ export function createUrlHistory({ client, dialog, context, onVisitDeleted, onUr
       row.loaded = true;
       row.more.hidden = page.next === null;
       const c = page.counts;
-      row.note.textContent = `閲覧履歴 ${n(c.matched)}件${c.matched !== c.total ? `（このURL全${n(c.total)}件のうち、検索・日付の条件に一致するもの）` : ""}。スナップショット ${n(c.snapshots)}件は個別削除の対象外で、「URL全件削除」で削除されます。`;
+      const scope = c.matched !== c.total ? t("urlHistoryNoteScope", n(c.total)) : "";
+      row.note.textContent = t("urlHistoryNote", t("deleteCount", n(c.matched)), scope, t("deleteCount", n(c.snapshots)), DELETE_TEXT.urlAll);
     } catch (error) {
       if (version === epoch && rows.has(row)) {
         if (error.code === "vault_switched") onVaultMismatch?.();

@@ -1,17 +1,17 @@
-// "Memocampusへ保存" for images: from the context-menu click to the host's COMMIT.
+// "Save to Memocampus" for images: from the context-menu click to the host's COMMIT.
 
 import { acquireImage, inspectImage, makeThumbnail } from "./image-capture.js";
 import { ImageSaveError, sha256Hex } from "./image-format.js";
 import { uploadImage } from "./image-upload.js";
+import { formatNumber, t } from "./i18n.js";
+import { registerMenuItem } from "./menu-item.js";
 import { describeErrorCode } from "./search-client.js";
 
 export const SAVE_IMAGE_MENU_ID = "memocampus-save-image";
 
+/** Creates the menu item, or only updates its title to the UI language if it already exists. */
 export function registerImageMenu(contextMenus, runtime) {
-  contextMenus.create({ id: SAVE_IMAGE_MENU_ID, title: "Memocampusへ保存", contexts: ["image"] }, () => {
-    // Re-registration after an update reports a duplicate id; the existing item is fine.
-    void runtime?.lastError;
-  });
+  return registerMenuItem(contextMenus, runtime, { id: SAVE_IMAGE_MENU_ID, title: t("menuSaveImage"), contexts: ["image"] });
 }
 
 const webUrl = (value) => {
@@ -69,20 +69,18 @@ export async function saveImageFromClick(info, tab, deps) {
   }
 }
 
-const formatBytes = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const formatBytes = (n) => (n >= 1024 * 1024
+  ? `${formatNumber(n / 1024 / 1024, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB`
+  : `${formatNumber(Math.max(1, Math.round(n / 1024)))} KB`);
 
 /** Title and message for the system notification (and the badge tooltip). */
 export function describeImageSaveResult(result) {
   if (result.ok) {
     const { width, height, byteLength } = result.image;
-    const note = result.saved.replayed
-      ? "（この保存操作は既に保存済みでした）"
-      : result.saved.deduplicated
-        ? "（同じ画像は保存済みのため、保存履歴を追加しました）"
-        : "";
-    return { title: "Memocampusへ保存しました", message: `画像 ${width}×${height}・${formatBytes(byteLength)}${note}` };
+    const key = result.saved.replayed ? "imageSavedMessageReplayed" : result.saved.deduplicated ? "imageSavedMessageDeduplicated" : "imageSavedMessage";
+    return { title: t("imageSavedTitle"), message: t(key, width, height, formatBytes(byteLength)) };
   }
-  let reason = describeErrorCode(result.code);
-  if (result.code === "http_error" && result.details?.status) reason = `画像の取得に失敗しました（HTTP ${result.details.status}）。`;
-  return { title: "Memocampusへ保存できませんでした", message: reason };
+  const status = Number.isInteger(result.details?.status) ? result.details.status : 0;
+  const message = result.code === "http_error" && status > 0 ? t("imageSaveFailedHttp", status) : describeErrorCode(result.code);
+  return { title: t("imageSaveFailedTitle"), message };
 }

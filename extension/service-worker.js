@@ -8,6 +8,7 @@ import { capturePageMetadata } from "./page-metadata.js";
 import { createNavigationTracker } from "./navigation-tracker.js";
 import { createNavigationStarts } from "./navigation-start.js";
 import { checkHostCapabilities } from "./host-capabilities.js";
+import { t } from "./i18n.js";
 import { SAVE_IMAGE_MENU_ID, describeImageSaveResult, registerImageMenu, saveImageFromClick } from "./image-save.js";
 import { SAVE_PAGE_MENU_ID, createPageSaver, describePageSaveResult, registerPageMenu } from "./page-save.js";
 
@@ -35,21 +36,33 @@ function sendNative(event) {
 const IMAGE_FAILURE_KEY = "imageSaveFailure";
 const PAGE_FAILURE_KEY = "pageSaveFailure";
 
+/**
+ * The last failed save, as kept in storage.session: `{ code, status? }` (language-independent, turned
+ * into text when shown). A string is the display text an earlier version of this worker kept in the
+ * same browser session; it is shown as it is. Anything else shows nothing.
+ */
+function failureText(stored, describe) {
+  if (typeof stored === "string") return stored;
+  if (typeof stored?.code !== "string") return "";
+  return describe({ ok: false, code: stored.code, details: Number.isInteger(stored.status) ? { status: stored.status } : {} }).message;
+}
+const imageFailureRecord = (result) => ({ code: result.code, ...(Number.isInteger(result.details?.status) ? { status: result.details.status } : {}) });
+
 async function updateBadge() {
   try {
     const status = await queue.status();
     const problems = status.deadLetters + status.dropped;
     // The last failed image save stays visible until an image is saved successfully.
-    const imageFailure = (await chrome.storage.session.get(IMAGE_FAILURE_KEY))[IMAGE_FAILURE_KEY];
+    const imageFailure = failureText((await chrome.storage.session.get(IMAGE_FAILURE_KEY))[IMAGE_FAILURE_KEY], describeImageSaveResult);
     const titles = [];
     const policyProblem = policy.problem();
     if (policyProblem) titles.push(describeErrorCode(policyProblem));
-    if (problems > 0) titles.push(`記録できなかったイベント ${status.deadLetters}件・破棄 ${status.dropped}件`);
+    if (problems > 0) titles.push(t("badgeEventsNotRecorded", status.deadLetters, status.dropped));
     const navigationLost = status.navigationInvalid + status.navigationNotStored;
-    if (navigationLost > 0) titles.push(`遷移情報を保存できなかった訪問 ${navigationLost}件`);
-    if (imageFailure) titles.push(`画像を保存できませんでした: ${imageFailure}`);
-    const pageFailure = (await chrome.storage.session.get(PAGE_FAILURE_KEY))[PAGE_FAILURE_KEY];
-    if (pageFailure) titles.push(`ページ保存: ${pageFailure}`);
+    if (navigationLost > 0) titles.push(t("badgeNavigationLost", navigationLost));
+    if (imageFailure) titles.push(t("badgeImageFailure", imageFailure));
+    const pageFailure = failureText((await chrome.storage.session.get(PAGE_FAILURE_KEY))[PAGE_FAILURE_KEY], describePageSaveResult);
+    if (pageFailure) titles.push(t("badgePageFailure", pageFailure));
     await chrome.action.setBadgeText({ text: titles.length > 0 ? "!" : "" });
     await chrome.action.setTitle({ title: titles.length > 0 ? `Memocampus — ${titles.join(" / ")}` : "Memocampus" });
   } catch {
@@ -224,11 +237,24 @@ chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
 // its own state. It only makes the tracker forget what the tab showed (PO decision after the audit).
 chrome.webNavigation.onHistoryStateUpdated.addListener((details) => void tracker.historyStateUpdated(details).catch(() => {}));
 
-chrome.runtime.onStartup.addListener(() => void flushQueue());
+// Menu items persist in Chrome; registering them again on startup (after install or update as before)
+// creates a missing item and otherwise only re-titles it, so a changed Chrome UI language shows up.
+// A failure is written to the worker's console (chrome://extensions shows it as an error) with the menu
+// id and Chrome's own messages only; it never stops the worker or the other item.
+function registerMenus() {
+  const report = (error) => console.error(`Memocampus: ${error?.message ?? error}`);
+  return Promise.all([
+    registerImageMenu(chrome.contextMenus, chrome.runtime).catch(report),
+    registerPageMenu(chrome.contextMenus, chrome.runtime).catch(report),
+  ]);
+}
+chrome.runtime.onStartup.addListener(() => {
+  void flushQueue();
+  registerMenus();
+});
 chrome.runtime.onInstalled.addListener(() => {
   void flushQueue();
-  registerImageMenu(chrome.contextMenus, chrome.runtime);
-  registerPageMenu(chrome.contextMenus, chrome.runtime);
+  registerMenus();
 });
 
 // --- Saving images from the context menu --------------------------------------------------------
@@ -259,7 +285,7 @@ async function reportImageSave(result) {
   const { title, message } = describeImageSaveResult(result);
   try {
     if (result.ok) await chrome.storage.session.remove(IMAGE_FAILURE_KEY);
-    else await chrome.storage.session.set({ [IMAGE_FAILURE_KEY]: message });
+    else await chrome.storage.session.set({ [IMAGE_FAILURE_KEY]: imageFailureRecord(result) });
   } catch {
     // storage.session unavailable: the notification below still reports it
   }
@@ -312,7 +338,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     const { title, message } = describePageSaveResult(result);
     try {
       if (result.ok) await chrome.storage.session.remove(PAGE_FAILURE_KEY);
-      else await chrome.storage.session.set({ [PAGE_FAILURE_KEY]: message });
+      else await chrome.storage.session.set({ [PAGE_FAILURE_KEY]: { code: result.code } });
       await updateBadge();
       await chrome.notifications.create(`memocampus-page-${Date.now()}`, { type: "basic", iconUrl: FALLBACK_ICON, title, message, priority: result.ok ? 0 : 1 });
     } catch { /* A failed notification never turns an unconfirmed save into success. */ }
@@ -366,8 +392,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 function queueErrorText(error) {
-  if (error?.code === "queue_full") return "送信待ちキューが満杯のため、記録しませんでした（1件も登録していません）。";
-  if (error?.code === "storage_write_failed") return "キューへの保存に失敗したため、記録しませんでした（1件も登録していません）。";
-  if (typeof error?.code === "string") return `${describeErrorCode(error.code)}（1件も登録していません）`;
-  return error?.message || "記録に失敗しました。";
+  if (error?.code === "queue_full") return t("queueErrorFull");
+  if (error?.code === "storage_write_failed") return t("queueErrorStorage");
+  if (typeof error?.code === "string") return t("queueErrorWithReason", describeErrorCode(error.code));
+  return error?.message || t("queueErrorGeneric");
 }

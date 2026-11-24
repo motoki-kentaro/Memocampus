@@ -41,6 +41,12 @@ test("the real extension packages with the product profile and the working copy 
     assert.ok(existsSync(result.zipPath));
     assert.ok(result.files.includes("manifest.json"));
     assert.ok(result.files.includes("host-config.js"));
+    // Issue #77: manifest.json names default_locale "en", so both catalogs must ship (Chrome refuses
+    // to load an extension whose default locale is missing), and nothing else from the tests.
+    assert.deepEqual(result.files.filter((f) => f.startsWith("_locales/")).sort(), ["_locales/en/messages.json", "_locales/ja/messages.json"]);
+    assert.ok(result.files.includes("i18n.js") && result.files.includes("i18n-dom.js"));
+    assert.equal(result.files.some((f) => /i18n-(mock|setup|catalog)|tests?\//.test(f)), false);
+    assert.equal(JSON.parse(readFileSync(join(REAL, "manifest.json"), "utf8")).default_locale, "en");
     assert.equal(result.files.some((f) => /\.(pem|key|map|log|zip|crx)$|\.test\.|^\.env|(^|\/)\.git|node_modules/i.test(f)), false);
     assert.equal(sha(join(REAL, "host-config.js")), before, "the repository copy must not be rewritten");
     assert.match(readFileSync(join(REAL, "host-config.js"), "utf8"), /HOST_PROFILE = "legacyDev"/);

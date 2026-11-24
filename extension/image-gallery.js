@@ -41,17 +41,18 @@ import {
   shortMime,
 } from "./image-client.js";
 import { formatFullDate } from "./format.js";
+import { messageTable, t } from "./i18n.js";
 import { copyImage, exportImage, rebuildThumbnail } from "./image-original.js";
 
 const LOAD_MARGIN = "400px";
 const KEEP_MARGIN = "2500px";
 const BATCH_DELAY_MS = 30;
 const MENU_MARGIN = 4;
-const EMPTY_TEXT = "保存された画像はまだありません。ページ上の画像を右クリックして「Memocampusへ保存」を選ぶと、ここに表示されます。";
+const noImagesText = () => t("imageEmpty", t("menuSaveImage"));
 /** Messages for tag requests where the general one would point the wrong way. */
-const TAG_MESSAGES = {
-  blob_missing: "この画像がVaultに見つかりません。一覧を更新してください。",
-};
+const TAG_MESSAGE_KEYS = Object.freeze({
+  blob_missing: "imageErrorBlobMissing",
+});
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -149,13 +150,13 @@ export function createImageGallery({
   function setNew(value) {
     hasNew = value;
     newDot.hidden = !value;
-    const label = value ? "新しい画像があります" : "画像一覧を更新";
+    const label = t(value ? "imageRefreshNew" : "imageRefresh");
     refreshButton.setAttribute("aria-label", label);
     refreshButton.title = label;
   }
 
   function updateSummary() {
-    summary.textContent = tiles.size === 0 ? "" : `${tiles.size}${next ? "件以上" : "件"}`;
+    summary.textContent = tiles.size === 0 ? "" : t(next ? "imageSummaryMore" : "imageSummary", tiles.size);
     updateDeleteControls();
   }
 
@@ -164,7 +165,7 @@ export function createImageGallery({
     const on = deleteSupported() === true;
     for (const tile of tiles.values()) tile.trash.hidden = !on;
     setDangerLabel(deleteAll, filter ? DELETE_TEXT.imagesFiltered : DELETE_TEXT.imagesAll);
-    const label = filter ? `${DELETE_TEXT.imagesFiltered}（タグ「${filter.tag}」の付いた画像すべて）` : `${DELETE_TEXT.imagesAll}（保存した画像すべて）`;
+    const label = filter ? t("imageDeleteFilteredLabel", DELETE_TEXT.imagesFiltered, filter.tag) : t("imageDeleteAllLabel", DELETE_TEXT.imagesAll);
     deleteAll.title = label;
     deleteAll.setAttribute("aria-label", label);
     deleteAll.hidden = !on;
@@ -191,7 +192,7 @@ export function createImageGallery({
         const order = [...grid.children];
         const index = order.findIndex((li) => li.dataset.blobId === String(item.blobId));
         removeDeleted([item.blobId]);
-        showStatus("画像を削除しました。");
+        showStatus(t("imageDeleted"));
         const near = [...grid.children][Math.min(index, grid.children.length - 1)];
         const tile = near ? tiles.get(Number(near.dataset.blobId)) : null;
         if (tile) tile.button.focus();
@@ -199,7 +200,7 @@ export function createImageGallery({
       },
       onVaultMismatch: () => {
         void vaultMismatch();
-        showStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しました。", true);
+        showStatus(t("imageDeleteVaultSwitched"), true);
       },
       onStale: () => void reload(),
       onError: (code) => showStatus(deleteErrorText(code), true),
@@ -216,13 +217,13 @@ export function createImageGallery({
       vaultToken,
       opener: deleteAll,
       onDeleted: (deleted) => {
-        showStatus(`画像${deleted.images}件を削除しました。`);
+        showStatus(t("imageDeletedCount", deleted.images));
         void reload();
         deleteAll.focus();
       },
       onVaultMismatch: () => {
         void vaultMismatch();
-        showStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しました。", true);
+        showStatus(t("imageDeleteVaultSwitched"), true);
       },
       onStale: () => void reload(),
       onError: (code) => showStatus(deleteErrorText(code), true),
@@ -232,7 +233,7 @@ export function createImageGallery({
 
   function showError(error) {
     const vault = error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code);
-    errorMessage.textContent = error instanceof SearchError ? error.message : "画像を読み込めませんでした。";
+    errorMessage.textContent = error instanceof SearchError ? error.message : t("imageLoadFailed");
     settingsButton.hidden = !vault;
     errorBox.hidden = false;
     // Like the URL tab: point at the settings tab without pulling the user away.
@@ -306,7 +307,7 @@ export function createImageGallery({
 
   function tileLabel(item) {
     const saved = formatFullDate(new Date(item.lastSavedAt).toISOString());
-    return `${shortMime(item.mimeType)} ${item.width}×${item.height}、最終保存 ${saved}、保存${item.saveCount}回`;
+    return t("imageTileLabel", shortMime(item.mimeType), item.width, item.height, saved, item.saveCount);
   }
 
   function renderTile(item) {
@@ -330,7 +331,7 @@ export function createImageGallery({
       button.append(badge);
     }
     // Not inside the tile button (a button in a button is invalid): a sibling at its corner.
-    const trash = createTrashButton({ label: `${DELETE_TEXT.trashImage}（${tileLabel(item)}）`, onClick: () => deleteImage(item, trash) });
+    const trash = createTrashButton({ label: t("imageTrashLabel", DELETE_TEXT.trashImage, tileLabel(item)), onClick: () => deleteImage(item, trash) });
     trash.className += " tile-trash";
     trash.hidden = deleteSupported() !== true;
     li.append(button, trash);
@@ -563,18 +564,18 @@ export function createImageGallery({
     busy = true;
     let task;
     if (kind === "copy") {
-      showStatus("画像をコピーしています…");
-      task = copyImage(tile.item, vaultToken, { send, isCurrent: () => token === generation, ...media() }).then(() => "画像をクリップボードにコピーしました。");
+      showStatus(t("imageCopying"));
+      task = copyImage(tile.item, vaultToken, { send, isCurrent: () => token === generation, ...media() }).then(() => t("imageCopied"));
     } else {
-      showStatus("書き出し先を選んでください…");
+      showStatus(t("imageChooseExport"));
       task = exportImage(tile.item, vaultToken, { send }).then((result) =>
-        result.cancelled ? "書き出しをキャンセルしました。" : `「${result.fileName}」として書き出しました。`,
+        result.cancelled ? t("imageExportCancelled") : t("imageExported", result.fileName),
       );
     }
     void task
       .then(
         (text) => showStatus(text),
-        (error) => showStatus(error instanceof SearchError ? error.message : "操作に失敗しました。", true),
+        (error) => showStatus(error instanceof SearchError ? error.message : t("imageActionFailed"), true),
       )
       .finally(() => {
         busy = false;
@@ -622,7 +623,8 @@ export function createImageGallery({
 
   const MANAGE_ACTIONS = ["never_save", "save_but_no_mcp", "publish"];
   const MAX_SOURCE_PAGES = 50;
-  const URL_KIND = { imageUrl: "画像URL", pageUrl: "ページURL", frameUrl: "フレームURL" };
+  const URL_KIND_KEYS = Object.freeze({ imageUrl: "imageKindImageUrl", pageUrl: "imageKindPageUrl", frameUrl: "imageKindFrameUrl" });
+  const URL_KIND = messageTable(URL_KIND_KEYS);
 
   /** The URLs of `sources` a rule can be for, each with what it is and how many saves name it. */
   function candidates(sources) {
@@ -637,16 +639,14 @@ export function createImageGallery({
         found.set(url, entry);
       }
     }
-    return [...found.values()].map((entry) => ({ url: entry.url, label: `${[...entry.kinds].join("・")}（保存${entry.saves}件）` }));
+    return [...found.values()].map((entry) => ({ url: entry.url, label: t("imageCandidate", [...entry.kinds].join(t("imageKindSeparator")), entry.saves) }));
   }
 
   /** What MCP needs besides the policy: saves the person allowed, not incognito. */
   function publicationNote(sources) {
     const allowed = sources.filter((source) => source.mcpPublic && !source.incognito).length;
-    const base = "MCPサーバに画像が出るのは、保存履歴で「MCPへの公開を許可」がONで、その保存の画像URL・ページURL・フレームURLがすべて公開のときだけです。";
-    return allowed === 0
-      ? `${base}この画像には公開を許可した保存履歴がないため、URLを公開してもMCPサーバには出ません（公開の許可はここでは変更しません）。`
-      : `${base}この画像で公開を許可した保存履歴: ${allowed}/${sources.length}件。`;
+    const base = t("imagePublicationRule");
+    return base + (allowed === 0 ? t("imagePublicationNone") : t("imagePublicationSome", allowed, sources.length));
   }
 
   function setManageNote(text) {
@@ -660,7 +660,7 @@ export function createImageGallery({
     const state = selected;
     if (supported !== true) {
       manageSelect.disabled = true;
-      if (supported === false) setManageNote("Native Hostを更新すると、ここから画像の管理（削除・ルールの追加・公開）ができます。");
+      if (supported === false) setManageNote(t("imageManageUpdateHost"));
       return;
     }
     manageSelect.disabled = !state || !vaultToken || Boolean(state.managing);
@@ -670,10 +670,10 @@ export function createImageGallery({
     for (const option of manageSelect.children) {
       if (!option.value) continue;
       let reason = null;
-      if (complete && urls.length === 0) reason = "対象にできるURLがありません";
-      else if (complete && urls.every((choice) => sameState(option.value, state.decisions.get(choice.url)))) reason = `すべてのURLが${SAME_STATE[option.value]}`;
+      if (complete && urls.length === 0) reason = t("imageNoTargetUrls");
+      else if (complete && urls.every((choice) => sameState(option.value, state.decisions.get(choice.url)))) reason = t("imageAllUrlsSame", SAME_STATE[option.value]);
       option.disabled = reason !== null;
-      option.textContent = reason ? `${ACTION_LABEL[option.value]}（${reason}）` : ACTION_LABEL[option.value];
+      option.textContent = reason ? t("imageActionRemark", ACTION_LABEL[option.value], reason) : ACTION_LABEL[option.value];
     }
     if (state.managing) return;
     if (!state.sourcesLoaded) {
@@ -686,8 +686,8 @@ export function createImageGallery({
       if (decision) tally[decision] += 1;
     }
     const known = Object.values(tally).reduce((a, b) => a + b, 0);
-    const states = known === 0 && urls.length > 0 ? "状態を確認できません" : `公開 ${tally.allow}・MCPサーバに見せない ${tally.save_but_no_mcp}・保存しない ${tally.never_save}`;
-    setManageNote(urls.length === 0 ? "この画像の保存履歴には、ルールの対象にできるURLがありません。" : `この画像のURL（${state.next ? "読み込んだ保存履歴の範囲" : "保存履歴のすべて"}）: ${states}`);
+    const states = known === 0 && urls.length > 0 ? t("imageStatesUnknown") : t("imageStatesTally", tally.allow, tally.save_but_no_mcp, tally.never_save);
+    setManageNote(urls.length === 0 ? t("imageNoRuleUrls") : t("imageUrlsStates", t(state.next ? "imageRangeLoaded" : "imageRangeAll"), states));
   }
 
   /** Asks the host how it judges the URLs of the loaded save history. */
@@ -728,7 +728,7 @@ export function createImageGallery({
   async function choosePolicy(state, action) {
     const token = generation;
     state.managing = true;
-    setManageNote("保存履歴のURLを確認しています…");
+    setManageNote(t("imageCheckingUrls"));
     updateManage();
     let sources;
     let decisions;
@@ -736,7 +736,7 @@ export function createImageGallery({
       sources = await allSources(state);
       if (token !== generation || selected !== state) return;
       if (sources === null) {
-        setManageNote("保存履歴が多すぎるため、ここからはルールを追加できません。Privacy設定でURLを指定してください。");
+        setManageNote(t("imageTooManySources"));
         return;
       }
       const urls = candidates(sources).map((choice) => choice.url);
@@ -748,7 +748,7 @@ export function createImageGallery({
         vaultMismatch();
         return;
       }
-      setManageNote(error instanceof SearchError ? error.message : "保存履歴を確認できませんでした。");
+      setManageNote(error instanceof SearchError ? error.message : t("imageSourcesCheckFailed"));
       return;
     } finally {
       if (token === generation && selected === state) {
@@ -762,7 +762,7 @@ export function createImageGallery({
       return { ...choice, decision, unavailable: decision && sameState(action, decision) ? SAME_STATE[action] : null };
     });
     if (targets.length === 0 || targets.every((choice) => choice.unavailable)) {
-      setManageNote(targets.length === 0 ? "この画像の保存履歴には、ルールの対象にできるURLがありません。" : `この画像のURLはすべて${SAME_STATE[action]}です。`);
+      setManageNote(targets.length === 0 ? t("imageNoRuleUrls") : t("imageAllUrlsAlready", SAME_STATE[action]));
       resetManage();
       return;
     }
@@ -770,12 +770,12 @@ export function createImageGallery({
       owner: "image",
       action,
       targets,
-      targetText: `対象: ${selected.item ? tileLabel(selected.item) : "画像"}\nルールは画像ではなく、選んだURLに適用されます。`,
+      targetText: t("imagePolicyTarget", selected.item ? tileLabel(selected.item) : t("imagePolicyTargetFallback")),
       note: publicationNote(sources),
       opener: manageSelect,
       onClose: resetManage,
       onApplied: (result) => {
-        showStatus(`「${ACTION_LABEL[action]}」を実行しました（${result.url}）。現在の状態: ${DECISION_LABEL[result.decision]}`);
+        showStatus(t("imagePolicyApplied", ACTION_LABEL[action], result.url, DECISION_LABEL[result.decision]));
         if (selected) void evaluateSources(selected);
         onPolicyChanged();
       },
@@ -826,7 +826,7 @@ export function createImageGallery({
     box.disabled = source.incognito;
     box.dataset.savedImageId = String(source.savedImageId);
     const text = document.createElement("span");
-    text.textContent = source.incognito ? "シークレット保存のためMCP非公開" : "MCPへの公開を許可（プライバシー設定が常に優先。MCPは未実装）";
+    text.textContent = t(source.incognito ? "imageIncognitoNotPublic" : "imageAllowMcp");
     const failure = document.createElement("span");
     failure.className = "source-publication-error";
     label.append(box, text, failure);
@@ -844,7 +844,7 @@ export function createImageGallery({
     } catch (error) {
       // What is stored is unchanged or unknown; never show a choice that was not confirmed.
       box.checked = !wanted;
-      failure.textContent = error instanceof SearchError ? error.message : "公開設定を変更できませんでした。";
+      failure.textContent = error instanceof SearchError ? error.message : t("imagePublicationFailed");
     } finally {
       box.disabled = false;
     }
@@ -869,11 +869,11 @@ export function createImageGallery({
         if (source.incognito) {
           const origin = document.createElement("span");
           origin.className = "source-origin";
-          origin.textContent = "シークレット";
+          origin.textContent = t("imageIncognito");
           li.append(origin);
         }
-        li.append(sourceLine("画像", source.imageUrl), sourceLine("ページ", source.pageUrl));
-        if (source.frameUrl) li.append(sourceLine("フレーム", source.frameUrl));
+        li.append(sourceLine(t("imageSourceImage"), source.imageUrl), sourceLine(t("imageSourcePage"), source.pageUrl));
+        if (source.frameUrl) li.append(sourceLine(t("imageSourceFrame"), source.frameUrl));
         li.append(publicationToggle(source));
         fragment.append(li);
       }
@@ -886,7 +886,7 @@ export function createImageGallery({
     } catch (error) {
       if (token !== generation || selected !== state) return;
       const li = document.createElement("li");
-      li.textContent = error instanceof SearchError ? error.message : "保存履歴を読み込めませんでした。";
+      li.textContent = error instanceof SearchError ? error.message : t("imageSourcesFailed");
       sourcesList.append(li);
     } finally {
       sourcesMore.disabled = false;
@@ -901,13 +901,13 @@ export function createImageGallery({
     selected = { blobId, item, next: null, tags: null, busy: false, sources: [], sourcesLoaded: false, decisions: new Map(), managing: false };
     resetManage();
     setManageNote("");
-    detailsMeta.textContent = `${shortMime(item.mimeType)}（${item.mimeType}）・${item.width}×${item.height}・${Math.max(1, Math.round(item.byteLength / 1024))} KB・保存${item.saveCount}回・最終保存 ${formatFullDate(new Date(item.lastSavedAt).toISOString())}`;
+    detailsMeta.textContent = t("imageDetailsMeta", shortMime(item.mimeType), item.mimeType, item.width, item.height, Math.max(1, Math.round(item.byteLength / 1024)), item.saveCount, formatFullDate(new Date(item.lastSavedAt).toISOString()));
     sourcesList.replaceChildren();
     sourcesMore.hidden = true;
     tagsList.replaceChildren();
     tagsEmpty.hidden = true;
     tagInput.value = "";
-    setTagsMessage("タグを読み込んでいます…");
+    setTagsMessage(t("imageTagsLoading"));
     if (pickerState?.mode === "add") closePicker({ restoreFocus: false });
     details.hidden = false;
     updateTagControls();
@@ -939,7 +939,7 @@ export function createImageGallery({
 
   function tagErrorText(error, fallback) {
     if (!(error instanceof SearchError)) return fallback;
-    return TAG_MESSAGES[error.code] ?? error.message;
+    return typeof error.code === "string" && Object.hasOwn(TAG_MESSAGE_KEYS, error.code) ? t(TAG_MESSAGE_KEYS[error.code]) : error.message;
   }
 
   /** Tag controls work only for a loaded image of a known vault, one request at a time. */
@@ -968,8 +968,8 @@ export function createImageGallery({
       remove.className = "tag-chip-remove";
       remove.dataset.tag = name;
       remove.textContent = "×";
-      remove.setAttribute("aria-label", `タグ「${name}」を外す`);
-      remove.title = `タグ「${name}」を外す`;
+      remove.setAttribute("aria-label", t("imageTagRemove", name));
+      remove.title = t("imageTagRemove", name);
       li.append(text, remove);
       fragment.append(li);
     }
@@ -992,7 +992,7 @@ export function createImageGallery({
       renderTags(state);
     } catch (error) {
       if (token !== generation || selected !== state) return;
-      setTagsMessage(tagErrorText(error, "タグを読み込めませんでした。"), true);
+      setTagsMessage(tagErrorText(error, t("imageTagsLoadFailed")), true);
       if (error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code)) onVaultUnavailable();
     }
   }
@@ -1005,13 +1005,13 @@ export function createImageGallery({
     const state = selected;
     if (!state || state.busy || !state.tags || !vaultToken) return;
     if (typeof raw !== "string" || raw.trim() === "") {
-      setTagsMessage("タグを入力してください。", true);
+      setTagsMessage(t("imageTagRequired"), true);
       return;
     }
     const token = generation;
     state.busy = true;
     updateTagControls();
-    setTagsMessage(kind === "add" ? "タグを追加しています…" : "タグを外しています…");
+    setTagsMessage(t(kind === "add" ? "imageTagAdding" : "imageTagRemoving"));
     try {
       const result = await changeImageTag(kind, state.item, raw, vaultToken, { send });
       if (token !== generation || selected !== state) return;
@@ -1019,9 +1019,9 @@ export function createImageGallery({
       renderTags(state);
       if (kind === "add") {
         tagInput.value = "";
-        setTagsMessage(result.changed ? `タグ「${result.tag}」を付けました。` : `タグ「${result.tag}」は既に付いています。`);
+        setTagsMessage(t(result.changed ? "imageTagAdded" : "imageTagAlready", result.tag));
       } else {
-        setTagsMessage(result.changed ? `タグ「${result.tag}」を外しました。` : `タグ「${result.tag}」は付いていません。`);
+        setTagsMessage(t(result.changed ? "imageTagRemoved" : "imageTagNotThere", result.tag));
       }
       followFilter(state);
     } catch (error) {
@@ -1032,7 +1032,7 @@ export function createImageGallery({
         showStatus(error.message, true);
         return;
       }
-      setTagsMessage(tagErrorText(error, "タグを変更できませんでした。"), true);
+      setTagsMessage(tagErrorText(error, t("imageTagChangeFailed")), true);
       if (error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code)) onVaultUnavailable();
     } finally {
       if (selected === state) {
@@ -1051,7 +1051,7 @@ export function createImageGallery({
   }
 
   function emptyText() {
-    return filter ? `タグ「${filter.tag}」の付いた画像はありません。` : EMPTY_TEXT;
+    return filter ? t("imageNoTaggedImages", filter.tag) : noImagesText();
   }
 
   function removeTile(blobId) {
@@ -1092,7 +1092,7 @@ export function createImageGallery({
 
   function renderFilter() {
     filterChip.hidden = !filter;
-    filterName.textContent = filter ? `タグ: ${filter.tag}` : "";
+    filterName.textContent = filter ? t("imageFilterName", filter.tag) : "";
     updateDeleteControls();
   }
 
@@ -1113,12 +1113,12 @@ export function createImageGallery({
   function openPicker(mode, opener) {
     if (!vaultToken || (mode === "add" && (!selected?.tags || selected.busy))) return;
     pickerState = { mode, next: null, loading: false, opener };
-    pickerTitle.textContent = mode === "filter" ? "タグで絞り込み" : "既存のタグから選ぶ";
+    pickerTitle.textContent = t(mode === "filter" ? "imageFilterByTag" : "imageChooseTag");
     pickerForm.hidden = mode !== "filter";
     pickerInput.value = "";
     pickerList.replaceChildren();
     pickerMore.hidden = true;
-    pickerMessage.textContent = "タグを読み込んでいます…";
+    pickerMessage.textContent = t("imageTagsLoading");
     picker.hidden = false;
     if (mode === "filter") pickerInput.focus();
     else picker.focus();
@@ -1161,17 +1161,17 @@ export function createImageGallery({
         option.append(name, count);
         const owned = state.mode === "add" && Boolean(selected?.tags?.includes(tag.name));
         option.setAttribute("aria-disabled", String(owned));
-        option.setAttribute("aria-label", owned ? `${tag.name}（付与済み）` : `${tag.name}、${tag.imageCount}件`);
+        option.setAttribute("aria-label", owned ? t("imageTagOwned", tag.name) : t("imageTagWithCount", tag.name, tag.imageCount));
         li.append(option);
         fragment.append(li);
       }
       pickerList.append(fragment);
       state.next = page.next;
       pickerMore.hidden = !page.next;
-      pickerMessage.textContent = pickerList.children.length === 0 ? "登録済みのタグはまだありません。" : "";
+      pickerMessage.textContent = pickerList.children.length === 0 ? t("imageNoTags") : "";
     } catch (error) {
       if (token !== generation || pickerState !== state) return;
-      pickerMessage.textContent = tagErrorText(error, "タグの一覧を読み込めませんでした。");
+      pickerMessage.textContent = tagErrorText(error, t("imageTagListFailed"));
       if (error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code)) onVaultUnavailable();
     } finally {
       if (pickerState === state) {
@@ -1194,7 +1194,7 @@ export function createImageGallery({
 
   function applyTyped() {
     if (pickerInput.value.trim() === "") {
-      pickerMessage.textContent = "タグを入力してください。";
+      pickerMessage.textContent = t("imageTagRequired");
       return;
     }
     applyFilter(pickerInput.value);

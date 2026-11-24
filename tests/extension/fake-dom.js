@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { createDeletePort } from "./delete-fixtures.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { chromeI18n } from "./i18n-mock.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const extensionDir = path.resolve(here, "../../extension");
@@ -797,6 +798,7 @@ function createChrome(host) {
     },
   };
   return {
+    i18n: chromeI18n,
     runtime,
     tabs: {
       async create(options) {
