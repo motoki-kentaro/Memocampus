@@ -86,7 +86,9 @@ test("sidepanel.html wires four tabs to their panels", () => {
     assert.match(html, new RegExp(`<section id="${panel}"[^>]*role="tabpanel"[^>]*aria-labelledby="${tab}"`), panel);
   }
   assert.match(html, /role="tablist"/);
-  assert.match(html, /id="tab-settings"[^>]*aria-label="設定"/, "icon-only tab has an accessible name");
+  // Issue #77: the name comes from the catalog (i18n-dom.js); in Japanese it is the same text as before.
+  assert.match(html, /id="tab-settings"[^>]*data-i18n-aria-label="panelSettings"/, "icon-only tab has an accessible name");
+  assert.equal(chrome.i18n.getMessage("panelSettings"), "設定");
   assert.match(html, /<span id="settings-attention"[^>]*aria-hidden="true"/, "the attention dot is decorative");
   assert.doesNotMatch(html, /⚙/, "no Unicode gear substitute");
 });
@@ -122,8 +124,9 @@ test("the settings, refresh and delete icons are unmodified copies without activ
 test("the Image tab refresh control is a 44 px icon button with an accessible name", () => {
   const html = read(extensionDir, "sidepanel.html").toString("utf8");
   const control = /<button id="gallery-refresh"[\s\S]*?<\/button>/.exec(html)[0];
-  assert.match(control, /aria-label="画像一覧を更新"/);
-  assert.match(control, /title="画像一覧を更新"/);
+  assert.match(control, /data-i18n-aria-label="imageRefresh"/);
+  assert.match(control, /data-i18n-title="imageRefresh"/);
+  assert.equal(chrome.i18n.getMessage("imageRefresh"), "画像一覧を更新");
   assert.match(control, /class="button-icon icon-cached" aria-hidden="true"/);
   assert.match(control, /id="gallery-new-dot" class="new-dot" aria-hidden="true" hidden/);
   assert.doesNotMatch(control, /新しい画像を表示/, "no text button any more");

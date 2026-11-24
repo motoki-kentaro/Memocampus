@@ -9,25 +9,33 @@
 
 import { SearchError, VAULT_UNAVAILABLE_CODES } from "./search-client.js";
 import { applyPolicyItem, previewPolicyItem } from "./vault-items-client.js";
+import { messageTable, t } from "./i18n.js";
 
-export const DECISION_LABEL = { allow: "公開", save_but_no_mcp: "MCPサーバに見せない", never_save: "保存しない" };
-const DECISION_TEXT = {
-  allow: "公開（記録し、MCPサーバにも見せる）",
-  save_but_no_mcp: "MCPサーバに見せない（Vaultには記録する）",
-  never_save: "保存しない（自動記録せず、MCPサーバにも見せない）",
-};
-export const ACTION_LABEL = {
-  never_save: "保存しないグループへ追加",
-  save_but_no_mcp: "MCPサーバに見せないグループへ追加",
-  publish: "公開",
-};
-const CONFIRM_LABEL = {
-  never_save: "保存しないグループへ追加する",
-  save_but_no_mcp: "MCPサーバに見せないグループへ追加する",
-  publish: "公開する（ルールを外す）",
-};
+// Display text only, looked up by the host's decision or the action's protocol value. The values sent
+// (action, scope, URL, ETag) never come from these texts, and no text decides what is allowed.
+const DECISION_LABEL_KEYS = Object.freeze({ allow: "policyStateAllow", save_but_no_mcp: "policyStateSaveButNoMcp", never_save: "policyStateNeverSave" });
+export const DECISION_LABEL = messageTable(DECISION_LABEL_KEYS);
+const DECISION_TEXT_KEYS = Object.freeze({
+  allow: "policyStateAllowLong",
+  save_but_no_mcp: "policyStateSaveButNoMcpLong",
+  never_save: "policyStateNeverSaveLong",
+});
+const DECISION_TEXT = messageTable(DECISION_TEXT_KEYS);
+const ACTION_LABEL_KEYS = Object.freeze({
+  never_save: "policyActionNeverSave",
+  save_but_no_mcp: "policyActionSaveButNoMcp",
+  publish: "policyActionPublish",
+});
+export const ACTION_LABEL = messageTable(ACTION_LABEL_KEYS);
+const CONFIRM_LABEL_KEYS = Object.freeze({
+  never_save: "policyConfirmNeverSave",
+  save_but_no_mcp: "policyConfirmSaveButNoMcp",
+  publish: "policyConfirmPublish",
+});
+const CONFIRM_LABEL = messageTable(CONFIRM_LABEL_KEYS);
 /** How an action is said when it would leave the state as it is (`sameState`). */
-export const SAME_STATE = { never_save: "既に保存しない", save_but_no_mcp: "既にMCPサーバに見せない", publish: "既に公開" };
+const SAME_STATE_KEYS = Object.freeze({ never_save: "policySameNeverSave", save_but_no_mcp: "policySameSaveButNoMcp", publish: "policySamePublish" });
+export const SAME_STATE = messageTable(SAME_STATE_KEYS);
 
 /**
  * Whether `action` would leave a URL as the host judges it now (`decision`): a rule that cannot make it
@@ -41,16 +49,18 @@ export function sameState(action, decision) {
   return false;
 }
 
-const LAYER_NAME = { neverSave: "保存しないグループ", saveButNoMcp: "MCPサーバに見せないグループ" };
+const LAYER_NAME_KEYS = Object.freeze({ neverSave: "policyLayerNeverSave", saveButNoMcp: "policyLayerSaveButNoMcp" });
+const LAYER_NAME = messageTable(LAYER_NAME_KEYS);
 const KIND_LABEL = { pattern: "Pattern", regex: "Regex", domainWildcard: "Domain Wildcard", exact: "Exact URL" };
-const REASON_TEXT = {
-  publish_blocked: "このURLは、ほかのルールまたは基本保護によっても非公開になっています。ここで外せるのはこのURLだけのルール（Exact URL）で、ほかのURLにも効くルールは変更しません。変更するにはPrivacy設定を開いてください。",
-  layer_disabled: "このグループは現在無効です。ルールを追加しても効果がないため、追加しません。Privacy設定でグループを有効にできます。",
-  policy_limit: "ルールの数が上限に達しているため追加できません（1グループ1,000件）。Privacy設定でルールを整理してください。",
-  policy_migration_required: "プライバシー設定が旧形式（v1）のため、ここからは変更できません。",
-  unsupported_url: "このURLのホスト（IPv6アドレスなど）はルールで指定できません。",
-  invalid_url: "このURLはルールの対象にできません（http・https以外、または判定できない形式）。",
-};
+const REASON_TEXT_KEYS = Object.freeze({
+  publish_blocked: "policyReasonPublishBlocked",
+  layer_disabled: "policyReasonLayerDisabled",
+  policy_limit: "policyReasonPolicyLimit",
+  policy_migration_required: "policyReasonMigrationRequired",
+  unsupported_url: "policyReasonUnsupportedUrl",
+  invalid_url: "policyReasonInvalidUrl",
+});
+const reasonText = (reason) => (typeof reason === "string" && Object.hasOwn(REASON_TEXT_KEYS, reason) ? t(REASON_TEXT_KEYS[reason]) : null);
 /** Reasons the settings page can resolve. */
 const SETTINGS_REASONS = new Set(["publish_blocked", "layer_disabled", "policy_limit", "policy_migration_required"]);
 
@@ -177,13 +187,13 @@ export function createItemDialog({ send, openPrivacySettings, onVaultUnavailable
     if (targets.length === 1 && !targets[0].unavailable) {
       s.url = targets[0].url;
       if (!targetText) {
-        target.textContent = `対象URL: ${s.url}`;
+        target.textContent = t("policyTargetUrl", s.url);
         target.hidden = false;
       }
       void previewPolicy(s);
     } else {
       renderTargets(s, targets);
-      body.replaceChildren(paragraph("ルールを適用するURLを選んでください。画像そのものではなく、選んだURLにルールが適用されます。"));
+      body.replaceChildren(paragraph(t("policyChooseUrl")));
       if (note) body.append(paragraph(note, "item-dialog-note"));
     }
     scopeChoice.hidden = action === "publish";
@@ -204,8 +214,8 @@ export function createItemDialog({ send, openPrivacySettings, onVaultUnavailable
       input.dataset.unavailable = String(Boolean(choice.unavailable));
       input.disabled = Boolean(choice.unavailable);
       const text = doc.createElement("span");
-      const state = choice.decision ? `（現在: ${DECISION_LABEL[choice.decision]}）` : "（現在の状態: 不明）";
-      text.textContent = `${choice.label}${state}${choice.unavailable ? ` — ${choice.unavailable}` : ""}: ${choice.url}`;
+      const state = choice.decision ? t("policyCurrentState", DECISION_LABEL[choice.decision]) : t("policyCurrentStateUnknown");
+      text.textContent = t("policyUrlChoice", choice.label, state, choice.unavailable ? t("policyUrlUnavailable", choice.unavailable) : "", choice.url);
       row.append(input, text);
       return row;
     });
@@ -224,7 +234,7 @@ export function createItemDialog({ send, openPrivacySettings, onVaultUnavailable
     repreviewButton.hidden = true;
     settingsButton.hidden = true;
     setError("");
-    body.replaceChildren(paragraph("Native Hostで確認しています…"));
+    body.replaceChildren(paragraph(t("policyChecking")));
     update();
     try {
       const preview = await previewPolicyItem({ url: s.url, action: s.action, scope: s.scope }, { send });
@@ -234,7 +244,7 @@ export function createItemDialog({ send, openPrivacySettings, onVaultUnavailable
     } catch (error) {
       if (!current()) return;
       body.replaceChildren();
-      setError(errorText(error, "確認できませんでした。"));
+      setError(errorText(error, t("policyCheckFailed")));
       repreviewButton.hidden = false;
       if (error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code)) onVaultUnavailable();
     }
@@ -242,47 +252,48 @@ export function createItemDialog({ send, openPrivacySettings, onVaultUnavailable
   }
 
   function ruleLine(change) {
-    const verb = change.op === "add" ? "追加" : "削除";
-    return `${verb}: ${LAYER_NAME[change.layer]}・${KIND_LABEL[change.rule.kind]}「${change.rule.pattern}」`;
+    const verb = t(change.op === "add" ? "policyRuleAdd" : "policyRuleRemove");
+    return t("policyRuleLine", verb, LAYER_NAME[change.layer], KIND_LABEL[change.rule.kind], change.rule.pattern);
   }
 
   function blockerLine(blocker) {
-    if (blocker.builtin) return `${LAYER_NAME[blocker.layer]}: 基本保護（組み込みのカテゴリまたはURL内の認証情報）`;
-    return `${LAYER_NAME[blocker.layer]}: ${blocker.ruleIndex + 1}番目のルール（${KIND_LABEL[blocker.kind]}）`;
+    if (blocker.builtin) return t("policyBlockerBuiltin", LAYER_NAME[blocker.layer]);
+    return t("policyBlockerRule", LAYER_NAME[blocker.layer], blocker.ruleIndex + 1, KIND_LABEL[blocker.kind]);
   }
 
   function renderPolicyPreview(s, preview) {
     const parts = [];
-    parts.push(paragraph(`対象URL: ${preview.url}`));
+    parts.push(paragraph(t("policyTargetUrl", preview.url)));
     if (s.action !== "publish") {
-      parts.push(paragraph(preview.scope === "host" ? "適用範囲: 同じホスト全体（このURL以外にも適用されます）" : "適用範囲: このURLのみ（Exact URL）", preview.scope === "host" ? "item-dialog-warning" : ""));
+      // The scope shown is the host's preview's, never the radio button's.
+      parts.push(paragraph(t(preview.scope === "host" ? "policyScopeHost" : "policyScopeUrl"), preview.scope === "host" ? "item-dialog-warning" : ""));
     }
-    parts.push(paragraph(`現在の状態: ${DECISION_TEXT[preview.current]}`));
-    parts.push(paragraph(`実行後の状態: ${DECISION_TEXT[preview.expected]}`));
+    parts.push(paragraph(t("policyStateBefore", DECISION_TEXT[preview.current])));
+    parts.push(paragraph(t("policyStateAfter", DECISION_TEXT[preview.expected])));
     if (preview.changes.length > 0) {
-      parts.push(paragraph("変更されるルール:"));
+      parts.push(paragraph(t("policyChangesHeading")));
       parts.push(list(preview.changes.map(ruleLine)));
     }
     if (s.note) parts.push(paragraph(s.note, "item-dialog-note"));
-    if (s.action !== "publish") parts.push(paragraph("ルールの追加は、Vaultに保存済みのデータを削除しません。", "item-dialog-note"));
+    if (s.action !== "publish") parts.push(paragraph(t("policyRulesKeepData"), "item-dialog-note"));
     let ready = preview.executable;
     if (!preview.executable) {
-      parts.push(paragraph(REASON_TEXT[preview.reason] ?? errorText(new SearchError(preview.reason), "この操作は実行できません。"), "item-dialog-warning"));
+      parts.push(paragraph(reasonText(preview.reason) ?? errorText(new SearchError(preview.reason), t("policyCannotRun")), "item-dialog-warning"));
       if (preview.blockers.length > 0) {
-        parts.push(paragraph("非公開にしているもの:"));
+        parts.push(paragraph(t("policyBlockersHeading")));
         parts.push(list(preview.blockers.map(blockerLine)));
       }
       settingsButton.hidden = !SETTINGS_REASONS.has(preview.reason);
     } else if (preview.changes.length === 0) {
       ready = false;
-      parts.push(paragraph(s.action === "publish" ? "このURLは既に公開されています。変更はありません。" : "同じルールが既にあります。変更はありません。"));
+      parts.push(paragraph(t(s.action === "publish" ? "policyAlreadyPublic" : "policyRuleExists")));
     } else if (preview.expected === preview.current && s.action !== "publish") {
-      parts.push(paragraph("現在の状態は変わりませんが、このルールが追加されます（ほかのルールを外しても、このルールは残ります）。"));
+      parts.push(paragraph(t("policyRuleAddedStateSame")));
     }
     if (preview.affectsOtherUrls && ready) {
       s.needsAck = true;
       ack.hidden = false;
-      ackText.textContent = "このホストのすべてのURL（ほかのページも含む）に適用されることを確認しました";
+      ackText.textContent = t("policyAckHost");
     }
     s.ready = ready;
     body.replaceChildren(...parts);
@@ -306,7 +317,7 @@ export function createItemDialog({ send, openPrivacySettings, onVaultUnavailable
       s.busy = false;
       // What is stored is unknown or unchanged: never shown as done, and never sent again as it was.
       s.ready = false;
-      setError(error instanceof SearchError && error.code === "policy_conflict" ? `${error.message}「もう一度確認」で最新の設定に対して確認し直せます。` : errorText(error, "変更できませんでした。"));
+      setError(error instanceof SearchError && error.code === "policy_conflict" ? t("policyConflictRetry", error.message, t("policyRecheck")) : errorText(error, t("policyChangeFailed")));
       repreviewButton.hidden = false;
       update();
     }

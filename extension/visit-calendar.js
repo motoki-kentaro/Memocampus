@@ -11,8 +11,27 @@
 // list (`getVaultToken`): an answer of another vault is never shown as this one's.
 
 import { SearchError, VAULT_UNAVAILABLE_CODES, visitDays } from "./search-client.js";
+import { formatDateTime, pluralKey, t } from "./i18n.js";
 
-export const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+// Names of weekdays and months come from Intl in the language in use, for display only. They are
+// formatted in UTC from civil dates, so no time zone can shift them; nothing here is stored or compared.
+const civil = (year, monthIndex, day) => new Date(Date.UTC(year, monthIndex, day));
+const civilName = (date, options) => formatDateTime(date, { ...options, timeZone: "UTC" });
+
+/** The weekday names, Sunday first ("short": 日 / Sun, "long": 日曜日 / Sunday). */
+export function weekdayNames(width = "short") {
+  // 2023-01-01 was a Sunday.
+  return Array.from({ length: 7 }, (_, index) => civilName(civil(2023, 0, 1 + index), { weekday: width }));
+}
+
+/** A month's name ("short": 11月 / Nov, "long": 11月 / November). */
+export const monthName = (monthIndex, width = "short") => civilName(civil(2023, monthIndex, 1), { month: width });
+
+/** A month and year (2026年11月 / November 2026). */
+export const yearMonthName = (year, monthIndex) => civilName(civil(year, monthIndex, 1), { year: "numeric", month: "long" });
+
+/** The short weekday names when the module was loaded (the History page's calendar reads these). */
+export const WEEKDAYS = Object.freeze(weekdayNames());
 /** The earliest year offered (`new Date(y, …)` reads years below 100 as 19xx; the host takes 0000–9999). */
 export const MIN_YEAR = 1970;
 /** How far ahead of this year the calendar goes: a little future is harmless, a far one is useless. */
@@ -70,11 +89,14 @@ export function calendarWeeks(year, monthIndex) {
   return weeks;
 }
 
-/** The accessible name of a day: 「11月8日（日）閲覧12件」, and whether it is today or chosen. */
+/** The accessible name of a day (11月8日（日）閲覧12件 / Sun, November 8: 12 visits), and whether it is today or chosen. */
 export function dayLabel(year, monthIndex, day, count, { today = false, selected = false } = {}) {
-  const visits = count === null ? "読み込み中" : count > 0 ? `閲覧${count}件` : "閲覧なし";
-  const notes = [today ? "今日" : null, selected ? "選択中" : null].filter(Boolean);
-  return `${monthIndex + 1}月${day}日（${WEEKDAYS[weekdayOf(year, monthIndex, day)]}）${visits}${notes.map((note) => `、${note}`).join("")}`;
+  const visits = count === null ? t("calendarDayLoading")
+    : count > 0 ? t(pluralKey(count, { one: "calendarDayVisitsOne", other: "calendarDayVisitsOther" }), count)
+    : t("calendarDayNoVisits");
+  const notes = [today ? t("calendarDayToday") : null, selected ? t("calendarDaySelected") : null].filter(Boolean);
+  const date = t("calendarDayDate", monthName(monthIndex, "long"), day, weekdayNames()[weekdayOf(year, monthIndex, day)]);
+  return t("calendarDayLabel", date, visits) + notes.map((note) => t("calendarDayNote", note)).join("");
 }
 
 /**
@@ -132,10 +154,11 @@ export function createVisitCalendar({ launcher, popover, send, getVaultToken, ge
   const grid = make("table", "calendar-grid");
   grid.setAttribute("role", "grid");
   const weekdayRow = make("tr");
-  for (const [index, name] of WEEKDAYS.entries()) {
+  const longWeekdays = weekdayNames("long");
+  for (const [index, name] of weekdayNames().entries()) {
     const th = make("th", index === 0 ? "is-sun" : index === 6 ? "is-sat" : "", name);
     th.setAttribute("scope", "col");
-    th.setAttribute("abbr", `${name}曜日`);
+    th.setAttribute("abbr", longWeekdays[index]);
     weekdayRow.append(th);
   }
   const thead = make("thead");
@@ -146,7 +169,7 @@ export function createVisitCalendar({ launcher, popover, send, getVaultToken, ge
   const months = make("div", "calendar-months");
   months.hidden = true;
   const monthButtons = Array.from({ length: 12 }, (_, monthIndex) => {
-    const choice = button("calendar-month", `${monthIndex + 1}月`);
+    const choice = button("calendar-month", monthName(monthIndex));
     choice.dataset.month = String(monthIndex);
     months.append(choice);
     return choice;
@@ -155,7 +178,7 @@ export function createVisitCalendar({ launcher, popover, send, getVaultToken, ge
   const status = make("p", "calendar-status");
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
-  const retry = button("secondary calendar-retry", "再読み込み");
+  const retry = button("secondary calendar-retry", t("calendarReload"));
   retry.hidden = true;
   popover.replaceChildren(head, grid, months, status, retry);
 
@@ -184,18 +207,18 @@ export function createVisitCalendar({ launcher, popover, send, getVaultToken, ge
       const after = addMonths(shown.year, shown.monthIndex, 1);
       prev.disabled = !inRange(before.year);
       next.disabled = !inRange(after.year);
-      prev.setAttribute("aria-label", "前の月");
-      next.setAttribute("aria-label", "次の月");
-      title.textContent = `${shown.year} ▼ ${shown.monthIndex + 1}月`;
-      title.setAttribute("aria-label", `${shown.year}年${shown.monthIndex + 1}月、年と月を選ぶ`);
+      prev.setAttribute("aria-label", t("calendarPrevMonth"));
+      next.setAttribute("aria-label", t("calendarNextMonth"));
+      title.textContent = `${shown.year} ▼ ${monthName(shown.monthIndex)}`;
+      title.setAttribute("aria-label", t("calendarChooseMonth", yearMonthName(shown.year, shown.monthIndex)));
       title.setAttribute("aria-expanded", "false");
     } else {
       prev.disabled = !inRange(pickerYear - 1);
       next.disabled = !inRange(pickerYear + 1);
-      prev.setAttribute("aria-label", "前の年");
-      next.setAttribute("aria-label", "次の年");
+      prev.setAttribute("aria-label", t("calendarPrevYear"));
+      next.setAttribute("aria-label", t("calendarNextYear"));
       title.textContent = `${pickerYear} ▲`;
-      title.setAttribute("aria-label", `${pickerYear}年、月の一覧を閉じる`);
+      title.setAttribute("aria-label", t("calendarCloseMonths", pickerYear));
       title.setAttribute("aria-expanded", "true");
     }
     prev.title = prev.getAttribute("aria-label");
@@ -228,7 +251,7 @@ export function createVisitCalendar({ launcher, popover, send, getVaultToken, ge
     const roving = rovingDay();
     const loading = countOf(1) === null;
     grid.setAttribute("aria-busy", String(loading && open));
-    grid.setAttribute("aria-label", `${shown.year}年${shown.monthIndex + 1}月`);
+    grid.setAttribute("aria-label", yearMonthName(shown.year, shown.monthIndex));
     let focusTarget = null;
     const rows = calendarWeeks(shown.year, shown.monthIndex).map((week) => {
       const row = make("tr");
@@ -272,7 +295,7 @@ export function createVisitCalendar({ launcher, popover, send, getVaultToken, ge
   function renderMonths() {
     const shownHere = pickerYear === shown.year;
     for (const [monthIndex, choice] of monthButtons.entries()) {
-      choice.setAttribute("aria-label", `${pickerYear}年${monthIndex + 1}月`);
+      choice.setAttribute("aria-label", yearMonthName(pickerYear, monthIndex));
       if (shownHere && monthIndex === shown.monthIndex) choice.setAttribute("aria-current", "true");
       else choice.removeAttribute("aria-current");
       choice.disabled = !inRange(pickerYear);
@@ -292,10 +315,10 @@ export function createVisitCalendar({ launcher, popover, send, getVaultToken, ge
     const ticket = ++generation;
     const { year, monthIndex } = shown;
     if (!keep) counts = null;
-    setStatus("閲覧日を読み込んでいます…");
+    setStatus(t("calendarLoading"));
     renderGrid();
     if (getVaultToken() === null) {
-      setStatus("Vaultを確認できないため、閲覧日を表示できません。");
+      setStatus(t("calendarNoVault"));
       return;
     }
     try {
@@ -306,20 +329,20 @@ export function createVisitCalendar({ launcher, popover, send, getVaultToken, ge
         // Counted in another vault than the list's (switched elsewhere): never shown as this one's.
         counts = null;
         renderGrid();
-        setStatus("Vaultが切り替えられたため、閲覧日を表示できません。");
+        setStatus(t("calendarVaultSwitched"));
         if (current !== null) onVaultMismatch();
         return;
       }
       counts = { year, monthIndex, vaultToken: answer.vaultToken, values: answer.counts };
       const days = answer.counts.filter((count) => count > 0).length;
-      setStatus(days === 0 ? "この月の閲覧記録はありません。" : `閲覧記録のある日: ${days}日`);
+      setStatus(days === 0 ? t("calendarNoVisitsInMonth") : t("calendarDaysWithVisits", days));
       renderGrid();
       if (doc.activeElement === popover && view === "days") dayButtons().find((candidate) => candidate.tabIndex === 0)?.focus();
     } catch (error) {
       if (ticket !== generation || !open) return;
       counts = null;
       renderGrid();
-      setStatus(error instanceof SearchError ? error.message : "閲覧日を読み込めませんでした。", { canRetry: true });
+      setStatus(error instanceof SearchError ? error.message : t("calendarLoadFailed"), { canRetry: true });
       if (error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code)) onVaultUnavailable();
     }
   }
@@ -457,7 +480,7 @@ export function createVisitCalendar({ launcher, popover, send, getVaultToken, ge
     /** Whether the calendar can be used now (a host that offers it, and a list from a known vault). */
     setAvailable(available, reason = "") {
       launcher.disabled = !available;
-      launcher.title = available ? "閲覧日で絞り込み" : reason;
+      launcher.title = available ? t("calendarFilterByDate") : reason;
       if (!available) close({ restoreFocus: focusInside() });
     },
     /** The vault changed: nothing of the old one stays (counts, the open popover). */

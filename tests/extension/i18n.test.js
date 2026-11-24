@@ -135,7 +135,7 @@ test("notifications for image and page saves read in English", async () => {
     const image = { width: 800, height: 600, byteLength: 2 * 1024 * 1024 };
     assert.deepEqual(describeImageSaveResult({ ok: true, image, saved: { deduplicated: false, replayed: false } }), { title: "Saved to Memocampus", message: "Image 800×600, 2.0 MB" });
     assert.match(describeImageSaveResult({ ok: true, image: { ...image, byteLength: 5000 }, saved: { deduplicated: true, replayed: false } }).message, /^Image 800×600, 5 KB \(the same image was already saved/);
-    assert.match(describeImageSaveResult({ ok: true, image, saved: { deduplicated: false, replayed: true } }).message, /already been saved\)$/);
+    assert.match(describeImageSaveResult({ ok: true, image, saved: { deduplicated: false, replayed: true } }).message, /\(this save operation was already completed\)$/, "a resent save operation, not a duplicate image");
     assert.deepEqual(describeImageSaveResult({ ok: false, code: "http_error", details: { status: 403 } }), { title: "Could not save to Memocampus", message: "Fetching the image failed (HTTP 403)." });
     assert.equal(describeImageSaveResult({ ok: false, code: "http_error", details: { status: "403" } }).message, "Fetching the image failed (HTTP error).", "only a numeric status is shown");
     assert.deepEqual(describePageSaveResult({ ok: true }), { title: "Page saved to Memocampus", message: "Saved the original MHTML and its save record to the Vault. It is not published to MCP." });

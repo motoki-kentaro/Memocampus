@@ -1,33 +1,36 @@
 // The one deletion UI of the URL, Image and Page tabs (Issue #7): a red button with assets/delete.svg and
 // one confirmation dialog for URL and Image deletion. Every text here is set with textContent.
 import { formatFullDate } from "./format.js";
+import { formatNumber, messageTable, t } from "./i18n.js";
 import { CENSORED_LABEL } from "./navigation-text.js";
 
-export const DELETE_TEXT = Object.freeze({
-  trashEvent: "この閲覧履歴を削除", trashImage: "この画像を削除", trashPageEvent: "この保存履歴を削除",
-  urlAll: "URL全件削除", visitsFiltered: "条件に一致する閲覧履歴を削除", visitsAll: "全閲覧履歴を削除",
-  imagesFiltered: "検索結果をすべて削除", imagesAll: "全画像を削除",
-  title: "削除の確認", cancel: "キャンセル", close: "閉じる", confirm: "削除する", deleting: "削除中…", previewing: "削除対象を確認しています…",
+const DELETE_TEXT_KEYS = Object.freeze({
+  trashEvent: "deleteTrashVisit", trashImage: "deleteTrashImage", trashPageEvent: "deleteTrashPageSave",
+  urlAll: "deleteUrlAll", visitsFiltered: "deleteVisitsFiltered", visitsAll: "deleteVisitsAll",
+  imagesFiltered: "deleteImagesFiltered", imagesAll: "deleteImagesAll",
+  title: "deleteDialogTitle", cancel: "deleteCancel", close: "deleteClose", confirm: "deleteConfirm", deleting: "deleteInProgress", previewing: "deletePreviewing",
 });
+export const DELETE_TEXT = messageTable(DELETE_TEXT_KEYS);
 
-const ERRORS = Object.freeze({
-  item_not_found: "削除対象は既に存在しません。削除していません。",
-  item_targets_changed: "確認後に削除対象が変更されました。何も削除していません。もう一度確認してください。",
-  invalid_review: "削除確認が無効・期限切れです。何も削除していません。もう一度確認してください。",
-  vault_switched: "Vaultが変更されました。何も削除していません。一覧を読み込み直してください。",
-  vault_locked: "Vaultがロックされています。設定画面で状態を確認してください。",
-  key_unavailable: "Vaultの鍵を使用できません。", vault_not_configured: "Vaultが未選択です。",
-  vault_schema_mismatch: "このVaultのスキーマには対応していません。",
+// Error codes stay the protocol's; only the text is looked up (the code decides, never the text).
+const DELETE_ERROR_KEYS = Object.freeze({
+  item_not_found: "deleteErrorItemNotFound",
+  item_targets_changed: "deleteErrorItemTargetsChanged",
+  invalid_review: "deleteErrorInvalidReview",
+  vault_switched: "deleteErrorVaultSwitched",
+  vault_locked: "deleteErrorVaultLocked",
+  key_unavailable: "deleteErrorKeyUnavailable", vault_not_configured: "deleteErrorVaultNotConfigured",
+  vault_schema_mismatch: "deleteErrorVaultSchemaMismatch",
   // The request was sent and nothing proves its outcome: never "nothing was deleted", never resent by itself.
-  item_delete_unknown: "削除状態を確認できません。削除要求の結果を確認できませんでした。削除が完了している可能性があります。Vaultの内容を再確認してください（自動では再実行しません）。",
-  delete_not_sent: "削除要求は送信されませんでした。何も削除していません。",
-  timeout: "Hostからの応答がありません。削除状態は確認できていません。一覧を読み込み直してください。",
-  host_unavailable: "Native Hostに接続できません。何も削除していません。",
-  unknown_type: "Native Hostがこの削除に対応していません。Hostを更新してください。",
-  invalid_tag: "タグを指定できません。何も削除していません。",
-  item_response_too_large: "表示データが大きすぎるため取得できません。",
+  item_delete_unknown: "deleteErrorUnknown",
+  delete_not_sent: "deleteErrorNotSent",
+  timeout: "deleteErrorTimeout",
+  host_unavailable: "deleteErrorHostUnavailable",
+  unknown_type: "deleteErrorUnknownType",
+  invalid_tag: "deleteErrorInvalidTag",
+  item_response_too_large: "deleteErrorResponseTooLarge",
 });
-export const deleteErrorText = (code) => Object.hasOwn(ERRORS, code) ? ERRORS[code] : "削除に失敗しました。成功扱いにせず、一覧を読み込み直して状態を確認してください。";
+export const deleteErrorText = (code) => t(typeof code === "string" && Object.hasOwn(DELETE_ERROR_KEYS, code) ? DELETE_ERROR_KEYS[code] : "deleteErrorGeneric");
 /** Errors after which the list shown is no longer what the host has. */
 /**
  * A status line with a place for the one message that must never be overwritten: a delete that was sent and
@@ -39,7 +42,7 @@ export function createStatusNotice({ paint, vault = () => null }) {
   let current = { text: "", isError: false }, notice = null;
   const render = () => {
     const lines = [];
-    if (notice) lines.push(notice.vaultToken !== null && vault() !== null && notice.vaultToken !== vault() ? `${deleteErrorText(UNKNOWN_CODE)}（以前に開いていたVaultでの削除要求です）` : deleteErrorText(UNKNOWN_CODE));
+    if (notice) lines.push(notice.vaultToken !== null && vault() !== null && notice.vaultToken !== vault() ? t("deleteErrorUnknownOtherVault", deleteErrorText(UNKNOWN_CODE)) : deleteErrorText(UNKNOWN_CODE));
     if (current.text) lines.push(current.text);
     paint(lines.join("\n"), notice !== null || current.isError, notice !== null);
   };
@@ -86,15 +89,16 @@ export function setDangerLabel(button, text) {
   if (button.className.includes("icon-only")) button.className = button.className.replace(" icon-only", "");
 }
 
-const n = (value) => Number(value ?? 0).toLocaleString("ja-JP");
-const count = (value) => `${n(value)}件`;
+const n = (value) => formatNumber(Number(value ?? 0));
+const count = (value) => t("deleteCount", n(value));
 const bytes = (value) => `${n(value)} bytes`;
 const safeDate = (iso) => { try { return formatFullDate(iso); } catch { return iso; } };
 
 // The sections of every deletion confirmation (URL, Image and Page): what is deleted, what it affects, what
 // is kept, and one warning that nothing comes back. Facts are rows (a name and a value) so that a count is
 // always next to its name; a value that comes from the web (title, URL, search text) is only ever text.
-export const REVIEW_TEXT = Object.freeze({ target: "削除対象", effects: "削除による影響", notes: "注意事項", warning: "削除すると元に戻せません。", warningDetail: "ゴミ箱はありません。バックアップには残る場合があります。Vaultファイルは小さくなりません。" });
+const REVIEW_TEXT_KEYS = Object.freeze({ target: "deleteReviewTarget", effects: "deleteReviewEffects", notes: "deleteReviewNotes", warning: "deleteReviewWarning", warningDetail: "deleteReviewWarningDetail" });
+export const REVIEW_TEXT = messageTable(REVIEW_TEXT_KEYS);
 
 /**
  * The three counts of a visit deletion, kept apart: the visits (n), the navigation records that stay with their
@@ -102,47 +106,47 @@ export const REVIEW_TEXT = Object.freeze({ target: "削除対象", effects: "削
  * A zero of m or k is left out.
  */
 function navigationRows(counts) {
-  const rows = [{ label: "削除する閲覧履歴", value: count(counts.visits) }];
-  if (counts.navigationSourcesCleared) rows.push({ label: `遷移元が検閲済み（${CENSORED_LABEL}）になる遷移記録`, value: count(counts.navigationSourcesCleared) });
-  if (counts.navigations) rows.push({ label: "一緒に削除される遷移記録", value: count(counts.navigations) });
+  const rows = [{ label: t("deleteRowVisits"), value: count(counts.visits) }];
+  if (counts.navigationSourcesCleared) rows.push({ label: t("deleteRowNavigationCensored", CENSORED_LABEL), value: count(counts.navigationSourcesCleared) });
+  if (counts.navigations) rows.push({ label: t("deleteRowNavigationsDeleted"), value: count(counts.navigations) });
   return rows;
 }
-const navigationNote = (counts) => counts.navigationSourcesCleared ? ["検閲済みの遷移記録は残りますが、削除した閲覧は復元しません。"] : [];
+const navigationNote = (counts) => counts.navigationSourcesCleared ? [t("deleteNoteNavigationCensored")] : [];
 
 /** What the confirmation shows, from the host's preview: { target, effects, notes } (rows `{label, value, long}`). `condition`: the list's filter as text. */
 export function deletionModel(preview, condition = "") {
   const { counts, target, detail } = preview;
   if (target.scope === "visit") {
     return {
-      target: [{ label: "対象", value: "閲覧履歴1件" }, { label: "日時", value: safeDate(detail?.visitedAt ?? "") }, { label: "タイトル", value: detail?.title || "（なし）", long: true }, { label: "URL", value: detail?.url ?? "", long: true }],
-      effects: [...navigationRows(counts), ...(counts.pageMetadata ? [{ label: "このイベントが持つページ情報", value: count(counts.pageMetadata) }] : [])],
-      notes: ["同じURLの他の閲覧履歴とスナップショットは削除しません。", ...navigationNote(counts)],
+      target: [{ label: t("deleteRowTarget"), value: t("deleteTargetOneVisit") }, { label: t("deleteRowDateTime"), value: safeDate(detail?.visitedAt ?? "") }, { label: t("deleteRowTitle"), value: detail?.title || t("deleteNoTitle"), long: true }, { label: "URL", value: detail?.url ?? "", long: true }],
+      effects: [...navigationRows(counts), ...(counts.pageMetadata ? [{ label: t("deleteRowPageInfoOfVisit"), value: count(counts.pageMetadata) }] : [])],
+      notes: [t("deleteNoteVisitKeepsOthers"), ...navigationNote(counts)],
     };
   }
   if (target.scope === "visits") {
     return {
-      target: [{ label: "対象", value: "閲覧履歴" }, condition ? { label: "条件", value: condition, long: true } : { label: "条件", value: "なし（すべての閲覧履歴）" }, { label: "対象のURL", value: count(counts.urls) }],
-      effects: [...navigationRows(counts), ...(counts.pageMetadata ? [{ label: "一緒に削除するページ情報", value: count(counts.pageMetadata) }] : [])],
-      notes: ["件数は表示中のURL数ではなく、DB上の一致した閲覧履歴の件数です。", `スナップショットは対象外です（これらのURLのスナップショット ${count(counts.snapshotsKept)}は残ります）。`, "条件に一致しない同じURLの閲覧履歴も残ります。", ...navigationNote(counts)],
+      target: [{ label: t("deleteRowTarget"), value: t("deleteTargetVisits") }, condition ? { label: t("deleteRowCondition"), value: condition, long: true } : { label: t("deleteRowCondition"), value: t("deleteConditionNoneVisits") }, { label: t("deleteRowTargetUrls"), value: count(counts.urls) }],
+      effects: [...navigationRows(counts), ...(counts.pageMetadata ? [{ label: t("deleteRowPageInfoWith"), value: count(counts.pageMetadata) }] : [])],
+      notes: [t("deleteNoteCountIsDb"), t("deleteNoteSnapshotsKept", count(counts.snapshotsKept)), t("deleteNoteNonMatchingKept"), ...navigationNote(counts)],
     };
   }
   if (target.scope === "url") {
     return {
-      target: [{ label: "対象", value: "URL全件" }, { label: "URL", value: target.url, long: true }],
-      effects: [...navigationRows(counts), { label: "削除するスナップショット", value: count(counts.tabSnapshots) }, { label: "削除するページ情報", value: count(counts.pageMetadata) }],
-      notes: [`このURLを含む保存画像の保存履歴 ${count(counts.imageSavesKept)}は削除しません。`, "ポリシーは変更しません。ポリシーが許す限り、次の閲覧は再び記録されます。", ...navigationNote(counts)],
+      target: [{ label: t("deleteRowTarget"), value: t("deleteTargetUrlAll") }, { label: "URL", value: target.url, long: true }],
+      effects: [...navigationRows(counts), { label: t("deleteRowSnapshots"), value: count(counts.tabSnapshots) }, { label: t("deleteRowPageInfo"), value: count(counts.pageMetadata) }],
+      notes: [t("deleteNoteImageSavesKept", count(counts.imageSavesKept)), t("deleteNotePolicyUnchanged"), ...navigationNote(counts)],
     };
   }
   const images = [
-    { label: "削除する画像", value: `${count(counts.images)}（原本 ${bytes(counts.bytes)}）` }, { label: "保存履歴", value: count(counts.saves) }, { label: "サムネイル", value: count(counts.thumbnails) }, { label: "タグの付与", value: count(counts.tagLinks) },
-    ...(counts.tagsRemoved ? [{ label: "他に使われず消えるタグ", value: count(counts.tagsRemoved) }] : []),
+    { label: t("deleteRowImages"), value: t("deleteImagesValue", count(counts.images), bytes(counts.bytes)) }, { label: t("deleteRowSaves"), value: count(counts.saves) }, { label: t("deleteRowThumbnails"), value: count(counts.thumbnails) }, { label: t("deleteRowTagLinks"), value: count(counts.tagLinks) },
+    ...(counts.tagsRemoved ? [{ label: t("deleteRowTagsRemoved"), value: count(counts.tagsRemoved) }] : []),
   ];
   return {
     target: target.scope === "images"
-      ? [{ label: "対象", value: "画像" }, target.tag ? { label: "条件", value: `タグ「${target.tag}」の付いた画像`, long: true } : { label: "条件", value: "なし（すべての画像）" }]
-      : [{ label: "対象", value: "画像1件" }, { label: "内容", value: condition || "画像1件", long: true }],
+      ? [{ label: t("deleteRowTarget"), value: t("deleteTargetImages") }, target.tag ? { label: t("deleteRowCondition"), value: t("deleteConditionTag", target.tag), long: true } : { label: t("deleteRowCondition"), value: t("deleteConditionNoneImages") }]
+      : [{ label: t("deleteRowTarget"), value: t("deleteTargetOneImage") }, { label: t("deleteRowContent"), value: condition || t("deleteTargetOneImage"), long: true }],
     effects: images,
-    notes: ["閲覧履歴・URL・他の画像は削除しません。"],
+    notes: [t("deleteNoteImagesOnly")],
   };
 }
 

@@ -13,6 +13,9 @@ import { createI18n } from "./i18n-mock.js";
 // Files whose display text is fully in the catalogs. Each later slice adds the files it localizes.
 const LOCALIZED_FILES = [
   "manifest.json", "i18n.js", "i18n-dom.js", "menu-item.js", "service-worker.js", "image-save.js", "page-save.js", "queue-text.js", "format.js", "search-client.js",
+  // Slice 2: the Side Panel except the Vault section (sidepanel.html is checked in i18n-sidepanel.test.js).
+  "sidepanel.js", "tabs.js", "delete-ui.js", "url-history.js", "visit-calendar.js", "item-dialog.js", "image-gallery.js", "image-client.js",
+  "page-panel.js", "page-text.js", "page-client.js", "delete-client.js", "vault-items-client.js", "host-capabilities.js",
 ];
 
 const entry = (message, placeholders) => ({ message, description: "test", ...(placeholders ? { placeholders } : {}) });

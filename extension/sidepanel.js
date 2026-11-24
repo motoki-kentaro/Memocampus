@@ -14,6 +14,7 @@ import { createDeleteClient } from "./delete-client.js";
 import { DELETE_TEXT, UNKNOWN_CODE, createDeleteDialog, createStatusNotice, deleteErrorText, setDangerLabel } from "./delete-ui.js";
 import { createUrlHistory } from "./url-history.js";
 import { createVisitCalendar, formatDate, localDayBounds } from "./visit-calendar.js";
+import { t } from "./i18n.js";
 
 const DEBOUNCE_MS = 200;
 
@@ -67,7 +68,7 @@ const deleteClient = createDeleteClient({
     // A DELETE that was on its way has its own, lasting notice (the tab that asked says so): this line must not
     // claim anything about it.
     if (code === UNKNOWN_CODE) return;
-    showItemStatus(code === "vault_switched" ? "Vaultが変更されたため、削除の確認を取り消しました。" : deleteErrorText(code));
+    showItemStatus(code === "vault_switched" ? t("panelDeleteWithdrawnVaultChanged") : deleteErrorText(code));
   },
 });
 // The full-page History opens in a new tab; the side panel stays. A second click while the tab is being made does nothing.
@@ -78,7 +79,7 @@ openHistoryButton.addEventListener("click", () => {
   openingHistory = true;
   chrome.tabs
     .create({ url: chrome.runtime.getURL("history.html") })
-    .catch(() => showItemStatus("Historyを開けませんでした。"))
+    .catch(() => showItemStatus(t("panelHistoryOpenFailed")))
     .finally(() => setTimeout(() => { openingHistory = false; }, 600));
 });
 const deleteDialog = createDeleteDialog({ client: deleteClient });
@@ -103,7 +104,7 @@ const tabs = createTabs(
 function showVaultAttention(needed) {
   settingsAttention.hidden = !needed;
   // The dot is decorative (aria-hidden); the accessible name and tooltip carry the same message.
-  const label = needed ? "設定（Vaultの確認が必要です）" : "設定";
+  const label = t(needed ? "panelSettingsAttention" : "panelSettings");
   settingsTab.setAttribute("aria-label", label);
   settingsTab.title = label;
 }
@@ -223,7 +224,7 @@ function currentQuery() {
 
 function showError(error) {
   const vaultUnavailable = error instanceof SearchError && VAULT_UNAVAILABLE_CODES.has(error.code);
-  showErrorText(error instanceof SearchError ? error.message : "検索に失敗しました。", vaultUnavailable);
+  showErrorText(error instanceof SearchError ? error.message : t("searchFailed"), vaultUnavailable);
   // Point at the settings tab (badge + button) without pulling the user away from the search box.
   if (vaultUnavailable) void vaultPanel.refresh();
 }
@@ -236,16 +237,16 @@ function showErrorText(text, offerVaultSettings = false) {
 
 function updateSummary(loading) {
   if (loading) {
-    summary.textContent = "検索中…";
+    summary.textContent = t("searchInProgress");
     return;
   }
   if (state.visited && state.date) {
     // A day filter is always named, also with no result.
-    summary.textContent = `${state.count}${state.hasMore ? "件以上" : "件"}（${state.date.label}）`;
+    summary.textContent = t(state.hasMore ? "searchSummaryDayMore" : "searchSummaryDay", state.count, state.date.label);
     return;
   }
-  const label = state.query ? "件" : "件（最近の順）";
-  summary.textContent = state.count === 0 ? "" : `${state.count}${state.hasMore ? "件以上" : label}`;
+  const key = state.hasMore ? "searchSummaryMore" : state.query ? "searchSummary" : "searchSummaryRecent";
+  summary.textContent = state.count === 0 ? "" : t(key, state.count);
 }
 
 // --- The day filter (Issue #5) ------------------------------------------------------------------------
@@ -272,7 +273,7 @@ const calendar = createVisitCalendar({
 function renderDateChip() {
   dateChip.hidden = state.date === null;
   dateChipText.textContent = state.date?.label ?? "";
-  const label = state.date ? `日付の絞り込みを解除（${state.date.label}）` : "日付の絞り込みを解除";
+  const label = state.date ? t("dateFilterClearWith", state.date.label) : t("dateFilterClear");
   dateClear.setAttribute("aria-label", label);
   dateClear.title = label;
 }
@@ -288,16 +289,16 @@ function vaultMismatch() {
   calendar.close({ restoreFocus: false });
   if (state.date) {
     dropDate();
-    showItemStatus("Vaultが切り替えられたため、日付の絞り込みを解除しました。");
+    showItemStatus(t("dateFilterDroppedVaultSwitched"));
   }
   void runSearch();
 }
 
 /** The calendar can be opened with a host that offers it and a list read from a known vault. */
 function updateCalendarAvailability() {
-  if (calendarSupported === false) calendar.setAvailable(false, "Native Hostが閲覧日カレンダーに対応していません。Hostを更新してください。");
-  else if (calendarSupported === null) calendar.setAvailable(false, "Native Hostの対応状況を確認しています。");
-  else if (state.vaultToken === null) calendar.setAvailable(false, "Vaultを読み込めないため、閲覧日で絞り込めません。");
+  if (calendarSupported === false) calendar.setAvailable(false, t("calendarUnsupported"));
+  else if (calendarSupported === null) calendar.setAvailable(false, t("calendarCheckingHost"));
+  else if (state.vaultToken === null) calendar.setAvailable(false, t("calendarNoVaultList"));
   else calendar.setAvailable(true);
 }
 
@@ -335,12 +336,12 @@ function applyDecision(li, decision, stamp) {
   li.dataset.decisionStamp = String(stamp);
   const { badge, select } = actionsOf(li);
   badge.dataset.decision = decision ?? "";
-  badge.textContent = decision ? DECISION_LABEL[decision] : "状態不明";
+  badge.textContent = decision ? DECISION_LABEL[decision] : t("rowStateUnknown");
   for (const option of select.children) {
     if (!option.value) continue;
     const same = decision ? sameState(option.value, decision) : false;
     option.disabled = same;
-    option.textContent = same ? `${ACTION_LABEL[option.value]}（${SAME_STATE[option.value]}）` : ACTION_LABEL[option.value];
+    option.textContent = same ? t("rowActionRemark", ACTION_LABEL[option.value], SAME_STATE[option.value]) : ACTION_LABEL[option.value];
   }
 }
 
@@ -364,14 +365,14 @@ function renderActions(item) {
   const badge = document.createElement("span");
   badge.className = "hit-state";
   badge.id = `hit-state-${rowCounter}`;
-  badge.textContent = "確認中…";
+  badge.textContent = t("rowStateChecking");
   const select = document.createElement("select");
   select.className = "item-action";
-  select.setAttribute("aria-label", `「${item.title || displayUrl(item.url)}」の操作`);
+  select.setAttribute("aria-label", t("rowActionsLabel", item.title || displayUrl(item.url)));
   select.setAttribute("aria-describedby", badge.id);
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = "操作を選択…";
+  placeholder.textContent = t("rowChooseAction");
   select.append(placeholder);
   for (const action of ROW_ACTIONS) {
     const option = document.createElement("option");
@@ -405,14 +406,14 @@ const urlHistory = createUrlHistory({
   dialog: deleteDialog,
   context: () => ({ query: state.query, visited: state.visited, vaultToken: state.vaultToken }),
   onVisitDeleted: (url, deleted) => {
-    showItemStatus(`閲覧履歴${deleted.visits}件を削除しました。同じURLのスナップショットと他の閲覧履歴は残っています。`);
+    showItemStatus(t("panelVisitDeleted", deleted.visits));
     // The group's latest visit, title and presence in the list may have changed: list again, history reopened.
     reopenUrl = url;
     void runSearch();
   },
   onUrlDeleted: removeRow,
   onVaultMismatch: () => {
-    showItemStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しています。");
+    showItemStatus(t("panelDeleteVaultSwitched"));
     void runSearch();
   },
   onFailure: (code) => showItemStatus(deleteErrorText(code)),
@@ -425,16 +426,15 @@ function updateDeleteAll() {
   setDangerLabel(urlDeleteAll, filtered ? DELETE_TEXT.visitsFiltered : DELETE_TEXT.visitsAll);
   urlDeleteAll.hidden = deleteSupported !== true;
   urlDeleteAll.disabled = state.vaultToken === null;
-  const label = filtered ? `${DELETE_TEXT.visitsFiltered}（現在の検索・日付の条件に一致する閲覧履歴。スナップショットは対象外）` : `${DELETE_TEXT.visitsAll}（スナップショットは対象外）`;
+  const label = filtered ? t("panelDeleteVisitsFilteredLabel", DELETE_TEXT.visitsFiltered) : t("panelDeleteVisitsAllLabel", DELETE_TEXT.visitsAll);
   urlDeleteAll.title = label;
   urlDeleteAll.setAttribute("aria-label", label);
 }
 
 function filterText() {
-  const parts = [];
-  if (state.query) parts.push(`検索「${state.query}」`);
-  if (state.visited && state.date) parts.push(`閲覧日 ${state.date.label}`);
-  return parts.join(" かつ ");
+  const search = state.query ? t("filterSearch", state.query) : null;
+  const date = state.visited && state.date ? t("filterDate", state.date.label) : null;
+  return search && date ? t("filterBoth", search, date) : search ?? date ?? "";
 }
 
 urlDeleteAll.addEventListener("click", () => {
@@ -446,11 +446,11 @@ urlDeleteAll.addEventListener("click", () => {
     condition: filterText(),
     opener: urlDeleteAll,
     onDeleted: (deleted) => {
-      showItemStatus(`閲覧履歴${deleted.visits}件を削除しました（スナップショットは削除していません）。`);
+      showItemStatus(t("panelVisitsDeleted", deleted.visits));
       void runSearch();
     },
     onVaultMismatch: () => {
-      showItemStatus("Vaultが切り替えられたため、削除しませんでした。一覧を読み込み直しています。");
+      showItemStatus(t("panelDeleteVaultSwitched"));
       void runSearch();
     },
     onStale: () => void runSearch(),
@@ -469,7 +469,7 @@ function removeRow(li, deleted) {
   state.offset = Math.max(0, state.offset - 1);
   renderEmpty();
   updateSummary(false);
-  showItemStatus(`URL全件を削除しました（閲覧履歴${deleted.visits}件・スナップショット${deleted.tabSnapshots}件）。`);
+  showItemStatus(t("panelUrlDeleted", deleted.visits, deleted.tabSnapshots));
   updateDeleteAll();
   const next = rows()[index] ?? rows()[index - 1];
   (next?.querySelector("a.hit") ?? input).focus();
@@ -491,12 +491,12 @@ function chooseAction(select) {
   itemDialog.openPolicy({
     owner: "url",
     action,
-    targets: [{ url, label: "このページ" }],
-    targetText: `対象: ${label}\n${url}`,
+    targets: [{ url, label: t("policyThisPage") }],
+    targetText: t("policyTargetText", label, url),
     opener: select,
     onClose,
     onApplied: (result) => {
-      showItemStatus(`「${ACTION_LABEL[action]}」を実行しました。現在の状態: ${DECISION_LABEL[result.decision]}`);
+      showItemStatus(t("panelPolicyApplied", ACTION_LABEL[action], DECISION_LABEL[result.decision]));
       void evaluateRows(rows());
       gallery.policyChanged();
     },
@@ -536,8 +536,8 @@ function renderItem(item) {
 
   const meta = document.createElement("span");
   meta.className = "hit-meta";
-  if (item.lastVisitedAt) meta.append(timeLabel("閲覧", item.lastVisitedAt));
-  if (item.lastCapturedAt) meta.append(timeLabel("スナップショット", item.lastCapturedAt));
+  if (item.lastVisitedAt) meta.append(timeLabel(t("resultVisited"), item.lastVisitedAt));
+  if (item.lastCapturedAt) meta.append(timeLabel(t("resultSnapshot"), item.lastCapturedAt));
 
   link.append(title, url, meta);
   const li = document.createElement("li");
@@ -589,8 +589,8 @@ function renderEmpty() {
   empty.hidden = state.count !== 0;
   updateDeleteAll();
   const day = state.visited && state.date ? state.date.label : null;
-  if (day) empty.textContent = state.query ? `「${state.query}」に一致する、${day}に閲覧したページはありません。` : `${day}に閲覧したページはありません。`;
-  else empty.textContent = state.query ? `「${state.query}」に一致するページはありません。` : "まだ記録されたページがありません。";
+  if (day) empty.textContent = state.query ? t("searchEmptyQueryDay", state.query, day) : t("searchEmptyDay", day);
+  else empty.textContent = state.query ? t("searchEmptyQuery", state.query) : t("searchEmptyNone");
 }
 
 async function runSearch() {
@@ -660,7 +660,7 @@ async function loadMore() {
   const token = state.token;
   state.loadingMore = true;
   loadMoreButton.disabled = true;
-  loadMoreButton.textContent = "読み込み中…";
+  loadMoreButton.textContent = t("searchLoadingMore");
   try {
     const page = await searchPages({ query: state.query, offset: state.offset, limit: PAGE_SIZE, ...state.visited }, { send });
     if (!gate.isCurrent(token)) return;
@@ -682,7 +682,7 @@ async function loadMore() {
     if (gate.isCurrent(token)) {
       state.loadingMore = false;
       loadMoreButton.disabled = false;
-      loadMoreButton.textContent = "さらに読み込む";
+      loadMoreButton.textContent = t("searchLoadMore");
       loadMoreButton.hidden = !state.hasMore;
       updateSummary(false);
     }
@@ -703,7 +703,7 @@ function openResult(event) {
   event.preventDefault();
   if (!isWebUrl(link.href)) return;
   const background = event.button === 1 || event.ctrlKey || event.metaKey;
-  chrome.tabs.create({ url: link.href, active: !background }).catch(() => showErrorText("タブを開けませんでした。"));
+  chrome.tabs.create({ url: link.href, active: !background }).catch(() => showErrorText(t("panelTabOpenFailed")));
 }
 
 input.addEventListener("input", (event) => {
@@ -749,7 +749,7 @@ document.addEventListener("visibilitychange", () => {
 recordButton.addEventListener("click", async () => {
   recordButton.disabled = true;
   recordStatus.hidden = false;
-  recordStatus.textContent = "記録中…";
+  recordStatus.textContent = t("panelRecording");
   try {
     const result = await chrome.runtime.sendMessage({ type: "record-all-tabs" });
     recordStatus.textContent = describeRecordResult(result);

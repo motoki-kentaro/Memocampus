@@ -33,6 +33,17 @@ export function t(key, ...substitutions) {
   return text;
 }
 
+/**
+ * A frozen object whose properties read their messages when used: `{ name: key }` in, `{ name: text }`
+ * out. A table made when a module loads still follows the catalog in use, and a missing message throws
+ * where the text is used, as `t` does. Only literal keys go in: keys are never built from data.
+ */
+export function messageTable(keys) {
+  const table = Object.create(null);
+  for (const [name, key] of Object.entries(keys)) Object.defineProperty(table, name, { enumerable: true, get: () => t(key) });
+  return Object.freeze(table);
+}
+
 /** The language of the catalog Chrome actually used ("ja" or "en"), read from the catalog itself. */
 export function uiLanguage() {
   const tag = t("langTag");

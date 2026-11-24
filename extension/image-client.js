@@ -3,6 +3,7 @@
 
 import { base64ToBytes, sniffImage } from "./image-format.js";
 import { SearchError, callHost } from "./search-client.js";
+import { t } from "./i18n.js";
 
 export const LIST_PAGE_SIZE = 60;
 export const THUMBNAIL_BATCH = 16;
@@ -157,8 +158,8 @@ export async function searchImagesByTag(tag, cursor, { send }) {
 
 /** How a recorded URL is shown: only http(s) URLs become openable links; the rest stay text. */
 export function describeSourceUrl(url) {
-  if (typeof url !== "string" || url === "") return { text: "（記録なし）", href: null };
-  if (url.startsWith("data:")) return { text: `${url}（ページ内に埋め込まれた画像）`, href: null };
+  if (typeof url !== "string" || url === "") return { text: t("imageSourceNone"), href: null };
+  if (url.startsWith("data:")) return { text: t("imageSourceEmbedded", url), href: null };
   try {
     const parsed = new URL(url);
     if (parsed.protocol === "http:" || parsed.protocol === "https:") return { text: url, href: parsed.href };
@@ -168,4 +169,4 @@ export function describeSourceUrl(url) {
   return { text: url, href: null };
 }
 
-export const shortMime = (mimeType) => ({ "image/jpeg": "JPEG", "image/png": "PNG", "image/gif": "GIF", "image/webp": "WebP", "image/avif": "AVIF", "image/bmp": "BMP" })[mimeType] ?? "画像";
+export const shortMime = (mimeType) => ({ "image/jpeg": "JPEG", "image/png": "PNG", "image/gif": "GIF", "image/webp": "WebP", "image/avif": "AVIF", "image/bmp": "BMP" })[mimeType] ?? t("imageTypeGeneric");
