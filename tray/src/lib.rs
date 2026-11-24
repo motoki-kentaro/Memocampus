@@ -4,7 +4,8 @@
 //! Issue #67, Slice 1 is the base: silent start, a management channel for a graceful stop, a job
 //! object against orphans, the supervisor with its states, the settings file and the single-instance
 //! guard. Slice 2 adds the tray icon and its menu (`ui`, `view`), the logon auto-start through the
-//! per-user Run key (`autostart`) and the operations behind the menu (`controller`).
+//! per-user Run key (`autostart`) and the operations behind the menu (`controller`). Issue #78 puts
+//! every text a person reads into a Japanese / English catalog (`i18n`).
 //!
 //! What this crate never does: read a vault, write `config.json` or `policy.json`, choose which
 //! vault is active, publish anything, change the transport or the listen address beyond a loopback
@@ -13,6 +14,7 @@
 pub mod autostart;
 pub mod classify;
 pub mod controller;
+pub mod i18n;
 pub mod instance;
 pub mod mode;
 pub mod quit;
