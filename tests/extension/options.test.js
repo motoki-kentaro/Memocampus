@@ -8,6 +8,7 @@ import { createDocument, extensionDir, settle } from "./fake-dom.js";
 import { SearchError } from "../../extension/search-client.js";
 import { startOptionsPage } from "../../extension/options-page.js";
 import { CATEGORY_KEYS, createDraft, loadActivePolicy, readActive, sameValue } from "../../extension/options-state.js";
+import { chromeI18n } from "./i18n-mock.js";
 
 const read = (name) => readFileSync(path.join(extensionDir, name), "utf8");
 const manifest = JSON.parse(read("manifest.json"));
@@ -429,7 +430,7 @@ test("the draft is kept nowhere but in the page", async () => {
   const trap = { get() { throw new Error("storage used"); } };
   const saved = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   Object.defineProperty(globalThis, "localStorage", { configurable: true, ...trap });
-  globalThis.chrome = { storage: new Proxy({}, { get() { throw new Error("chrome.storage used"); } }) };
+  globalThis.chrome = { i18n: chromeI18n, storage: new Proxy({}, { get() { throw new Error("chrome.storage used"); } }) };
   try {
     const { $ } = await openPage();
     toggle($, "webmail", false);
@@ -437,7 +438,7 @@ test("the draft is kept nowhere but in the page", async () => {
   } finally {
     if (saved) Object.defineProperty(globalThis, "localStorage", saved);
     else delete globalThis.localStorage;
-    delete globalThis.chrome;
+    globalThis.chrome = { i18n: chromeI18n };
   }
 });
 

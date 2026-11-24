@@ -1,32 +1,33 @@
 // Display text for queue results. "Queued" and "stored in SQLite" are always reported separately.
+import { pluralKey, t } from "./i18n.js";
 
 export function describeRecordResult(result) {
-  if (!result?.ok) return `記録に失敗しました。\n${result?.error || "保存に失敗しました。"}`;
-  if (result.queued === 0) return "記録できる通常ウィンドウのタブ（http/https）がありません。";
-  if (result.stored === result.queued) return `${result.stored}件のタブをSQLiteに保存しました。タブは閉じていません。`;
-  const lines = [`${result.queued}件のタブを送信キューに登録しました。タブは閉じていません。`, `SQLiteに保存済み: ${result.stored}件`];
+  if (!result?.ok) return t("recordFailed", result?.error || t("recordFailedDetail"));
+  if (result.queued === 0) return t("recordNoTabs");
+  if (result.stored === result.queued) return t(pluralKey(result.stored, { one: "recordStoredAllOne", other: "recordStoredAllOther" }), result.stored);
+  const lines = [t(pluralKey(result.queued, { one: "recordQueuedOne", other: "recordQueuedOther" }), result.queued), t("recordStoredCount", result.stored)];
   if (result.pending > 0) {
-    lines.push(`未保存（送信待ち・自動で再送）: ${result.pending}件`);
-    if (result.reason) lines.push(`理由: ${result.reason}`);
+    lines.push(t("recordPendingCount", result.pending));
+    if (result.reason) lines.push(t("recordPendingReason", result.reason));
   }
-  if (result.deadLettered > 0) lines.push(`記録できず隔離: ${result.deadLettered}件`);
+  if (result.deadLettered > 0) lines.push(t("recordDeadLetteredCount", result.deadLettered));
   return lines.join("\n");
 }
 
 /** The policy state for the side panel, or "" when automatic recording is running. */
 export function describePolicyStatus(status) {
-  if (status?.ok !== true) return "プライバシー設定の状態を確認できないため、自動記録が止まっている可能性があります。";
-  return status.state === "ready" ? "" : status.message || "自動記録を停止しています。";
+  if (status?.ok !== true) return t("policyStatusUnknown");
+  return status.state === "ready" ? "" : status.message || t("policyStatusStopped");
 }
 
 /** One line for the side panel, or "" when nothing needs attention. */
 export function describeQueueStatus(status) {
   if (!status?.ok) return "";
   const parts = [];
-  if (status.pending > 0) parts.push(`送信待ち ${status.pending}件${status.blockedReason ? `（${status.blockedReason}）` : ""}`);
-  if (status.deadLetters > 0) parts.push(`記録できず隔離したイベント ${status.deadLetters}件`);
-  if (status.dropped > 0) parts.push(`キューに入れられず破棄したイベント ${status.dropped}件`);
-  if (status.navigationInvalid > 0) parts.push(`遷移情報がHostに拒否された訪問 ${status.navigationInvalid}件（訪問は保存済み）`);
-  if (status.navigationNotStored > 0) parts.push(`Hostが遷移情報に未対応のため遷移情報を保存できなかった訪問 ${status.navigationNotStored}件（訪問は保存済み）`);
+  if (status.pending > 0) parts.push(status.blockedReason ? t("queuePendingReason", status.pending, status.blockedReason) : t("queuePending", status.pending));
+  if (status.deadLetters > 0) parts.push(t("queueDeadLetters", status.deadLetters));
+  if (status.dropped > 0) parts.push(t("queueDropped", status.dropped));
+  if (status.navigationInvalid > 0) parts.push(t("queueNavigationInvalid", status.navigationInvalid));
+  if (status.navigationNotStored > 0) parts.push(t("queueNavigationNotStored", status.navigationNotStored));
   return parts.join("\n");
 }

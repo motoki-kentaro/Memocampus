@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { DEAD_LETTER_KEY, QUEUE_KEY, classifyResponse, createEventQueue } from "../../extension/event-queue.js";
 import { describeRecordResult } from "../../extension/queue-text.js";
 import { extensionDir } from "./fake-dom.js";
+import { chromeI18n } from "./i18n-mock.js";
 import defaults from "../../extension/policy-defaults.json" with { type: "json" };
 
 const SECRET_URL = "https://secret.test/private-page";
@@ -19,6 +20,7 @@ async function startWorker({ tabs = {}, query = [], seed = {} } = {}) {
   const data = new Map(Object.entries(seed));
   const sent = [];
   globalThis.chrome = {
+    i18n: chromeI18n,
     runtime: {
       onStartup: on("startup"),
       onInstalled: on("installed"),

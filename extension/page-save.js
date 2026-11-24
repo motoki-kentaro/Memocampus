@@ -1,8 +1,11 @@
 import { captureAndUploadPage, PageSaveError } from "./page-upload.js";
+import { t } from "./i18n.js";
+import { registerMenuItem } from "./menu-item.js";
 
 export const SAVE_PAGE_MENU_ID = "memocampus-save-page";
+/** Creates the menu item, or only updates its title to the UI language if it already exists. */
 export function registerPageMenu(contextMenus, runtime) {
-  contextMenus.create({ id: SAVE_PAGE_MENU_ID, title: "Memocampusにページを保存", contexts: ["page", "frame", "link", "selection", "image", "video", "audio"] }, () => { void runtime?.lastError; });
+  return registerMenuItem(contextMenus, runtime, { id: SAVE_PAGE_MENU_ID, title: t("menuSavePage"), contexts: ["page", "frame", "link", "selection", "image", "video", "audio"] });
 }
 const web = (raw) => { try { return ["http:", "https:"].includes(new URL(raw).protocol); } catch { return false; } };
 
@@ -53,26 +56,29 @@ export function createPageSaver(deps) {
   };
 }
 
+// The message key for each page-save failure code; the codes themselves are never translated.
+const PAGE_ERROR_KEYS = Object.freeze({
+  unsupported_url: "pageSaveErrorUnsupportedUrl",
+  incognito_not_allowed: "pageSaveErrorIncognitoNotAllowed",
+  navigation_changed: "pageSaveErrorNavigationChanged",
+  vault_switched: "pageSaveErrorVaultSwitched",
+  invalid_page_size: "pageSaveErrorInvalidPageSize",
+  page_upload_busy: "pageSaveErrorPageUploadBusy",
+  vault_not_configured: "pageSaveErrorVaultNotConfigured",
+  vault_schema_mismatch: "pageSaveErrorVaultSchemaMismatch",
+  save_state_unknown: "pageSaveErrorSaveStateUnknown",
+  timeout: "pageSaveErrorTimeout",
+  transfer_interrupted: "pageSaveErrorTransferInterrupted",
+  capture_failed: "pageSaveErrorCaptureFailed",
+  vault_locked: "pageSaveErrorVaultLocked",
+  key_unavailable: "pageSaveErrorKeyUnavailable",
+  vault_reselect_required: "pageSaveErrorVaultReselectRequired",
+  save_id_conflict: "pageSaveErrorSaveIdConflict",
+  db_error: "pageSaveErrorDbError",
+});
+
 export function describePageSaveResult(result) {
-  if (result.ok) return { title: "Memocampusにページを保存しました", message: "MHTML原本と保存履歴をVaultへ保存しました。MCPには公開しません。" };
-  const reasons = {
-    unsupported_url: "HTTP(S)ページのみ保存できます。リンク先ではなくクリック元のタブを保存します。",
-    incognito_not_allowed: "シークレットモードのページ保存には対応していません。",
-    navigation_changed: "保存中にページが変わったため中止しました。読み込み完了後に再操作してください。",
-    vault_switched: "Vaultが変更されたため保存を中止しました。",
-    invalid_page_size: "MHTMLが空、または上限128MiBを超えています。",
-    page_upload_busy: "別のページを保存中です。完了後に再操作してください。",
-    vault_not_configured: "先に設定画面で新しいVaultを作成または選択してください。",
-    vault_schema_mismatch: "このVaultのスキーマは非対応です。Schema 8のVaultを明示的に新規作成してください。旧Vaultは変更しません。",
-    save_state_unknown: "保存状態未確定です。自動再保存は行いません。重複を避けるため状態を確認してください。",
-    timeout: "保存処理がタイムアウトしました。",
-    transfer_interrupted: "Native Hostとの接続が切れたため保存できませんでした。",
-    capture_failed: "ChromeによるMHTML取得に失敗しました。取得できないページやフレーム、ページ消失などの技術的制約が考えられます。",
-    vault_locked: "Vaultがロックされているため保存できません。設定画面で状態を確認してください。",
-    key_unavailable: "Vaultの鍵を使用できないため保存できません。",
-    vault_reselect_required: "Vaultを設定画面で明示的に選び直してから保存してください。",
-    save_id_conflict: "保存操作IDが既存の異なる保存記録と一致したため中止しました。",
-    db_error: "Vaultへの保存を確定できませんでした。自動再保存は行いません。",
-  };
-  return { title: "ページを保存できませんでした", message: Object.hasOwn(reasons, result.code) ? reasons[result.code] : "ページ取得またはVaultへの保存に失敗しました。Chromeの技術的制約で取得できないページもあります。" };
+  if (result.ok) return { title: t("pageSavedTitle"), message: t("pageSavedMessage") };
+  const key = typeof result.code === "string" && Object.hasOwn(PAGE_ERROR_KEYS, result.code) ? PAGE_ERROR_KEYS[result.code] : "pageSaveErrorGeneric";
+  return { title: t("pageSaveFailedTitle"), message: t(key) };
 }

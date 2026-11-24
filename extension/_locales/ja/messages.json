@@ -1,0 +1,1057 @@
+{
+  "langTag": {
+    "message": "ja",
+    "description": "Language of this catalog (BCP 47). Read by i18n.js and i18n-dom.js to know which catalog Chrome actually used; sets <html lang> and the Intl locale. Must equal the folder name."
+  },
+  "extDescription": {
+    "message": "ローカルファーストのWeb記憶キャプチャ。",
+    "description": "manifest.json description shown on chrome://extensions and in the Chrome Web Store. At most 132 characters. No dollar signs (manifest messages are not substituted)."
+  },
+  "menuSaveImage": {
+    "message": "Memocampusへ保存",
+    "description": "Context menu item shown on images. Saves the clicked image to the Vault."
+  },
+  "menuSavePage": {
+    "message": "Memocampusにページを保存",
+    "description": "Context menu item shown on pages. Saves the tab that was clicked in (not a link target) as MHTML to the Vault."
+  },
+  "imageSavedTitle": {
+    "message": "Memocampusへ保存しました",
+    "description": "Notification title after an image was saved."
+  },
+  "imageSavedMessage": {
+    "message": "画像 $width$×$height$・$size$",
+    "description": "Notification body after an image was saved: pixel size and file size.",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSavedMessageReplayed": {
+    "message": "画像 $width$×$height$・$size$（この保存操作は既に保存済みでした）",
+    "description": "Notification body when the same save action was already committed (a retry).",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSavedMessageDeduplicated": {
+    "message": "画像 $width$×$height$・$size$（同じ画像は保存済みのため、保存履歴を追加しました）",
+    "description": "Notification body when identical image bytes were already in the Vault and only a save record was added.",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSaveFailedTitle": {
+    "message": "Memocampusへ保存できませんでした",
+    "description": "Notification title when saving an image failed."
+  },
+  "imageSaveFailedHttp": {
+    "message": "画像の取得に失敗しました（HTTP $status$）。",
+    "description": "Notification body when the image server answered with an HTTP error status.",
+    "placeholders": {
+      "status": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageSavedTitle": {
+    "message": "Memocampusにページを保存しました",
+    "description": "Notification title after a page was saved."
+  },
+  "pageSavedMessage": {
+    "message": "MHTML原本と保存履歴をVaultへ保存しました。MCPには公開しません。",
+    "description": "Privacy: notification body after a page was saved. Must keep saying that saved pages are not published to MCP."
+  },
+  "pageSaveFailedTitle": {
+    "message": "ページを保存できませんでした",
+    "description": "Notification title when saving a page failed."
+  },
+  "pageSaveErrorUnsupportedUrl": {
+    "message": "HTTP(S)ページのみ保存できます。リンク先ではなくクリック元のタブを保存します。",
+    "description": "Notification body when saving a page failed with \"unsupported_url\"."
+  },
+  "pageSaveErrorIncognitoNotAllowed": {
+    "message": "シークレットモードのページ保存には対応していません。",
+    "description": "Notification body when saving a page failed with \"incognito_not_allowed\"."
+  },
+  "pageSaveErrorNavigationChanged": {
+    "message": "保存中にページが変わったため中止しました。読み込み完了後に再操作してください。",
+    "description": "Notification body when saving a page failed with \"navigation_changed\"."
+  },
+  "pageSaveErrorVaultSwitched": {
+    "message": "Vaultが変更されたため保存を中止しました。",
+    "description": "Notification body when saving a page failed with \"vault_switched\"."
+  },
+  "pageSaveErrorInvalidPageSize": {
+    "message": "MHTMLが空、または上限128MiBを超えています。",
+    "description": "Notification body when saving a page failed with \"invalid_page_size\"."
+  },
+  "pageSaveErrorPageUploadBusy": {
+    "message": "別のページを保存中です。完了後に再操作してください。",
+    "description": "Notification body when saving a page failed with \"page_upload_busy\"."
+  },
+  "pageSaveErrorVaultNotConfigured": {
+    "message": "先に設定画面で新しいVaultを作成または選択してください。",
+    "description": "Notification body when saving a page failed with \"vault_not_configured\"."
+  },
+  "pageSaveErrorVaultSchemaMismatch": {
+    "message": "このVaultのスキーマは非対応です。Schema 8のVaultを明示的に新規作成してください。旧Vaultは変更しません。",
+    "description": "Notification body when saving a page failed with \"vault_schema_mismatch\"."
+  },
+  "pageSaveErrorSaveStateUnknown": {
+    "message": "保存状態未確定です。自動再保存は行いません。重複を避けるため状態を確認してください。",
+    "description": "Notification body when saving a page failed with \"save_state_unknown\"."
+  },
+  "pageSaveErrorTimeout": {
+    "message": "保存処理がタイムアウトしました。",
+    "description": "Notification body when saving a page failed with \"timeout\"."
+  },
+  "pageSaveErrorTransferInterrupted": {
+    "message": "Native Hostとの接続が切れたため保存できませんでした。",
+    "description": "Notification body when saving a page failed with \"transfer_interrupted\"."
+  },
+  "pageSaveErrorCaptureFailed": {
+    "message": "ChromeによるMHTML取得に失敗しました。取得できないページやフレーム、ページ消失などの技術的制約が考えられます。",
+    "description": "Notification body when saving a page failed with \"capture_failed\"."
+  },
+  "pageSaveErrorVaultLocked": {
+    "message": "Vaultがロックされているため保存できません。設定画面で状態を確認してください。",
+    "description": "Notification body when saving a page failed with \"vault_locked\"."
+  },
+  "pageSaveErrorKeyUnavailable": {
+    "message": "Vaultの鍵を使用できないため保存できません。",
+    "description": "Notification body when saving a page failed with \"key_unavailable\"."
+  },
+  "pageSaveErrorVaultReselectRequired": {
+    "message": "Vaultを設定画面で明示的に選び直してから保存してください。",
+    "description": "Notification body when saving a page failed with \"vault_reselect_required\"."
+  },
+  "pageSaveErrorSaveIdConflict": {
+    "message": "保存操作IDが既存の異なる保存記録と一致したため中止しました。",
+    "description": "Notification body when saving a page failed with \"save_id_conflict\"."
+  },
+  "pageSaveErrorDbError": {
+    "message": "Vaultへの保存を確定できませんでした。自動再保存は行いません。",
+    "description": "Notification body when saving a page failed with \"db_error\"."
+  },
+  "pageSaveErrorGeneric": {
+    "message": "ページ取得またはVaultへの保存に失敗しました。Chromeの技術的制約で取得できないページもあります。",
+    "description": "Notification body when saving a page failed for any other reason."
+  },
+  "badgeEventsNotRecorded": {
+    "message": "記録できなかったイベント $deadLetters$件・破棄 $dropped$件",
+    "description": "Toolbar tooltip part: quarantined and discarded events.",
+    "placeholders": {
+      "deadLetters": {
+        "content": "$1"
+      },
+      "dropped": {
+        "content": "$2"
+      }
+    }
+  },
+  "badgeNavigationLost": {
+    "message": "遷移情報を保存できなかった訪問 $count$件",
+    "description": "Toolbar tooltip part.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "badgeImageFailure": {
+    "message": "画像を保存できませんでした: $reason$",
+    "description": "Toolbar tooltip part after a failed image save. [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "badgePageFailure": {
+    "message": "ページ保存: $reason$",
+    "description": "Toolbar tooltip part after a failed page save. [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueErrorFull": {
+    "message": "送信待ちキューが満杯のため、記録しませんでした（1件も登録していません）。",
+    "description": "Result of \"record all tabs\"."
+  },
+  "queueErrorStorage": {
+    "message": "キューへの保存に失敗したため、記録しませんでした（1件も登録していません）。",
+    "description": "Result of \"record all tabs\"."
+  },
+  "queueErrorWithReason": {
+    "message": "$reason$（1件も登録していません）",
+    "description": "Result of \"record all tabs\" refused for a reason; [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueErrorGeneric": {
+    "message": "記録に失敗しました。",
+    "description": "Result of \"record all tabs\" when nothing more specific is known."
+  },
+  "recordFailed": {
+    "message": "記録に失敗しました。\n$detail$",
+    "description": "Side panel result of \"record all tabs\"; [detail] is the reason on its own line.",
+    "placeholders": {
+      "detail": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordFailedDetail": {
+    "message": "保存に失敗しました。",
+    "description": "Reason used by recordFailed when none was given."
+  },
+  "recordNoTabs": {
+    "message": "記録できる通常ウィンドウのタブ（http/https）がありません。",
+    "description": "Result of \"record all tabs\". Incognito tabs are never recorded."
+  },
+  "recordStoredAllOne": {
+    "message": "$count$件のタブをSQLiteに保存しました。タブは閉じていません。",
+    "description": "Result of \"record all tabs\", singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordStoredAllOther": {
+    "message": "$count$件のタブをSQLiteに保存しました。タブは閉じていません。",
+    "description": "Result of \"record all tabs\", plural form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordQueuedOne": {
+    "message": "$count$件のタブを送信キューに登録しました。タブは閉じていません。",
+    "description": "Result of \"record all tabs\" when not everything is stored yet, singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordQueuedOther": {
+    "message": "$count$件のタブを送信キューに登録しました。タブは閉じていません。",
+    "description": "Result of \"record all tabs\" when not everything is stored yet, plural form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordStoredCount": {
+    "message": "SQLiteに保存済み: $count$件",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordPendingCount": {
+    "message": "未保存（送信待ち・自動で再送）: $count$件",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordPendingReason": {
+    "message": "理由: $reason$",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordDeadLetteredCount": {
+    "message": "記録できず隔離: $count$件",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyStatusUnknown": {
+    "message": "プライバシー設定の状態を確認できないため、自動記録が止まっている可能性があります。",
+    "description": "Privacy: side panel notice when the policy state is unknown. Recording fails closed."
+  },
+  "policyStatusStopped": {
+    "message": "自動記録を停止しています。",
+    "description": "Privacy: side panel notice when the policy is not ready."
+  },
+  "queuePending": {
+    "message": "送信待ち $count$件",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queuePendingReason": {
+    "message": "送信待ち $count$件（$reason$）",
+    "description": "Side panel queue status line with the reason sending is blocked.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "reason": {
+        "content": "$2"
+      }
+    }
+  },
+  "queueDeadLetters": {
+    "message": "記録できず隔離したイベント $count$件",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueDropped": {
+    "message": "キューに入れられず破棄したイベント $count$件",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueNavigationInvalid": {
+    "message": "遷移情報がHostに拒否された訪問 $count$件（訪問は保存済み）",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueNavigationNotStored": {
+    "message": "Hostが遷移情報に未対応のため遷移情報を保存できなかった訪問 $count$件（訪問は保存済み）",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateToday": {
+    "message": "今日 $time$",
+    "description": "Short date for a time today; [time] is the local time.",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateYesterday": {
+    "message": "昨日 $time$",
+    "description": "Short date for a time yesterday; [time] is the local time.",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateWithTime": {
+    "message": "$date$ $time$",
+    "description": "Short date for older times; [date] is the localized date, [time] the local time.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "time": {
+        "content": "$2"
+      }
+    }
+  },
+  "errorGeneric": {
+    "message": "操作に失敗しました。",
+    "description": "Error message for an error code that has no message of its own."
+  },
+  "errorHostUnavailable": {
+    "message": "Native Hostに接続できません。インストールと登録を確認してください。",
+    "description": "Message for the error code \"host_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTimeout": {
+    "message": "Native Hostから応答がありません。Hostが古いか、停止している可能性があります。",
+    "description": "Message for the error code \"timeout\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidResponse": {
+    "message": "Native Hostから不正な応答を受け取りました。",
+    "description": "Message for the error code \"invalid_response\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDbError": {
+    "message": "データベースの操作に失敗しました。",
+    "description": "Message for the error code \"db_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorQueryTooLong": {
+    "message": "検索語は$max$文字以内で入力してください。",
+    "description": "Message for the error code \"query_too_long\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip.",
+    "placeholders": {
+      "max": {
+        "content": "$1"
+      }
+    }
+  },
+  "errorInvalidQuery": {
+    "message": "検索条件が不正です。",
+    "description": "Message for the error code \"invalid_query\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidLimit": {
+    "message": "検索条件が不正です。",
+    "description": "Message for the error code \"invalid_limit\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidOffset": {
+    "message": "これ以上読み込めません。",
+    "description": "Message for the error code \"invalid_offset\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidRequestId": {
+    "message": "要求が不正です。",
+    "description": "Message for the error code \"invalid_request_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBounds": {
+    "message": "日付の指定が不正です。",
+    "description": "Message for the error code \"invalid_bounds\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnknownType": {
+    "message": "Native Hostがこの操作に対応していません。Hostを更新してください。",
+    "description": "Message for the error code \"unknown_type\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorAppDirUnavailable": {
+    "message": "%LOCALAPPDATA% を特定できないため、Vaultの設定を読み書きできません。",
+    "description": "Message for the error code \"app_dir_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultNotConfigured": {
+    "message": "Vaultが未設定です。Vault設定から新規作成するか、既存のVaultを開いてください。",
+    "description": "Message for the error code \"vault_not_configured\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultMissing": {
+    "message": "Vaultファイルが見つかりません。移動・削除されていないか確認し、Vaultを開き直してください。",
+    "description": "Message for the error code \"vault_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultInvalid": {
+    "message": "このファイルはMemocampus Vaultとして利用できません。",
+    "description": "Message for the error code \"vault_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultSchemaMismatch": {
+    "message": "このVaultは現在の形式に対応していません。自動変換は行いません（このVaultは変更していません）。",
+    "description": "Message for the error code \"vault_schema_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorConfigInvalid": {
+    "message": "設定ファイル(config.json)を読み取れません。Vaultを作成し直すか開き直すと設定が書き直されます。",
+    "description": "Message for the error code \"config_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultSwitched": {
+    "message": "Vaultが切り替えられました。もう一度お試しください。",
+    "description": "Message for the error code \"vault_switched\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultModeMismatch": {
+    "message": "Vaultファイルが設定上の形式（暗号化／平文）と一致しません。ファイルは変更していません。",
+    "description": "Message for the error code \"vault_mode_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultEncryptionUnsupported": {
+    "message": "この環境では暗号化Vaultを開けません。ファイルは変更していません。",
+    "description": "Message for the error code \"vault_encryption_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyUnavailable": {
+    "message": "このWindowsユーザーでは暗号化Vaultの鍵を取得できません。ファイルは変更していません。",
+    "description": "Message for the error code \"key_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultBackupEncryptedUnsupported": {
+    "message": "暗号化Vaultのバックアップは、まだ作成できません（今後のバージョンで対応します）。平文のコピーは作成しません。",
+    "description": "Message for the error code \"vault_backup_encrypted_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordRequired": {
+    "message": "パスワードを入力してください。",
+    "description": "Message for the error code \"backup_password_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordTooShort": {
+    "message": "パスワードは8文字以上にしてください。",
+    "description": "Message for the error code \"backup_password_too_short\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordTooLong": {
+    "message": "パスワードが長すぎます。",
+    "description": "Message for the error code \"backup_password_too_long\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordRejected": {
+    "message": "パスワードが違います。何も作成していません。",
+    "description": "Message for the error code \"backup_password_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPathRequired": {
+    "message": "復元するバックアップファイルを選んでください。",
+    "description": "Message for the error code \"backup_path_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupUnsupportedFormat": {
+    "message": "このファイルはMemocampusのバックアップではありません。",
+    "description": "Message for the error code \"backup_unsupported_format\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupUnsupportedVersion": {
+    "message": "このバックアップは未対応の版です。Memocampusを更新してください。",
+    "description": "Message for the error code \"backup_unsupported_version\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupMalformed": {
+    "message": "バックアップファイルの形式が不正です（改変または破損）。何も作成していません。",
+    "description": "Message for the error code \"backup_malformed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupIncomplete": {
+    "message": "バックアップファイルが途中で切れているか、余分なデータが付いています。何も作成していません。",
+    "description": "Message for the error code \"backup_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupTampered": {
+    "message": "バックアップの内容が改変または破損しています。復元途中のファイルは削除しました。",
+    "description": "Message for the error code \"backup_tampered\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupDamaged": {
+    "message": "バックアップの内容または復旧情報が破損しています。復元途中のファイルは削除しました。",
+    "description": "Message for the error code \"backup_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupSchemaMismatch": {
+    "message": "このバックアップのVaultの形式には対応していません。",
+    "description": "Message for the error code \"backup_schema_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupVaultInvalid": {
+    "message": "このファイルはMemocampus Vaultのバックアップとして利用できません。",
+    "description": "Message for the error code \"backup_vault_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestorePending": {
+    "message": "使用開始前の復元済みVault（または中断された復元）があります。使い始めるか破棄してから、もう一度お試しください。",
+    "description": "Message for the error code \"vault_restore_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreNotPending": {
+    "message": "使用開始を待っている復元済みVaultはありません。",
+    "description": "Message for the error code \"vault_restore_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreIncomplete": {
+    "message": "復元が中断されています。破棄してから、もう一度復元してください。",
+    "description": "Message for the error code \"vault_restore_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreDamaged": {
+    "message": "復元の記録または復元先のファイルが壊れているか、変更されています。破棄してください。",
+    "description": "Message for the error code \"vault_restore_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRestoreFailed": {
+    "message": "復元に失敗しました。復元途中のファイルは削除しました。",
+    "description": "Message for the error code \"restore_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDiskFull": {
+    "message": "保存先の空き容量が不足しています。作成途中のファイルは削除しました。",
+    "description": "Message for the error code \"disk_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupWalUnsupported": {
+    "message": "このVaultはWALモードのため、パスワード保護バックアップを作成できません。通常のバックアップを使ってください。何も作成していません。",
+    "description": "Message for the error code \"backup_wal_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidRequest": {
+    "message": "要求が不正です。",
+    "description": "Message for the error code \"invalid_request\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationPending": {
+    "message": "作成途中の暗号化Vaultがあります。破棄してから、もう一度作成してください。",
+    "description": "Message for the error code \"vault_creation_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertPending": {
+    "message": "変換途中（または使用開始前）のVaultがあります。使い始めるか、保存して終えるか、破棄してから、もう一度お試しください。",
+    "description": "Message for the error code \"vault_convert_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertNotPending": {
+    "message": "使用開始を待っている変換済みVaultはありません。",
+    "description": "Message for the error code \"vault_convert_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertIncomplete": {
+    "message": "変換が中断されています。破棄してから、もう一度変換してください。元のVaultは変更していません。",
+    "description": "Message for the error code \"vault_convert_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSpellUnconfirmed": {
+    "message": "新しいVaultのふっかつのじゅもんを確認するまで、使い始めることはできません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"vault_convert_spell_unconfirmed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertInvalidState": {
+    "message": "この操作は、今の変換の段階では行えません。表示を更新してください。",
+    "description": "Message for the error code \"vault_convert_invalid_state\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertDamaged": {
+    "message": "変換の記録または変換先のファイルが壊れているか、変更されています。破棄してください。元のVaultは変更していません。",
+    "description": "Message for the error code \"vault_convert_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSourceChanged": {
+    "message": "変換元のVaultが、変換を始めたときのファイルではなくなりました。Active Vaultは変更していません。変換したVaultは、切り替えずに保存するか破棄してください。",
+    "description": "Message for the error code \"vault_convert_source_changed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSameAsSource": {
+    "message": "変換先に、変換元のVaultそのものが選ばれました。別の新しいファイル名を選んでください。",
+    "description": "Message for the error code \"vault_convert_same_as_source\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertModeMismatch": {
+    "message": "表示中のVaultの形式（暗号化／平文）が変わりました。表示を更新してから、もう一度お試しください。",
+    "description": "Message for the error code \"vault_convert_mode_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertPlaintextUnacknowledged": {
+    "message": "暗号化を解除すると、閲覧履歴や画像が暗号化されずに保存されます。確認のチェックを入れてから実行してください。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"vault_convert_plaintext_unacknowledged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertVerifyFailed": {
+    "message": "変換したVaultが変換元と一致しませんでした。変換途中のファイルは削除しました。元のVaultは変更していません。",
+    "description": "Message for the error code \"vault_convert_verify_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertFailed": {
+    "message": "変換に失敗しました。変換途中のファイルは削除しました。元のVaultは変更していません。",
+    "description": "Message for the error code \"vault_convert_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultWorkFile": {
+    "message": "作成・復元・変換の途中のファイルは、Vaultとして開けません。",
+    "description": "Message for the error code \"vault_work_file\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationNotPending": {
+    "message": "作成途中の暗号化Vaultが見つかりません。最初から作成し直してください。",
+    "description": "Message for the error code \"vault_creation_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationDamaged": {
+    "message": "作成途中の暗号化Vaultのファイルが壊れているか、見つかりません。破棄して作成し直してください。",
+    "description": "Message for the error code \"vault_creation_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRecoverySpellInvalid": {
+    "message": "ふっかつのじゅもんの形式が正しくありません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"recovery_spell_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRecoverySpellRejected": {
+    "message": "ふっかつのじゅもんが、このVaultのものと一致しません。Vaultも鍵も変更していません。（Vaultファイルが壊れているか改変されている場合も、こう表示されます。）",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"recovery_spell_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultLegacyUnsupported": {
+    "message": "このVaultは、以前の鍵管理方式（「.mckey」ファイルを使う方式）で作られたもので、この版では開けません。ファイルは変更・削除していません。",
+    "description": "Message for the error code \"vault_legacy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupLegacyUnsupported": {
+    "message": "このバックアップは、以前の鍵管理方式で作られたもの（形式BまたはD）で、この版では復元できません。何も変更していません。",
+    "description": "Message for the error code \"backup_legacy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultNotEncrypted": {
+    "message": "このVaultは暗号化されていません。「既存のVaultを開く」で開いてください。",
+    "description": "Message for the error code \"vault_not_encrypted\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyProtectorUnavailable": {
+    "message": "この環境では鍵を保護できない（Windows DPAPIが使えない）ため、暗号化Vaultを作成できません。",
+    "description": "Message for the error code \"key_protector_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyProtectorFailed": {
+    "message": "Windowsで鍵を保護できませんでした。何も作成していません。",
+    "description": "Message for the error code \"key_protector_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRandomUnavailable": {
+    "message": "安全な乱数を取得できませんでした。何も作成していません。",
+    "description": "Message for the error code \"random_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultLocked": {
+    "message": "暗号化Vaultがロックされています。ファイルは変更していません。",
+    "description": "Message for the error code \"vault_locked\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultDecryptFailed": {
+    "message": "暗号化Vaultを復号できません。ファイルは変更していません。",
+    "description": "Message for the error code \"vault_decrypt_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidVaultToken": {
+    "message": "要求が不正です。一覧を更新してください。",
+    "description": "Message for the error code \"invalid_vault_token\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultBusy": {
+    "message": "Vaultが使用中です。しばらくしてからもう一度お試しください。",
+    "description": "Message for the error code \"vault_busy\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorManagementDisabled": {
+    "message": "開発用DB(MEMOCAMPUS_DB)が指定されているため、Vault管理は無効です。",
+    "description": "Message for the error code \"management_disabled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorFileExists": {
+    "message": "同名のファイルが既にあります。上書きはしません。別の名前を選ぶか「既存のVaultを開く」を使ってください。",
+    "description": "Message for the error code \"file_exists\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSidecarExists": {
+    "message": "保存先に同名の -journal / -wal / -shm ファイルが残っているため、安全のため作成を中止しました。",
+    "description": "Message for the error code \"sidecar_exists\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorParentMissing": {
+    "message": "保存先のフォルダが存在しません。",
+    "description": "Message for the error code \"parent_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidPath": {
+    "message": "パスが不正です。ドライブ名から始まる絶対パスを指定してください。",
+    "description": "Message for the error code \"invalid_path\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCancelled": {
+    "message": "キャンセルしました。",
+    "description": "Message for the error code \"cancelled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupFailed": {
+    "message": "バックアップに失敗しました。バックアップは作成されていません。",
+    "description": "Message for the error code \"backup_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLocationRejected": {
+    "message": "この場所はActive Vaultとして使用できません。",
+    "description": "Message for the error code \"location_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLocationNeedsApproval": {
+    "message": "この場所をActive Vaultにするには確認が必要です。",
+    "description": "Message for the error code \"location_needs_approval\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIoError": {
+    "message": "ファイルの読み書きに失敗しました。",
+    "description": "Message for the error code \"io_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidAck": {
+    "message": "Native Hostの応答が不正です。Hostを更新してください。",
+    "description": "Message for the error code \"invalid_ack\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidUrl": {
+    "message": "記録できないURLです。",
+    "description": "Message for the error code \"invalid_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidEvent": {
+    "message": "イベントの形式が不正です。",
+    "description": "Message for the error code \"invalid_event\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidMessage": {
+    "message": "メッセージの形式が不正です。",
+    "description": "Message for the error code \"invalid_message\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorQueueFull": {
+    "message": "送信待ちキューが満杯です。",
+    "description": "Message for the error code \"queue_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorStorageWriteFailed": {
+    "message": "拡張機能のストレージへの保存に失敗しました。",
+    "description": "Message for the error code \"storage_write_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDeadLetterFull": {
+    "message": "隔離領域が満杯のため、送信を一時停止しています。",
+    "description": "Message for the error code \"dead_letter_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDeadLetterWriteFailed": {
+    "message": "隔離領域への保存に失敗したため、送信を一時停止しています。",
+    "description": "Message for the error code \"dead_letter_write_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyNotInitialized": {
+    "message": "プライバシー設定が初期化されていないため、自動記録を停止しています。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_not_initialized\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyInvalid": {
+    "message": "プライバシー設定を読み取れない（欠落・破損・未対応の版）ため、自動記録を停止しています。設定は上書きしていません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyBusy": {
+    "message": "プライバシー設定が使用中のため、自動記録を一時停止しています。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_busy\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyUnavailable": {
+    "message": "プライバシー設定にアクセスできないため、自動記録を停止しています。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyUnsupported": {
+    "message": "プライバシー設定に、このバージョンでは使えないルール（先読み・後読み・後方参照を使う正規表現など）が含まれているため、自動記録を停止しています。設定は上書きしていません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidPolicyBatch": {
+    "message": "Native Hostと拡張機能のバージョンが合わないため、自動記録を停止しています。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_policy_batch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyBatchTooLarge": {
+    "message": "Native Hostと拡張機能のバージョンが合わないため、自動記録を停止しています。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_batch_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyAlreadyInitialized": {
+    "message": "プライバシー設定は初期化済みです。既存の設定は上書きしません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_already_initialized\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoUnknown": {
+    "message": "保存元のウィンドウの種類を確認できないため、保存しませんでした。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"incognito_unknown\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidIncognito": {
+    "message": "保存元のウィンドウの種類を確認できないため、保存しませんでした。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_incognito\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoFixedAtBegin": {
+    "message": "転送手順が不正です。もう一度保存してください。",
+    "description": "Message for the error code \"incognito_fixed_at_begin\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedUrl": {
+    "message": "このURLのホストはルールで指定できません。",
+    "description": "Message for the error code \"unsupported_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorNetworkError": {
+    "message": "画像を取得できませんでした（ネットワークエラー）。",
+    "description": "Message for the error code \"network_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHttpError": {
+    "message": "画像の取得に失敗しました（HTTPエラー）。",
+    "description": "Message for the error code \"http_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPageAccessDenied": {
+    "message": "このページからは画像を取得できません。",
+    "description": "Message for the error code \"page_access_denied\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTooLarge": {
+    "message": "画像が大きすぎます（上限 32 MiB）。",
+    "description": "Message for the error code \"too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorEmptyImage": {
+    "message": "画像データが空です。",
+    "description": "Message for the error code \"empty_image\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSvgNotSupported": {
+    "message": "SVG画像は保存できません。",
+    "description": "Message for the error code \"svg_not_supported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedFormat": {
+    "message": "対応していない画像形式です（PNG・JPEG・GIF・WebP・AVIF・BMPに対応）。",
+    "description": "Message for the error code \"unsupported_format\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDecodeFailed": {
+    "message": "画像を読み込めませんでした。壊れているか、対応していない形式です。",
+    "description": "Message for the error code \"decode_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTransferInterrupted": {
+    "message": "Native Hostとの接続が途中で切れました。保存されていません。",
+    "description": "Message for the error code \"transfer_interrupted\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHostOutdated": {
+    "message": "Native Hostが古いため画像を保存できません。Hostを更新してください。",
+    "description": "Message for the error code \"host_outdated\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveFailed": {
+    "message": "画像の保存に失敗しました。",
+    "description": "Message for the error code \"save_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSavedImageNotFound": {
+    "message": "この保存履歴が見つかりません。一覧を更新してください。",
+    "description": "Message for the error code \"saved_image_not_found\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoNotPublishable": {
+    "message": "シークレット保存のためMCP非公開です。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"incognito_not_publishable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidSavedImageId": {
+    "message": "保存履歴の指定が不正です。",
+    "description": "Message for the error code \"invalid_saved_image_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidMcpPublic": {
+    "message": "公開設定の指定が不正です。",
+    "description": "Message for the error code \"invalid_mcp_public\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHashMismatch": {
+    "message": "転送中に画像データが変化しました。保存されていません。",
+    "description": "Message for the error code \"hash_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLengthMismatch": {
+    "message": "画像データの長さが一致しません。保存されていません。",
+    "description": "Message for the error code \"length_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorMimeMismatch": {
+    "message": "画像の形式が申告と一致しません。",
+    "description": "Message for the error code \"mime_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDimensionMismatch": {
+    "message": "画像の寸法が一致しません。",
+    "description": "Message for the error code \"dimension_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidDimensions": {
+    "message": "画像の寸法が不正です。",
+    "description": "Message for the error code \"invalid_dimensions\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTruncatedImage": {
+    "message": "画像データが途中で切れています。",
+    "description": "Message for the error code \"truncated_image\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidThumbnail": {
+    "message": "サムネイルが不正です。",
+    "description": "Message for the error code \"invalid_thumbnail\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveIdConflict": {
+    "message": "保存IDが重複しています。もう一度保存してください。",
+    "description": "Message for the error code \"save_id_conflict\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBlobMissing": {
+    "message": "保存済みの画像が見つかりません。もう一度保存してください。",
+    "description": "Message for the error code \"blob_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidHash": {
+    "message": "画像のハッシュ値が不正です。",
+    "description": "Message for the error code \"invalid_hash\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidSaveId": {
+    "message": "保存IDが不正です。",
+    "description": "Message for the error code \"invalid_save_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedProtocol": {
+    "message": "Native Hostと拡張機能のバージョンが合いません。",
+    "description": "Message for the error code \"unsupported_protocol\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorNoUpload": {
+    "message": "転送が中断されました。もう一度保存してください。",
+    "description": "Message for the error code \"no_upload\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUploadInProgress": {
+    "message": "別の転送が進行中です。もう一度保存してください。",
+    "description": "Message for the error code \"upload_in_progress\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveIdMismatch": {
+    "message": "転送の対応関係が崩れました。もう一度保存してください。",
+    "description": "Message for the error code \"save_id_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnexpectedChunk": {
+    "message": "転送手順が不正です。もう一度保存してください。",
+    "description": "Message for the error code \"unexpected_chunk\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDuplicateChunk": {
+    "message": "転送データが重複しました。もう一度保存してください。",
+    "description": "Message for the error code \"duplicate_chunk\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorChunkOutOfOrder": {
+    "message": "転送データの順序が乱れました。もう一度保存してください。",
+    "description": "Message for the error code \"chunk_out_of_order\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidChunkSize": {
+    "message": "転送データのサイズが不正です。もう一度保存してください。",
+    "description": "Message for the error code \"invalid_chunk_size\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBase64": {
+    "message": "転送データが壊れています。もう一度保存してください。",
+    "description": "Message for the error code \"invalid_base64\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUploadTooLarge": {
+    "message": "画像データが申告より大きいため中止しました。",
+    "description": "Message for the error code \"upload_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncompleteUpload": {
+    "message": "画像データが揃わないまま確定しようとしました。保存されていません。",
+    "description": "Message for the error code \"incomplete_upload\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidTag": {
+    "message": "タグ名が不正です。1〜64文字で、制御文字や見えない文字は使えません。",
+    "description": "Message for the error code \"invalid_tag\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTooManyTags": {
+    "message": "1枚の画像に付けられるタグは64個までです。",
+    "description": "Message for the error code \"too_many_tags\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyConflict": {
+    "message": "プライバシー設定がほかの画面で変更されました。内容を確認し直してください。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_conflict\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPublishBlocked": {
+    "message": "ほかのルールまたは基本保護によって非公開になっているため、ここからは公開できません。Privacy設定で確認してください。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"publish_blocked\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyLimit": {
+    "message": "ルールの数が上限に達しているため追加できません（1グループ1,000件）。Privacy設定で整理してください。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_limit\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLayerDisabled": {
+    "message": "このグループは無効になっているため、ルールを追加しても効果がありません。Privacy設定でグループを有効にしてください。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"layer_disabled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidExactUrl": {
+    "message": "URLの形式が不正なため、Exact URLルールにできません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_exact_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyMigrationRequired": {
+    "message": "プライバシー設定が旧形式（v1）のため、この操作はできません。",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_migration_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidAction": {
+    "message": "要求が不正です。",
+    "description": "Message for the error code \"invalid_action\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidScope": {
+    "message": "要求が不正です。",
+    "description": "Message for the error code \"invalid_scope\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidEtag": {
+    "message": "要求が不正です。もう一度確認してください。",
+    "description": "Message for the error code \"invalid_etag\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBlobId": {
+    "message": "画像の指定が不正です。",
+    "description": "Message for the error code \"invalid_blob_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorReadIncomplete": {
+    "message": "画像データを最後まで読み出せませんでした。",
+    "description": "Message for the error code \"read_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorReadHashMismatch": {
+    "message": "読み出した画像データが記録と一致しません（SHA-256）。",
+    "description": "Message for the error code \"read_hash_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardUnavailable": {
+    "message": "このブラウザではクリップボードに画像をコピーできません。",
+    "description": "Message for the error code \"clipboard_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardDenied": {
+    "message": "クリップボードへのコピーが許可されませんでした。サイドパネルをクリックしてから、もう一度お試しください。",
+    "description": "Message for the error code \"clipboard_denied\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardFailed": {
+    "message": "クリップボードにコピーできませんでした。",
+    "description": "Message for the error code \"clipboard_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCopyTooLarge": {
+    "message": "画像の画素数が大きすぎるため、コピーできません。",
+    "description": "Message for the error code \"copy_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCopyConvertFailed": {
+    "message": "画像をPNGに変換できなかったため、コピーできません。",
+    "description": "Message for the error code \"copy_convert_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportFailed": {
+    "message": "ファイルを書き出せませんでした。既存のファイルは変更されていません。",
+    "description": "Message for the error code \"export_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportFileAppeared": {
+    "message": "書き出し中に同名のファイルが作られたため、上書きせずに中止しました。",
+    "description": "Message for the error code \"export_file_appeared\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportInvalidTarget": {
+    "message": "この場所には書き出せません。",
+    "description": "Message for the error code \"export_invalid_target\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  }
+}

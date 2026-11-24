@@ -1,0 +1,1057 @@
+{
+  "langTag": {
+    "message": "en",
+    "description": "Language of this catalog (BCP 47). Read by i18n.js and i18n-dom.js to know which catalog Chrome actually used; sets <html lang> and the Intl locale. Must equal the folder name."
+  },
+  "extDescription": {
+    "message": "Local-first web memory capture.",
+    "description": "manifest.json description shown on chrome://extensions and in the Chrome Web Store. At most 132 characters. No dollar signs (manifest messages are not substituted)."
+  },
+  "menuSaveImage": {
+    "message": "Save to Memocampus",
+    "description": "Context menu item shown on images. Saves the clicked image to the Vault."
+  },
+  "menuSavePage": {
+    "message": "Save page to Memocampus",
+    "description": "Context menu item shown on pages. Saves the tab that was clicked in (not a link target) as MHTML to the Vault."
+  },
+  "imageSavedTitle": {
+    "message": "Saved to Memocampus",
+    "description": "Notification title after an image was saved."
+  },
+  "imageSavedMessage": {
+    "message": "Image $width$×$height$, $size$",
+    "description": "Notification body after an image was saved: pixel size and file size.",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSavedMessageReplayed": {
+    "message": "Image $width$×$height$, $size$ (this save action had already been saved)",
+    "description": "Notification body when the same save action was already committed (a retry).",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSavedMessageDeduplicated": {
+    "message": "Image $width$×$height$, $size$ (the same image was already saved, so a save record was added)",
+    "description": "Notification body when identical image bytes were already in the Vault and only a save record was added.",
+    "placeholders": {
+      "width": {
+        "content": "$1"
+      },
+      "height": {
+        "content": "$2"
+      },
+      "size": {
+        "content": "$3"
+      }
+    }
+  },
+  "imageSaveFailedTitle": {
+    "message": "Could not save to Memocampus",
+    "description": "Notification title when saving an image failed."
+  },
+  "imageSaveFailedHttp": {
+    "message": "Fetching the image failed (HTTP $status$).",
+    "description": "Notification body when the image server answered with an HTTP error status.",
+    "placeholders": {
+      "status": {
+        "content": "$1"
+      }
+    }
+  },
+  "pageSavedTitle": {
+    "message": "Page saved to Memocampus",
+    "description": "Notification title after a page was saved."
+  },
+  "pageSavedMessage": {
+    "message": "Saved the original MHTML and its save record to the Vault. It is not published to MCP.",
+    "description": "Privacy: notification body after a page was saved. Must keep saying that saved pages are not published to MCP."
+  },
+  "pageSaveFailedTitle": {
+    "message": "Could not save the page",
+    "description": "Notification title when saving a page failed."
+  },
+  "pageSaveErrorUnsupportedUrl": {
+    "message": "Only HTTP(S) pages can be saved. The tab you clicked in is saved, not the link target.",
+    "description": "Notification body when saving a page failed with \"unsupported_url\"."
+  },
+  "pageSaveErrorIncognitoNotAllowed": {
+    "message": "Saving pages from Incognito windows is not supported.",
+    "description": "Notification body when saving a page failed with \"incognito_not_allowed\"."
+  },
+  "pageSaveErrorNavigationChanged": {
+    "message": "Stopped because the page changed while it was being saved. Try again after the page has finished loading.",
+    "description": "Notification body when saving a page failed with \"navigation_changed\"."
+  },
+  "pageSaveErrorVaultSwitched": {
+    "message": "Saving was stopped because the Vault was changed.",
+    "description": "Notification body when saving a page failed with \"vault_switched\"."
+  },
+  "pageSaveErrorInvalidPageSize": {
+    "message": "The MHTML is empty or exceeds the 128 MiB limit.",
+    "description": "Notification body when saving a page failed with \"invalid_page_size\"."
+  },
+  "pageSaveErrorPageUploadBusy": {
+    "message": "Another page is being saved. Try again when it has finished.",
+    "description": "Notification body when saving a page failed with \"page_upload_busy\"."
+  },
+  "pageSaveErrorVaultNotConfigured": {
+    "message": "First create or choose a Vault in the settings.",
+    "description": "Notification body when saving a page failed with \"vault_not_configured\"."
+  },
+  "pageSaveErrorVaultSchemaMismatch": {
+    "message": "This Vault's schema is not supported. Explicitly create a new Schema 8 Vault. The old Vault is not changed.",
+    "description": "Notification body when saving a page failed with \"vault_schema_mismatch\"."
+  },
+  "pageSaveErrorSaveStateUnknown": {
+    "message": "Whether the page was saved is unconfirmed. It is not saved again automatically. Check the state to avoid duplicates.",
+    "description": "Notification body when saving a page failed with \"save_state_unknown\"."
+  },
+  "pageSaveErrorTimeout": {
+    "message": "Saving timed out.",
+    "description": "Notification body when saving a page failed with \"timeout\"."
+  },
+  "pageSaveErrorTransferInterrupted": {
+    "message": "Could not save because the connection to the Native Host was lost.",
+    "description": "Notification body when saving a page failed with \"transfer_interrupted\"."
+  },
+  "pageSaveErrorCaptureFailed": {
+    "message": "Chrome failed to capture the MHTML. Possible technical limits include pages or frames that cannot be captured, or the page disappearing.",
+    "description": "Notification body when saving a page failed with \"capture_failed\"."
+  },
+  "pageSaveErrorVaultLocked": {
+    "message": "Cannot save because the Vault is locked. Check its state in the settings.",
+    "description": "Notification body when saving a page failed with \"vault_locked\"."
+  },
+  "pageSaveErrorKeyUnavailable": {
+    "message": "Cannot save because the Vault's key cannot be used.",
+    "description": "Notification body when saving a page failed with \"key_unavailable\"."
+  },
+  "pageSaveErrorVaultReselectRequired": {
+    "message": "Explicitly choose the Vault again in the settings, then save.",
+    "description": "Notification body when saving a page failed with \"vault_reselect_required\"."
+  },
+  "pageSaveErrorSaveIdConflict": {
+    "message": "Stopped because the save operation ID matched a different existing save record.",
+    "description": "Notification body when saving a page failed with \"save_id_conflict\"."
+  },
+  "pageSaveErrorDbError": {
+    "message": "The save to the Vault could not be confirmed. It is not saved again automatically.",
+    "description": "Notification body when saving a page failed with \"db_error\"."
+  },
+  "pageSaveErrorGeneric": {
+    "message": "Capturing the page or saving it to the Vault failed. Some pages cannot be captured because of Chrome's technical limits.",
+    "description": "Notification body when saving a page failed for any other reason."
+  },
+  "badgeEventsNotRecorded": {
+    "message": "Events not recorded: $deadLetters$, discarded: $dropped$",
+    "description": "Toolbar tooltip part: quarantined and discarded events.",
+    "placeholders": {
+      "deadLetters": {
+        "content": "$1"
+      },
+      "dropped": {
+        "content": "$2"
+      }
+    }
+  },
+  "badgeNavigationLost": {
+    "message": "Visits whose navigation details could not be saved: $count$",
+    "description": "Toolbar tooltip part.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "badgeImageFailure": {
+    "message": "Could not save an image: $reason$",
+    "description": "Toolbar tooltip part after a failed image save. [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "badgePageFailure": {
+    "message": "Page save: $reason$",
+    "description": "Toolbar tooltip part after a failed page save. [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueErrorFull": {
+    "message": "Not recorded because the send queue is full (nothing was added).",
+    "description": "Result of \"record all tabs\"."
+  },
+  "queueErrorStorage": {
+    "message": "Not recorded because saving to the queue failed (nothing was added).",
+    "description": "Result of \"record all tabs\"."
+  },
+  "queueErrorWithReason": {
+    "message": "$reason$ (nothing was added)",
+    "description": "Result of \"record all tabs\" refused for a reason; [reason] is an error message.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueErrorGeneric": {
+    "message": "Recording failed.",
+    "description": "Result of \"record all tabs\" when nothing more specific is known."
+  },
+  "recordFailed": {
+    "message": "Recording failed.\n$detail$",
+    "description": "Side panel result of \"record all tabs\"; [detail] is the reason on its own line.",
+    "placeholders": {
+      "detail": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordFailedDetail": {
+    "message": "Saving failed.",
+    "description": "Reason used by recordFailed when none was given."
+  },
+  "recordNoTabs": {
+    "message": "There are no tabs in normal windows (http/https) that can be recorded.",
+    "description": "Result of \"record all tabs\". Incognito tabs are never recorded."
+  },
+  "recordStoredAllOne": {
+    "message": "Saved $count$ tab to SQLite. The tab was not closed.",
+    "description": "Result of \"record all tabs\", singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordStoredAllOther": {
+    "message": "Saved $count$ tabs to SQLite. The tabs were not closed.",
+    "description": "Result of \"record all tabs\", plural form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordQueuedOne": {
+    "message": "Added $count$ tab to the send queue. The tab was not closed.",
+    "description": "Result of \"record all tabs\" when not everything is stored yet, singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordQueuedOther": {
+    "message": "Added $count$ tabs to the send queue. The tabs were not closed.",
+    "description": "Result of \"record all tabs\" when not everything is stored yet, plural form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordStoredCount": {
+    "message": "Saved to SQLite: $count$",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordPendingCount": {
+    "message": "Not saved yet (waiting to send, retried automatically): $count$",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordPendingReason": {
+    "message": "Reason: $reason$",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "recordDeadLetteredCount": {
+    "message": "Not recorded, quarantined: $count$",
+    "description": "Line of the \"record all tabs\" result.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "policyStatusUnknown": {
+    "message": "The state of the privacy settings cannot be checked, so automatic recording may be stopped.",
+    "description": "Privacy: side panel notice when the policy state is unknown. Recording fails closed."
+  },
+  "policyStatusStopped": {
+    "message": "Automatic recording is stopped.",
+    "description": "Privacy: side panel notice when the policy is not ready."
+  },
+  "queuePending": {
+    "message": "Waiting to send: $count$",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queuePendingReason": {
+    "message": "Waiting to send: $count$ ($reason$)",
+    "description": "Side panel queue status line with the reason sending is blocked.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "reason": {
+        "content": "$2"
+      }
+    }
+  },
+  "queueDeadLetters": {
+    "message": "Events quarantined because they could not be recorded: $count$",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueDropped": {
+    "message": "Events discarded because they could not be queued: $count$",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueNavigationInvalid": {
+    "message": "Visits whose navigation details the host refused: $count$ (the visits are saved)",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueNavigationNotStored": {
+    "message": "Visits whose navigation details could not be saved because the host does not support them: $count$ (the visits are saved)",
+    "description": "Side panel queue status line.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateToday": {
+    "message": "Today $time$",
+    "description": "Short date for a time today; [time] is the local time.",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateYesterday": {
+    "message": "Yesterday $time$",
+    "description": "Short date for a time yesterday; [time] is the local time.",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "dateWithTime": {
+    "message": "$date$ $time$",
+    "description": "Short date for older times; [date] is the localized date, [time] the local time.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "time": {
+        "content": "$2"
+      }
+    }
+  },
+  "errorGeneric": {
+    "message": "The operation failed.",
+    "description": "Error message for an error code that has no message of its own."
+  },
+  "errorHostUnavailable": {
+    "message": "Cannot connect to the Native Host. Check that it is installed and registered.",
+    "description": "Message for the error code \"host_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTimeout": {
+    "message": "The Native Host did not respond. The host may be outdated or stopped.",
+    "description": "Message for the error code \"timeout\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidResponse": {
+    "message": "Received an invalid response from the Native Host.",
+    "description": "Message for the error code \"invalid_response\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDbError": {
+    "message": "The database operation failed.",
+    "description": "Message for the error code \"db_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorQueryTooLong": {
+    "message": "Enter a search term of $max$ characters or fewer.",
+    "description": "Message for the error code \"query_too_long\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip.",
+    "placeholders": {
+      "max": {
+        "content": "$1"
+      }
+    }
+  },
+  "errorInvalidQuery": {
+    "message": "The search conditions are invalid.",
+    "description": "Message for the error code \"invalid_query\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidLimit": {
+    "message": "The search conditions are invalid.",
+    "description": "Message for the error code \"invalid_limit\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidOffset": {
+    "message": "No more results can be loaded.",
+    "description": "Message for the error code \"invalid_offset\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidRequestId": {
+    "message": "The request is invalid.",
+    "description": "Message for the error code \"invalid_request_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBounds": {
+    "message": "The date range is invalid.",
+    "description": "Message for the error code \"invalid_bounds\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnknownType": {
+    "message": "The Native Host does not support this operation. Update the host.",
+    "description": "Message for the error code \"unknown_type\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorAppDirUnavailable": {
+    "message": "Vault settings cannot be read or written because %LOCALAPPDATA% cannot be determined.",
+    "description": "Message for the error code \"app_dir_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultNotConfigured": {
+    "message": "No Vault is set up. In Vault settings, create a new Vault or open an existing one.",
+    "description": "Message for the error code \"vault_not_configured\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultMissing": {
+    "message": "The Vault file cannot be found. Check that it has not been moved or deleted, then open the Vault again.",
+    "description": "Message for the error code \"vault_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultInvalid": {
+    "message": "This file cannot be used as a Memocampus Vault.",
+    "description": "Message for the error code \"vault_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultSchemaMismatch": {
+    "message": "This Vault's format is not supported by this version. It is not converted automatically (this Vault was not changed).",
+    "description": "Message for the error code \"vault_schema_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorConfigInvalid": {
+    "message": "The settings file (config.json) cannot be read. Creating or opening a Vault again rewrites the settings.",
+    "description": "Message for the error code \"config_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultSwitched": {
+    "message": "The Vault was switched. Please try again.",
+    "description": "Message for the error code \"vault_switched\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultModeMismatch": {
+    "message": "The Vault file does not match the configured format (encrypted / plaintext). The file was not changed.",
+    "description": "Message for the error code \"vault_mode_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultEncryptionUnsupported": {
+    "message": "Encrypted Vaults cannot be opened in this environment. The file was not changed.",
+    "description": "Message for the error code \"vault_encryption_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyUnavailable": {
+    "message": "The key for the encrypted Vault cannot be obtained for this Windows user. The file was not changed.",
+    "description": "Message for the error code \"key_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultBackupEncryptedUnsupported": {
+    "message": "Backups of an encrypted Vault cannot be created yet (planned for a future version). No plaintext copy is created.",
+    "description": "Message for the error code \"vault_backup_encrypted_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordRequired": {
+    "message": "Enter a password.",
+    "description": "Message for the error code \"backup_password_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordTooShort": {
+    "message": "Use a password of at least 8 characters.",
+    "description": "Message for the error code \"backup_password_too_short\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordTooLong": {
+    "message": "The password is too long.",
+    "description": "Message for the error code \"backup_password_too_long\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPasswordRejected": {
+    "message": "The password is incorrect. Nothing was created.",
+    "description": "Message for the error code \"backup_password_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupPathRequired": {
+    "message": "Choose the backup file to restore.",
+    "description": "Message for the error code \"backup_path_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupUnsupportedFormat": {
+    "message": "This file is not a Memocampus backup.",
+    "description": "Message for the error code \"backup_unsupported_format\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupUnsupportedVersion": {
+    "message": "This backup version is not supported. Update Memocampus.",
+    "description": "Message for the error code \"backup_unsupported_version\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupMalformed": {
+    "message": "The backup file is malformed (modified or damaged). Nothing was created.",
+    "description": "Message for the error code \"backup_malformed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupIncomplete": {
+    "message": "The backup file is truncated or has extra data appended. Nothing was created.",
+    "description": "Message for the error code \"backup_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupTampered": {
+    "message": "The backup contents have been modified or damaged. The partially restored file was deleted.",
+    "description": "Message for the error code \"backup_tampered\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupDamaged": {
+    "message": "The backup contents or its recovery information are damaged. The partially restored file was deleted.",
+    "description": "Message for the error code \"backup_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupSchemaMismatch": {
+    "message": "The Vault format in this backup is not supported.",
+    "description": "Message for the error code \"backup_schema_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupVaultInvalid": {
+    "message": "This file cannot be used as a Memocampus Vault backup.",
+    "description": "Message for the error code \"backup_vault_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestorePending": {
+    "message": "There is a restored Vault that is not in use yet (or an interrupted restore). Start using it or discard it, then try again.",
+    "description": "Message for the error code \"vault_restore_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreNotPending": {
+    "message": "There is no restored Vault waiting to be put into use.",
+    "description": "Message for the error code \"vault_restore_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreIncomplete": {
+    "message": "The restore was interrupted. Discard it, then restore again.",
+    "description": "Message for the error code \"vault_restore_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultRestoreDamaged": {
+    "message": "The restore record or the restored file is damaged or has been changed. Discard it.",
+    "description": "Message for the error code \"vault_restore_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRestoreFailed": {
+    "message": "The restore failed. The partially restored file was deleted.",
+    "description": "Message for the error code \"restore_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDiskFull": {
+    "message": "There is not enough free space at the destination. The partially created file was deleted.",
+    "description": "Message for the error code \"disk_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupWalUnsupported": {
+    "message": "This Vault uses WAL mode, so a password-protected backup cannot be created. Use a regular backup. Nothing was created.",
+    "description": "Message for the error code \"backup_wal_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidRequest": {
+    "message": "The request is invalid.",
+    "description": "Message for the error code \"invalid_request\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationPending": {
+    "message": "There is a partially created encrypted Vault. Discard it, then create it again.",
+    "description": "Message for the error code \"vault_creation_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertPending": {
+    "message": "There is a Vault being converted (or not yet in use). Start using it, save it and finish, or discard it, then try again.",
+    "description": "Message for the error code \"vault_convert_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertNotPending": {
+    "message": "There is no converted Vault waiting to be put into use.",
+    "description": "Message for the error code \"vault_convert_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertIncomplete": {
+    "message": "The conversion was interrupted. Discard it, then convert again. The original Vault was not changed.",
+    "description": "Message for the error code \"vault_convert_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSpellUnconfirmed": {
+    "message": "You cannot start using the new Vault until its Recovery Spell has been confirmed.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"vault_convert_spell_unconfirmed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertInvalidState": {
+    "message": "This operation is not possible at the current stage of the conversion. Refresh the view.",
+    "description": "Message for the error code \"vault_convert_invalid_state\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertDamaged": {
+    "message": "The conversion record or the converted file is damaged or has been changed. Discard it. The original Vault was not changed.",
+    "description": "Message for the error code \"vault_convert_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSourceChanged": {
+    "message": "The source Vault is no longer the file it was when the conversion started. The Active Vault was not changed. Save the converted Vault without switching to it, or discard it.",
+    "description": "Message for the error code \"vault_convert_source_changed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertSameAsSource": {
+    "message": "The source Vault itself was chosen as the destination. Choose a different, new file name.",
+    "description": "Message for the error code \"vault_convert_same_as_source\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertModeMismatch": {
+    "message": "The format (encrypted / plaintext) of the displayed Vault has changed. Refresh the view, then try again.",
+    "description": "Message for the error code \"vault_convert_mode_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertPlaintextUnacknowledged": {
+    "message": "Removing encryption stores browsing history and images without encryption. Select the confirmation checkbox before continuing.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"vault_convert_plaintext_unacknowledged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertVerifyFailed": {
+    "message": "The converted Vault did not match the source. The partially converted file was deleted. The original Vault was not changed.",
+    "description": "Message for the error code \"vault_convert_verify_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultConvertFailed": {
+    "message": "The conversion failed. The partially converted file was deleted. The original Vault was not changed.",
+    "description": "Message for the error code \"vault_convert_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultWorkFile": {
+    "message": "A file in the middle of being created, restored or converted cannot be opened as a Vault.",
+    "description": "Message for the error code \"vault_work_file\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationNotPending": {
+    "message": "The partially created encrypted Vault cannot be found. Start the creation over.",
+    "description": "Message for the error code \"vault_creation_not_pending\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultCreationDamaged": {
+    "message": "The partially created encrypted Vault file is damaged or missing. Discard it and create it again.",
+    "description": "Message for the error code \"vault_creation_damaged\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRecoverySpellInvalid": {
+    "message": "The Recovery Spell is not in the correct format.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"recovery_spell_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRecoverySpellRejected": {
+    "message": "The Recovery Spell does not match this Vault. Neither the Vault nor the key was changed. (This is also shown if the Vault file is damaged or has been modified.)",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"recovery_spell_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultLegacyUnsupported": {
+    "message": "This Vault was created with the earlier key management method (using a \".mckey\" file) and cannot be opened in this version. The file was not changed or deleted.",
+    "description": "Message for the error code \"vault_legacy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupLegacyUnsupported": {
+    "message": "This backup was created with the earlier key management method (format B or D) and cannot be restored in this version. Nothing was changed.",
+    "description": "Message for the error code \"backup_legacy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultNotEncrypted": {
+    "message": "This Vault is not encrypted. Open it with \"Open existing Vault\".",
+    "description": "Message for the error code \"vault_not_encrypted\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyProtectorUnavailable": {
+    "message": "An encrypted Vault cannot be created because the key cannot be protected in this environment (Windows DPAPI is unavailable).",
+    "description": "Message for the error code \"key_protector_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorKeyProtectorFailed": {
+    "message": "Windows could not protect the key. Nothing was created.",
+    "description": "Message for the error code \"key_protector_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorRandomUnavailable": {
+    "message": "Secure random numbers could not be obtained. Nothing was created.",
+    "description": "Message for the error code \"random_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultLocked": {
+    "message": "The encrypted Vault is locked. The file was not changed.",
+    "description": "Message for the error code \"vault_locked\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultDecryptFailed": {
+    "message": "The encrypted Vault cannot be decrypted. The file was not changed.",
+    "description": "Message for the error code \"vault_decrypt_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidVaultToken": {
+    "message": "The request is invalid. Refresh the list.",
+    "description": "Message for the error code \"invalid_vault_token\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorVaultBusy": {
+    "message": "The Vault is in use. Wait a moment, then try again.",
+    "description": "Message for the error code \"vault_busy\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorManagementDisabled": {
+    "message": "Vault management is disabled because a development database (MEMOCAMPUS_DB) is specified.",
+    "description": "Message for the error code \"management_disabled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorFileExists": {
+    "message": "A file with the same name already exists. It is not overwritten. Choose a different name or use \"Open existing Vault\".",
+    "description": "Message for the error code \"file_exists\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSidecarExists": {
+    "message": "Creation was stopped for safety because -journal / -wal / -shm files with the same name remain at the destination.",
+    "description": "Message for the error code \"sidecar_exists\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorParentMissing": {
+    "message": "The destination folder does not exist.",
+    "description": "Message for the error code \"parent_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidPath": {
+    "message": "The path is invalid. Specify an absolute path that starts with a drive letter.",
+    "description": "Message for the error code \"invalid_path\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCancelled": {
+    "message": "Cancelled.",
+    "description": "Message for the error code \"cancelled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBackupFailed": {
+    "message": "The backup failed. No backup was created.",
+    "description": "Message for the error code \"backup_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLocationRejected": {
+    "message": "This location cannot be used as the Active Vault.",
+    "description": "Message for the error code \"location_rejected\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLocationNeedsApproval": {
+    "message": "Confirmation is required to make this location the Active Vault.",
+    "description": "Message for the error code \"location_needs_approval\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIoError": {
+    "message": "Reading or writing the file failed.",
+    "description": "Message for the error code \"io_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidAck": {
+    "message": "The Native Host's response is invalid. Update the host.",
+    "description": "Message for the error code \"invalid_ack\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidUrl": {
+    "message": "This URL cannot be recorded.",
+    "description": "Message for the error code \"invalid_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidEvent": {
+    "message": "The event format is invalid.",
+    "description": "Message for the error code \"invalid_event\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidMessage": {
+    "message": "The message format is invalid.",
+    "description": "Message for the error code \"invalid_message\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorQueueFull": {
+    "message": "The send queue is full.",
+    "description": "Message for the error code \"queue_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorStorageWriteFailed": {
+    "message": "Saving to the extension's storage failed.",
+    "description": "Message for the error code \"storage_write_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDeadLetterFull": {
+    "message": "Sending is paused because the quarantine area is full.",
+    "description": "Message for the error code \"dead_letter_full\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDeadLetterWriteFailed": {
+    "message": "Sending is paused because saving to the quarantine area failed.",
+    "description": "Message for the error code \"dead_letter_write_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyNotInitialized": {
+    "message": "Automatic recording is stopped because the privacy settings have not been initialized.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_not_initialized\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyInvalid": {
+    "message": "Automatic recording is stopped because the privacy settings cannot be read (missing, damaged or an unsupported version). The settings were not overwritten.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_invalid\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyBusy": {
+    "message": "Automatic recording is paused because the privacy settings are in use.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_busy\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyUnavailable": {
+    "message": "Automatic recording is stopped because the privacy settings cannot be accessed.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyUnsupported": {
+    "message": "Automatic recording is stopped because the privacy settings contain rules this version cannot use (such as regular expressions with lookahead, lookbehind or backreferences). The settings were not overwritten.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_unsupported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidPolicyBatch": {
+    "message": "Automatic recording is stopped because the versions of the Native Host and the extension do not match.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_policy_batch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyBatchTooLarge": {
+    "message": "Automatic recording is stopped because the versions of the Native Host and the extension do not match.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_batch_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyAlreadyInitialized": {
+    "message": "The privacy settings are already initialized. The existing settings are not overwritten.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_already_initialized\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoUnknown": {
+    "message": "Not saved because the type of the source window could not be determined.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"incognito_unknown\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidIncognito": {
+    "message": "Not saved because the type of the source window could not be determined.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_incognito\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoFixedAtBegin": {
+    "message": "The transfer sequence is invalid. Save again.",
+    "description": "Message for the error code \"incognito_fixed_at_begin\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedUrl": {
+    "message": "The host of this URL cannot be specified in a rule.",
+    "description": "Message for the error code \"unsupported_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorNetworkError": {
+    "message": "The image could not be fetched (network error).",
+    "description": "Message for the error code \"network_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHttpError": {
+    "message": "Fetching the image failed (HTTP error).",
+    "description": "Message for the error code \"http_error\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPageAccessDenied": {
+    "message": "Images cannot be fetched from this page.",
+    "description": "Message for the error code \"page_access_denied\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTooLarge": {
+    "message": "The image is too large (limit: 32 MiB).",
+    "description": "Message for the error code \"too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorEmptyImage": {
+    "message": "The image data is empty.",
+    "description": "Message for the error code \"empty_image\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSvgNotSupported": {
+    "message": "SVG images cannot be saved.",
+    "description": "Message for the error code \"svg_not_supported\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedFormat": {
+    "message": "This image format is not supported (PNG, JPEG, GIF, WebP, AVIF and BMP are supported).",
+    "description": "Message for the error code \"unsupported_format\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDecodeFailed": {
+    "message": "The image could not be read. It is damaged or in an unsupported format.",
+    "description": "Message for the error code \"decode_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTransferInterrupted": {
+    "message": "The connection to the Native Host was interrupted. Nothing was saved.",
+    "description": "Message for the error code \"transfer_interrupted\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHostOutdated": {
+    "message": "The image cannot be saved because the Native Host is outdated. Update the host.",
+    "description": "Message for the error code \"host_outdated\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveFailed": {
+    "message": "Saving the image failed.",
+    "description": "Message for the error code \"save_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSavedImageNotFound": {
+    "message": "This save record cannot be found. Refresh the list.",
+    "description": "Message for the error code \"saved_image_not_found\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncognitoNotPublishable": {
+    "message": "Saved from an Incognito window, so it is not published to MCP.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"incognito_not_publishable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidSavedImageId": {
+    "message": "The specified save record is invalid.",
+    "description": "Message for the error code \"invalid_saved_image_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidMcpPublic": {
+    "message": "The specified publication setting is invalid.",
+    "description": "Message for the error code \"invalid_mcp_public\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorHashMismatch": {
+    "message": "The image data changed during the transfer. Nothing was saved.",
+    "description": "Message for the error code \"hash_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLengthMismatch": {
+    "message": "The length of the image data does not match. Nothing was saved.",
+    "description": "Message for the error code \"length_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorMimeMismatch": {
+    "message": "The image format does not match what was declared.",
+    "description": "Message for the error code \"mime_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDimensionMismatch": {
+    "message": "The image dimensions do not match.",
+    "description": "Message for the error code \"dimension_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidDimensions": {
+    "message": "The image dimensions are invalid.",
+    "description": "Message for the error code \"invalid_dimensions\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTruncatedImage": {
+    "message": "The image data is truncated.",
+    "description": "Message for the error code \"truncated_image\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidThumbnail": {
+    "message": "The thumbnail is invalid.",
+    "description": "Message for the error code \"invalid_thumbnail\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveIdConflict": {
+    "message": "The save ID is a duplicate. Save again.",
+    "description": "Message for the error code \"save_id_conflict\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorBlobMissing": {
+    "message": "The saved image cannot be found. Save again.",
+    "description": "Message for the error code \"blob_missing\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidHash": {
+    "message": "The image hash is invalid.",
+    "description": "Message for the error code \"invalid_hash\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidSaveId": {
+    "message": "The save ID is invalid.",
+    "description": "Message for the error code \"invalid_save_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnsupportedProtocol": {
+    "message": "The versions of the Native Host and the extension do not match.",
+    "description": "Message for the error code \"unsupported_protocol\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorNoUpload": {
+    "message": "The transfer was interrupted. Save again.",
+    "description": "Message for the error code \"no_upload\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUploadInProgress": {
+    "message": "Another transfer is in progress. Save again.",
+    "description": "Message for the error code \"upload_in_progress\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorSaveIdMismatch": {
+    "message": "The transfer got out of step. Save again.",
+    "description": "Message for the error code \"save_id_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUnexpectedChunk": {
+    "message": "The transfer sequence is invalid. Save again.",
+    "description": "Message for the error code \"unexpected_chunk\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorDuplicateChunk": {
+    "message": "Transfer data was duplicated. Save again.",
+    "description": "Message for the error code \"duplicate_chunk\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorChunkOutOfOrder": {
+    "message": "Transfer data arrived out of order. Save again.",
+    "description": "Message for the error code \"chunk_out_of_order\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidChunkSize": {
+    "message": "The size of the transfer data is invalid. Save again.",
+    "description": "Message for the error code \"invalid_chunk_size\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBase64": {
+    "message": "The transfer data is corrupted. Save again.",
+    "description": "Message for the error code \"invalid_base64\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorUploadTooLarge": {
+    "message": "Stopped because the image data is larger than declared.",
+    "description": "Message for the error code \"upload_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorIncompleteUpload": {
+    "message": "An attempt was made to finish before all the image data had arrived. Nothing was saved.",
+    "description": "Message for the error code \"incomplete_upload\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidTag": {
+    "message": "The tag name is invalid. Use 1 to 64 characters, without control or invisible characters.",
+    "description": "Message for the error code \"invalid_tag\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorTooManyTags": {
+    "message": "An image can have at most 64 tags.",
+    "description": "Message for the error code \"too_many_tags\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyConflict": {
+    "message": "The privacy settings were changed in another screen. Review them again.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_conflict\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPublishBlocked": {
+    "message": "This cannot be published from here because another rule or a basic protection keeps it private. Check the Privacy settings.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"publish_blocked\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyLimit": {
+    "message": "The rule cannot be added because the number of rules has reached the limit (1,000 per group). Tidy up the rules in the Privacy settings.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_limit\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorLayerDisabled": {
+    "message": "This group is turned off, so adding a rule has no effect. Turn the group on in the Privacy settings.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"layer_disabled\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidExactUrl": {
+    "message": "The URL format is invalid, so it cannot be made into an Exact URL rule.",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"invalid_exact_url\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorPolicyMigrationRequired": {
+    "message": "This operation is not possible because the privacy settings are in the old format (v1).",
+    "description": "Privacy: the meaning must stay identical in every language. Message for the error code \"policy_migration_required\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidAction": {
+    "message": "The request is invalid.",
+    "description": "Message for the error code \"invalid_action\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidScope": {
+    "message": "The request is invalid.",
+    "description": "Message for the error code \"invalid_scope\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidEtag": {
+    "message": "The request is invalid. Check again.",
+    "description": "Message for the error code \"invalid_etag\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorInvalidBlobId": {
+    "message": "The specified image is invalid.",
+    "description": "Message for the error code \"invalid_blob_id\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorReadIncomplete": {
+    "message": "The image data could not be read to the end.",
+    "description": "Message for the error code \"read_incomplete\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorReadHashMismatch": {
+    "message": "The image data that was read does not match the record (SHA-256).",
+    "description": "Message for the error code \"read_hash_mismatch\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardUnavailable": {
+    "message": "This browser cannot copy images to the clipboard.",
+    "description": "Message for the error code \"clipboard_unavailable\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardDenied": {
+    "message": "Copying to the clipboard was not allowed. Click the side panel, then try again.",
+    "description": "Message for the error code \"clipboard_denied\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorClipboardFailed": {
+    "message": "Could not copy to the clipboard.",
+    "description": "Message for the error code \"clipboard_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCopyTooLarge": {
+    "message": "The image cannot be copied because it has too many pixels.",
+    "description": "Message for the error code \"copy_too_large\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorCopyConvertFailed": {
+    "message": "The image cannot be copied because it could not be converted to PNG.",
+    "description": "Message for the error code \"copy_convert_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportFailed": {
+    "message": "The file could not be written. Existing files were not changed.",
+    "description": "Message for the error code \"export_failed\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportFileAppeared": {
+    "message": "A file with the same name was created during the export, so it was stopped without overwriting.",
+    "description": "Message for the error code \"export_file_appeared\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  },
+  "errorExportInvalidTarget": {
+    "message": "Cannot export to this location.",
+    "description": "Message for the error code \"export_invalid_target\" (from the Native Host or the extension). Shown in the side panel, notifications and the toolbar tooltip."
+  }
+}

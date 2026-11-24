@@ -1,4 +1,5 @@
 // Display helpers for the side panel. All dates are rendered in the viewer's local time zone.
+import { formatDateTime, t } from "./i18n.js";
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -12,19 +13,25 @@ function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
-/** Short, natural Japanese date: 「今日 14:05」「昨日 9:30」「10月28日 14:05」「2025年3月1日 9:30」. */
+/**
+ * Short, natural date in the UI language, for display only (never compared or stored). Japanese:
+ * "today 14:05", "yesterday 9:30", "10/28 14:05" and "2025/3/1 9:30" written the Japanese way;
+ * English (en-US): "Today 2:05 PM", "Oct 28 2:05 PM", "Mar 1, 2025 9:30 AM".
+ */
 export function formatShortDate(iso, now = new Date()) {
   const date = parse(iso);
   if (!date) return "";
-  const time = `${date.getHours()}:${pad(date.getMinutes())}`;
+  const time = formatDateTime(date, { hour: "numeric", minute: "2-digit" });
   const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
-  if (dayDiff === 0) return `今日 ${time}`;
-  if (dayDiff === 1) return `昨日 ${time}`;
-  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
-  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
+  if (dayDiff === 0) return t("dateToday", time);
+  if (dayDiff === 1) return t("dateYesterday", time);
+  const day = date.getFullYear() === now.getFullYear()
+    ? formatDateTime(date, { month: "short", day: "numeric" })
+    : formatDateTime(date, { year: "numeric", month: "short", day: "numeric" });
+  return t("dateWithTime", day, time);
 }
 
-/** Full timestamp for tooltips: 「2026/10/30 14:05:09」. */
+/** Full timestamp for tooltips, the same in every language: "2026/10/30 14:05:09". */
 export function formatFullDate(iso) {
   const date = parse(iso);
   if (!date) return "";

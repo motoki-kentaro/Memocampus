@@ -11,6 +11,7 @@ import { evaluatePolicy } from "../../extension/policy.js";
 import defaults from "../../extension/policy-defaults.json" with { type: "json" };
 import { readFileSync, readdirSync } from "node:fs";
 import { extensionDir, loadSidePanel, settle } from "./fake-dom.js";
+import { chromeI18n } from "./i18n-mock.js";
 
 const AUTH_URL = "https://accounts.google.com/signin/secret-path";
 const TOKEN_URL = "https://a.test/page?access_token=SECRET-VALUE";
@@ -96,6 +97,7 @@ function startWorker({ host = fakeHost(), tabs = {}, query = [], data = new Map(
     },
   };
   globalThis.chrome = {
+    i18n: chromeI18n,
     runtime,
     webNavigation: { onBeforeNavigate: on("before"), onErrorOccurred: on("failed"), onCompleted: on("navigation"), onCommitted: on("committed"), onCreatedNavigationTarget: on("createdTarget"), onHistoryStateUpdated: on("historyState") },
     contextMenus: { create() {}, onClicked: on("menuClick") },

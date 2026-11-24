@@ -6,6 +6,7 @@ import { SAVE_IMAGE_MENU_ID, describeImageSaveResult, registerImageMenu, saveIma
 import { bytesToBase64 } from "../../extension/image-format.js";
 import { FakeCanvas, fakeDecoder, fakeImageHost, gif, jpeg, png } from "./image-fixtures.js";
 import { extensionDir } from "./fake-dom.js";
+import { chromeI18n } from "./i18n-mock.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -107,13 +108,14 @@ test("notification texts distinguish new saves, history-only saves and failures"
 function fakeChrome() {
   const listeners = {};
   const on = (name) => ({ addListener: (fn) => ((listeners[name] ??= []).push(fn)) });
-  const calls = { menus: [], notifications: [], badge: [], session: {} };
+  const calls = { menus: [], updates: [], notifications: [], badge: [], titles: [], session: {} };
   const chrome = {
+    i18n: chromeI18n,
     runtime: { onStartup: on("startup"), onInstalled: on("installed"), onMessage: on("message"), sendMessage: async () => {}, sendNativeMessage() {}, connectNative() {}, lastError: undefined },
     webNavigation: { onBeforeNavigate: on("before"), onErrorOccurred: on("failed"), onCompleted: on("navigation"), onCommitted: on("committed"), onCreatedNavigationTarget: on("createdTarget"), onHistoryStateUpdated: on("historyState") },
     contextMenus: { create: (item, cb) => (calls.menus.push(item), cb?.()), onClicked: on("menuClick") },
     notifications: { create: async (id, options) => calls.notifications.push(options) },
-    action: { setBadgeText: async ({ text }) => calls.badge.push(text), setTitle: async () => {} },
+    action: { setBadgeText: async ({ text }) => calls.badge.push(text), setTitle: async ({ title }) => calls.titles.push(title) },
     sidePanel: { setPanelBehavior: async () => {} },
     scripting: { executeScript: async () => [] },
     tabs: { onRemoved: on("tabRemoved"), onReplaced: on("tabReplaced"), get: async () => ({}) },
@@ -141,7 +143,10 @@ test("the service worker registers the menu and reports a refused save visibly",
   assert.equal(calls.notifications.length, 1);
   assert.equal(calls.notifications[0].title, "Memocampusへ保存できませんでした");
   assert.match(calls.notifications[0].iconUrl, /^data:image\/png;base64,/);
-  assert.match(calls.session.imageSaveFailure, /ウィンドウの種類/);
+  assert.match(calls.notifications[0].message, /ウィンドウの種類/);
+  // Kept by code, not by text (Issue #77): the tooltip is written in the UI language when shown.
+  assert.deepEqual(calls.session.imageSaveFailure, { code: "incognito_unknown" });
+  assert.match(calls.titles.at(-1), /^Memocampus — 画像を保存できませんでした: 保存元のウィンドウの種類/);
   assert.equal(calls.badge.at(-1), "!", "a failure stays visible on the toolbar even without notifications");
   // Other menu items are ignored.
   listeners.menuClick.forEach((fn) => fn({ menuItemId: "other" }, { id: 1 }));
