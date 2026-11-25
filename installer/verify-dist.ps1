@@ -204,7 +204,7 @@ if ($Negative) {
     @{ n = 'Inno download from any GitHub repository'; f = 'installer/ci-setup-inno.ps1'; a = "'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe') { return }"; b = "'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe' -or `$u -cmatch '^https://github\.com/') { return }" },
     @{ n = 'static CRT removed from a crate'; f = 'tray/.cargo/config.toml'; a = 'target-feature=+crt-static'; b = 'target-feature=-crt-static' },
     @{ n = 'import-table check removed from build.ps1'; f = 'installer/build.ps1'; a = "if (`$LASTEXITCODE -ne 0) { Fail (""an executable needs the Visual C++ runtime"; b = "if (`$false) { Fail (""an executable needs the Visual C++ runtime" },
-    @{ n = 'made-up release gate id'; f = 'installer/release-gate.json'; a = '"extensionId": null'; b = '"extensionId": "abcdefghijklmnopabcdefghijklmnop"' },
+    @{ n = 'made-up release gate id'; f = 'installer/release-gate.json'; a = '"extensionId": "cdklofjfcjagkaclekmicliailmlnfla"'; b = '"extensionId": "abcdefghijklmnopabcdefghijklmnop"' },
     @{ n = 'manifest key added'; f = 'extension/manifest.json'; a = '"manifest_version": 3,'; b = '"manifest_version": 3, "key": "AAAA",' },
     @{ n = 'private key material in a script'; f = 'installer/build.ps1'; a = '# --- version:'; b = "# -----BEGIN PRIVATE KEY-----`n# --- version:" }
   )
