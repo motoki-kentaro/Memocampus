@@ -192,8 +192,11 @@ test("en: the host-wide rule reads as wide as in Japanese, needs the same acknow
   assert.equal(en.status, "“Add to the Hide from MCP group” was done. Current state: Hidden from MCP server");
 });
 
-/** Opens the range deletion with a search, as a person does, and returns what was asked and shown. */
-async function rangeDeleteFlow() {
+/**
+ * Opens the range deletion with a search, as a person does, and returns what was asked and shown.
+ * `previewShown`: the text that only the host's preview of this target puts in the dialog, in the current language.
+ */
+async function rangeDeleteFlow(previewShown) {
   const A = "https://a.test/", B = "https://b.test/";
   const rows = [
     { url: A, title: "Alpha", lastVisitedAt: "2026-10-12T00:00:00.000Z", lastCapturedAt: null, lastActivityAt: "2026-10-12T00:00:00.000Z", source: "visit" },
@@ -208,15 +211,25 @@ async function rangeDeleteFlow() {
   $("#query").dispatch("keydown", { key: "Enter" });
   await settle(60);
   $("#url-delete-all").dispatch("click");
-  await settle(30);
+  // #87: the dialog is drawn after two round trips to the host (item_state, item_delete_preview); a fixed wait
+  // can end before them on a coarse timer. Wait for this preview to be shown, for 2 s at most.
+  const deadline = Date.now() + 2000;
+  const drawn = () => !$("#item-delete-dialog").hidden && $("#item-delete-error").hidden && previewShown.test(text($("#item-delete-description")));
+  while (!drawn()) {
+    if (Date.now() > deadline) {
+      const state = { dialogHidden: $("#item-delete-dialog").hidden, description: text($("#item-delete-description")), error: $("#item-delete-error").hidden ? null : text($("#item-delete-error")), sent: host.deleteRequests.map((m) => m.type) };
+      throw new Error(`the deletion preview (${previewShown}) was not shown within 2 s: ${JSON.stringify(state)}`);
+    }
+    await settle(1);
+  }
   const shown = text($("#item-delete-description"));
   const targets = host.deleteRequests.filter((m) => m.type === "item_delete_preview").map((m) => m.target);
   return { shown, targets, title: $("#item-delete-title").textContent, confirm: text($("#item-delete-confirm")) };
 }
 
 test("en: the deletion dialog names the same target and keeps snapshots out, as in Japanese", async () => {
-  const ja = await rangeDeleteFlow();
-  const en = await withLocale("en", rangeDeleteFlow);
+  const ja = await rangeDeleteFlow(/条件 検索「alpha」/);
+  const en = await withLocale("en", () => rangeDeleteFlow(/Condition search “alpha”/));
   assert.deepEqual(en.targets, ja.targets);
   assert.deepEqual(en.targets, [{ scope: "visits", query: "alpha", visitedFrom: null, visitedTo: null }]);
   assert.match(ja.shown, /条件 検索「alpha」/);
