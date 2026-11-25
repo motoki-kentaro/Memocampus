@@ -789,6 +789,21 @@ test("the stylesheet stacks the page in a narrow window, wraps long text and fol
   assert.match(css, /:focus-visible/);
 });
 
+test("#83: the hidden attribute hides the calendar's jump button although its class gives it a display", () => {
+  // A class rule that sets display wins over the browser's own [hidden] { display: none }; the page must take it back.
+  // (The fake DOM renders no CSS: tests/dogfood/options-history-i18n-chrome.mjs checks the computed style in Chrome.)
+  const html = readFileSync(path.join(extensionDir, "history.html"), "utf8");
+  const classes = /<button id="cal-jump"[^>]*class="([^"]+)"[^>]*\shidden[\s>]/.exec(html)?.[1].split(/\s+/);
+  assert.ok(classes?.length, "#cal-jump starts hidden and has classes");
+  const css = readFileSync(path.join(extensionDir, "history.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m, order) => ({ order, selectors: m[1].split(",").map((s) => s.trim()), display: /(?:^|;)\s*display\s*:\s*([^;]+)/.exec(m[2])?.[1].trim() }));
+  const shows = rules.filter((r) => r.display && r.display !== "none" && r.selectors.some((s) => classes.some((c) => s === `.${c}`)));
+  assert.ok(shows.length > 0, "the class gives the button a display (the cause of #83)");
+  const hides = rules.filter((r) => r.display === "none" && r.selectors.some((s) => classes.some((c) => s === `.${c}[hidden]`) || s === "#cal-jump[hidden]"));
+  assert.ok(hides.length > 0, "a [hidden] rule hides the button");
+  assert.ok(Math.max(...hides.map((r) => r.order)) > Math.max(...shows.map((r) => r.order)), "and comes after the rules that show it");
+});
+
 // ----------------------------------------------------------------------------------- the side panel
 
 test("the side panel opens History in a new tab, once for a double click, and the panel stays", async () => {

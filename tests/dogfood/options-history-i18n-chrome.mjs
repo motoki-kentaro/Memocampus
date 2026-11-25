@@ -10,6 +10,8 @@
 // width is emulated) and checks: i18n-dom.js applied (<html lang>, the title), no horizontal scroll, no control outside
 // the viewport, no two controls overlapping, no clipped control text, no console error; in English no Japanese in any
 // visible text or accessible name. Screenshots and the measurements are written to outDir.
+// #83: the calendar's "back to the selected day's month" button is checked as Chrome renders it (computed style,
+// size, hit test), not only by its hidden attribute, and the steps must give the same states in both languages.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -124,7 +126,10 @@ const HOSTS = {
   "history-months": () => createHistoryHost({ visits: { A: VISITS, B: [] } }),
   "history-empty": () => createHistoryHost({ visits: { A: [], B: [] } }),
   "history-error": () => createHistoryHost({ visits: { A: VISITS, B: [] }, errors: { history_list: "vault_locked" } }),
+  "history-jump": () => createHistoryHost({ visits: { A: VISITS, B: [] } }),
 };
+const JUMP_LABEL = Object.fromEntries(["ja", "en"].map((lang) => [lang,
+  JSON.parse(readFileSync(fileURLToPath(new URL(`../../extension/_locales/${lang}/messages.json`, import.meta.url)), "utf8")).historyJumpToSelected.message]));
 
 // --- Scenarios (in the page) ----------------------------------------------------------------------------------
 const click = (page, selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
@@ -176,6 +181,55 @@ const SCENARIOS = {
   },
   "history-empty": async () => {},
   "history-error": async () => {},
+  // #83 cases A to C; the returned record must be the same in ja and en (case D).
+  "history-jump": async (page, { lang, host, problems }) => {
+    const fail = (text) => problems.push(`history-jump: ${text}`);
+    const jump = () => page.evaluate(`(() => {
+      const b = document.querySelector("#cal-jump");
+      b.scrollIntoView({ block: "center" });
+      const s = getComputedStyle(b), r = b.getBoundingClientRect();
+      const hit = r.width > 0 && r.height > 0 ? document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) : null;
+      return { hiddenAttr: b.hidden, display: s.display, visibility: s.visibility, width: r.width, height: r.height,
+        x: r.left + r.width / 2, y: r.top + r.height / 2, onTop: hit !== null && (hit === b || b.contains(hit)), disabled: b.disabled,
+        text: b.textContent, ariaLabel: b.getAttribute("aria-label"), title: document.querySelector("#cal-title").textContent };
+    })()`);
+    const selection = () => page.evaluate(`({ search: location.search, heading: document.querySelector("#selected-heading").textContent,
+      selected: [...document.querySelectorAll("#cal-table .is-selected")].map((el) => el.textContent) })`);
+    const notShown = (s, where) => {
+      if (!s.hiddenAttr) fail(`${where}: no hidden attribute`);
+      if (s.display !== "none" || s.width > 0 || s.height > 0 || s.onTop) fail(`${where}: still rendered (display ${s.display}, ${s.width}x${s.height})`);
+    };
+    const start = await selection();
+    const a = await jump();
+    notShown(a, "A, the selected day's month");
+    if (start.selected.length !== 1) fail("A: the selected day is not marked");
+    // B: another month.
+    await click(page, "#cal-prev");
+    await until(async () => (await jump()).title !== a.title, "previous month");
+    const b = await jump();
+    if (b.hiddenAttr) fail("B, another month: hidden attribute kept");
+    if (b.display === "none" || b.visibility !== "visible" || !(b.width > 0 && b.height > 0)) fail(`B: not rendered (display ${b.display}, ${b.width}x${b.height})`);
+    if (!b.onTop || b.disabled) fail("B: not clickable");
+    if (b.text !== JUMP_LABEL[lang]) fail(`B: label ${JSON.stringify(b.text)}`);
+    const away = await selection();
+    // C: a real mouse click at the button's centre.
+    for (const type of ["mousePressed", "mouseReleased"]) await page.send("Input.dispatchMouseEvent", { type, x: b.x, y: b.y, button: "left", clickCount: 1 });
+    await until(async () => (await jump()).title === a.title, "back to the selected day's month");
+    await pause(200);
+    const c = await jump();
+    notShown(c, "C, after the jump");
+    const end = await selection();
+    if (JSON.stringify(end) !== JSON.stringify(start)) fail(`C: the selection changed ${JSON.stringify(start)} -> ${JSON.stringify(end)}`);
+    if (JSON.stringify(away) !== JSON.stringify({ ...start, selected: [] })) fail(`B: the selection changed ${JSON.stringify(away)}`);
+    const requests = (type) => host.of(type).map(({ requestId, ...rest }) => rest);
+    return {
+      shown: { A: a.display !== "none", B: b.display !== "none" && b.onTop, C: c.display !== "none" },
+      hiddenAttr: { A: a.hiddenAttr, B: b.hiddenAttr, C: c.hiddenAttr },
+      ariaLabel: [a.ariaLabel, b.ariaLabel, c.ariaLabel],
+      search: [start.search, away.search, end.search], selected: [start.selected, away.selected, end.selected],
+      history_list: requests("history_list"), history_days: requests("history_days"),
+    };
+  },
 };
 
 const JAPANESE = /[ぁ-んァ-ヶ一-龠（）「」、。・]/u;
@@ -254,7 +308,7 @@ async function session(lang, run) {
         : `document.readyState === 'complete' && document.querySelector('#selected-heading').textContent.length > 0 && (document.querySelector('#history-list').children.length > 0 || !document.querySelector('#history-state').hidden && !/…$/.test(document.querySelector('#history-state-text').textContent))`;
       await until(() => page.evaluate(ready), `${name} loaded`);
       await pause(300);
-      return { page, errors };
+      return { page, errors, host };
     };
     return await run({ open });
   } finally {
@@ -267,14 +321,18 @@ async function session(lang, run) {
 
 const results = { root, outDir, sessions: {} };
 const problems = [];
+const jumps = {};
 try {
   for (const lang of ["ja", "en"]) {
     results.sessions[lang] = await session(lang, async ({ open }) => {
       const out = {};
       for (const width of WIDTHS) {
         for (const [name, scenario] of Object.entries(SCENARIOS)) {
-          const { page, errors } = await open(width, name);
-          await scenario(page);
+          const { page, errors, host } = await open(width, name);
+          const own = [];
+          const record = await scenario(page, { lang, host, problems: own });
+          if (record !== undefined) (jumps[width] ??= {})[lang] = record;
+          for (const item of own) problems.push(`${lang} ${width}px ${item}`);
           await pause(250);
           const m = await page.evaluate(MEASURE);
           const shot = await page.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
@@ -297,6 +355,10 @@ try {
       return out;
     });
   }
+  for (const [width, { ja, en }] of Object.entries(jumps)) {
+    try { assert.deepEqual(en, ja); } catch { problems.push(`${width}px history-jump: ja and en differ`); }
+  }
+  results.jumps = jumps;
   results.problems = problems;
   writeFileSync(path.join(outDir, "measurements.json"), JSON.stringify(results, null, 2));
   if (problems.length) throw new Error(`${problems.length} problem(s):\n${problems.join("\n")}`);
