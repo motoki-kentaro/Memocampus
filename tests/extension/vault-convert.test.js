@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { OTHER_SPELL, TEST_SPELL, loadSidePanel, pages, settle, tokenOf } from "./fake-dom.js";
-import { CONVERT_SPELL_NOTE, REISSUE_SPELL_NOTE, SPELL_CAUTION, SPELL_LEAD, SPELL_NOTE, convertDirection, convertMakesSpell, describeConversionPending, describeConverted, reissueOffered } from "../../extension/vault-client.js";
+import { texts, convertDirection, convertMakesSpell, describeConversionPending, describeConverted, reissueOffered } from "../../extension/vault-client.js";
 
 const sent = (host, type) => host.requests.filter((message) => message.type === type);
 const NEW_SPELL = OTHER_SPELL;
@@ -56,12 +56,12 @@ test("D1: a plain vault is encrypted into a new vault; the new spell is shown on
   // The official wording, the new spell, and which vault is which.
   assert.equal($("#vault-onboarding").hidden, false);
   assert.equal($("#vault-onboarding-title").textContent, "ふっかつのじゅもん（Recovery Spell）");
-  assert.equal($("#vault-spell-lead").textContent, SPELL_LEAD);
-  assert.equal($("#vault-spell-caution").textContent, SPELL_CAUTION);
+  assert.equal($("#vault-spell-lead").textContent, texts.SPELL_LEAD);
+  assert.equal($("#vault-spell-caution").textContent, texts.SPELL_CAUTION);
   assert.equal($("#vault-spell").textContent, NEW_SPELL);
   assert.match($("#vault-onboarding-path").textContent, /変換先（新しい暗号化Vault）: C:\\Converted\\memocampus-converted\.sqlite3/);
   assert.match($("#vault-onboarding-path").textContent, /変換元（そのまま残ります）: A/);
-  assert.ok($("#vault-onboarding-path").textContent.includes(CONVERT_SPELL_NOTE));
+  assert.ok($("#vault-onboarding-path").textContent.includes(texts.CONVERT_SPELL_NOTE));
   assert.equal($("#vault-spell-confirm").textContent, "確認して変換を完了する");
   assert.match($("#vault-onboarding-cancel").textContent, /変換をやめる/);
   assert.equal($("#vault-convert-pick").disabled, true, "one conversion at a time");
@@ -245,8 +245,8 @@ test("re-issuing the spell: offered for an encrypted vault only, a new spell sho
   assert.deepEqual({ direction: start.direction, token: start.expectedVaultToken, ack: start.acknowledgePlaintext }, { direction: "reissue", token: tokenOf("E"), ack: undefined });
   assert.equal(host.active, "E", "nothing switches");
   assert.equal($("#vault-spell").textContent, NEW_SPELL);
-  assert.ok($("#vault-onboarding-path").textContent.includes(CONVERT_SPELL_NOTE));
-  assert.ok($("#vault-onboarding-path").textContent.includes(REISSUE_SPELL_NOTE));
+  assert.ok($("#vault-onboarding-path").textContent.includes(texts.CONVERT_SPELL_NOTE));
+  assert.ok($("#vault-onboarding-path").textContent.includes(texts.REISSUE_SPELL_NOTE));
   assert.equal($("#vault-reissue-pick").disabled, true, "one at a time");
   assert.equal($("#vault-convert-pick").disabled, true);
   $("#vault-spell-copy").dispatch("click");
@@ -261,7 +261,7 @@ test("re-issuing the spell: offered for an encrypted vault only, a new spell sho
   assert.deepEqual(spellLeftovers($), []);
   assert.match($("#vault-converted-title").textContent, /再発行しました（まだ使用していません）/);
   assert.match($("#vault-converted-title").textContent, /古い呪文では開けません/);
-  assert.ok($("#vault-converted-title").textContent.includes(REISSUE_SPELL_NOTE));
+  assert.ok($("#vault-converted-title").textContent.includes(texts.REISSUE_SPELL_NOTE));
   $("#vault-convert-activate").dispatch("click");
   await settle(40);
   assert.equal(host.active, TARGET);
@@ -270,9 +270,9 @@ test("re-issuing the spell: offered for an encrypted vault only, a new spell sho
 });
 
 test("Slice E texts: the spell and the vault file are all a recovery needs; earlier schemes are named, never taken for a wrong spell", async () => {
-  assert.ok(!SPELL_NOTE.includes(".mckey"));
-  assert.match(SPELL_NOTE, /暗号化Vaultのファイル1個（またはそのバックアップ）があれば/);
-  assert.match(SPELL_NOTE, /ふっかつのじゅもんを再発行する/);
+  assert.ok(!texts.SPELL_NOTE.includes(".mckey"));
+  assert.match(texts.SPELL_NOTE, /暗号化Vaultのファイル1個（またはそのバックアップ）があれば/);
+  assert.match(texts.SPELL_NOTE, /ふっかつのじゅもんを再発行する/);
   assert.equal(convertMakesSpell("encrypt"), true);
   assert.equal(convertMakesSpell("reissue"), true);
   assert.equal(convertMakesSpell("decrypt"), false);

@@ -2,30 +2,17 @@
 // only sends requests and renders the host's answers.
 
 import { SearchError } from "./search-client.js";
+import { messageTable, t } from "./i18n.js";
 import {
   BACKUP_FORMAT_NOTE,
-  CONVERT_SPELL_NOTE,
   CONVERT_TEXT,
-  ENCRYPTION_NOTE,
-  LOCATION_NOTE,
-  BACKUP_SPELL_NOTE,
-  PASSWORD_NOTE,
   PUBLICATION_NOTE,
-  PUBLICATION_REVIEW,
-  RECOVERY_TITLE,
-  SPELL_CAUTION,
-  SPELL_CHECK_TITLE,
-  SPELL_LEAD,
-  SPELL_NOTE,
-  SPELL_TITLE,
-  VERDICT_TEXT,
   backupFormat,
   checkBackupPassword,
   checkSpell,
   convertDirection,
   convertMakesSpell,
   reissueOffered,
-  REISSUE_SPELL_NOTE,
   describeConversionPending,
   describeConverted,
   describeSpellProblem,
@@ -36,9 +23,11 @@ import {
   describeRestoreSource,
   describeRestored,
   describeStatus,
+  describeVerdict,
   formatCounts,
   normalizeSpellInput,
   spellMatches,
+  texts,
   vaultRequest,
 } from "./vault-client.js";
 
@@ -55,6 +44,12 @@ const CONVERT_END_TYPES = new Set(["vault_convert_activate", "vault_convert_keep
 const NAMES_SHOWN_TYPES = new Set(["vault_backup", "vault_convert_start"]);
 
 const $ = (selector) => document.querySelector(selector);
+
+/** Labels of the spell step's two buttons, by what the step finishes (create or convert). */
+const CONFIRM_LABEL_KEYS = Object.freeze({ create: "vaultSpellConfirmCreate", convert: "vaultSpellConfirmConvert" });
+const CANCEL_LABEL_KEYS = Object.freeze({ create: "vaultOnboardingCancelCreate", convert: "vaultOnboardingCancelConvert" });
+const confirmLabel = messageTable(CONFIRM_LABEL_KEYS);
+const cancelLabel = messageTable(CANCEL_LABEL_KEYS);
 
 /** Puts `text` on the clipboard, only ever from the user's own click on "コピー". */
 function writeClipboard(text) {
@@ -95,7 +90,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   const publicationReviewTitle = $("#vault-publication-review-title");
   const publicationApprove = $("#vault-publication-approve");
   const publicationCancel = $("#vault-publication-cancel");
-  $("#vault-note").textContent = LOCATION_NOTE;
+  $("#vault-note").textContent = texts.LOCATION_NOTE;
   // Issue #51: encryption choice, the Recovery Spell (ふっかつのじゅもん) shown once, and recovery.
   const encryptionBox = $("#vault-encryption");
   const encryptionNote = $("#vault-encryption-note");
@@ -134,7 +129,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   // Review finding C-03: an encrypted vault's backup (B, D) needs the spell that recovers it.
   const backupSpellRow = $("#vault-backup-spell-row");
   const backupSpell = $("#vault-backup-spell");
-  $("#vault-backup-spell-note").textContent = BACKUP_SPELL_NOTE;
+  $("#vault-backup-spell-note").textContent = texts.BACKUP_SPELL_NOTE;
   const restorePick = $("#vault-restore-pick");
   const restoreBox = $("#vault-restore");
   const restoreTitle = $("#vault-restore-title");
@@ -168,15 +163,13 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   const convertActivate = $("#vault-convert-activate");
   const convertKeep = $("#vault-convert-keep");
   const convertDiscard = $("#vault-convert-discard");
-  const confirmLabel = { create: spellConfirm.textContent || "確認して作成を完了する", convert: "確認して変換を完了する" };
-  const cancelLabel = { create: onboardingCancel.textContent || "作成をやめる", convert: "変換をやめる（作成した暗号化Vaultを破棄）" };
-  $("#vault-backup-password-note").textContent = PASSWORD_NOTE;
-  encryptionNote.textContent = ENCRYPTION_NOTE;
-  onboardingTitle.textContent = SPELL_TITLE;
-  $("#vault-spell-lead").textContent = SPELL_LEAD;
-  $("#vault-spell-caution").textContent = SPELL_CAUTION;
-  $("#vault-spell-note").textContent = SPELL_NOTE;
-  $("#vault-spell-check-title").textContent = SPELL_CHECK_TITLE;
+  $("#vault-backup-password-note").textContent = texts.PASSWORD_NOTE;
+  encryptionNote.textContent = texts.ENCRYPTION_NOTE;
+  onboardingTitle.textContent = texts.SPELL_TITLE;
+  $("#vault-spell-lead").textContent = texts.SPELL_LEAD;
+  $("#vault-spell-caution").textContent = texts.SPELL_CAUTION;
+  $("#vault-spell-note").textContent = texts.SPELL_NOTE;
+  $("#vault-spell-check-title").textContent = texts.SPELL_CHECK_TITLE;
 
   const actionButtons = [createDefault, createPick, openPick, backupPick, restorePick, convertPick, reissuePick, publicationConfirm, publicationRevoke, publicationApprove, ...document.querySelectorAll("[data-manual]")];
   const creationButtons = [createDefault, createPick, openPick, document.querySelector('[data-manual="vault_create"]'), document.querySelector('[data-manual="vault_open"]')];
@@ -268,7 +261,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     if (params.protection === "password") {
       const problem = checkBackupPassword(backupPasswordInput.value, backupPasswordConfirm.value);
       if (problem) {
-        setMessage(`${problem}\nバックアップは作成していません。`);
+        setMessage(`${problem}\n${t("vaultBackupNotCreated")}`);
         backupPasswordInput.focus();
         return null;
       }
@@ -277,7 +270,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     if (encryptedShown()) {
       const problem = checkSpell(backupSpell.value);
       if (problem) {
-        setMessage(`${problem}\nバックアップは作成していません。`);
+        setMessage(`${problem}\n${t("vaultBackupNotCreated")}`);
         backupSpell.focus();
         return null;
       }
@@ -301,6 +294,17 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   }
 
   function render() {
+    // The buttons follow the status even if a message cannot be shown (a missing catalog entry
+    // throws): nothing is left enabled by a half-finished render.
+    try {
+      renderText();
+    } finally {
+      updateButtons();
+    }
+    onStatus(status);
+  }
+
+  function renderText() {
     stateText.textContent = describeStatus(status);
     pathText.hidden = !status?.vaultPath;
     pathText.textContent = status?.vaultPath || "";
@@ -312,8 +316,8 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     locationBox.hidden = !location;
     if (location) {
       locationBox.dataset.verdict = location.verdict;
-      const approvedNote = location.verdict === "needs_approval" && status.locationApproved ? "（承認済み）" : "";
-      verdictText.textContent = `${VERDICT_TEXT[location.verdict] || location.verdict}${approvedNote}`;
+      const verdict = describeVerdict(location.verdict);
+      verdictText.textContent = location.verdict === "needs_approval" && status.locationApproved ? t("vaultVerdictApproved", verdict) : verdict;
       fillList(reasonsList, describeReasons(location.reasons));
     }
 
@@ -342,7 +346,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     const pendingPath = typeof status?.creationPending === "string" ? status.creationPending : null;
     creationPendingBox.hidden = pendingPath === null || Boolean(onboarding);
     if (!creationPendingBox.hidden) {
-      creationPendingText.textContent = `作成途中の暗号化Vaultがあります（ふっかつのじゅもんの確認前に中断されました）。呪文は再表示できないため、破棄して作成し直してください。${pendingPath ? `\n保存先: ${pendingPath}` : ""}`;
+      creationPendingText.textContent = `${t("vaultCreationPending")}${pendingPath ? `\n${t("vaultLocationLine", String(pendingPath))}` : ""}`;
     }
     recoveryOffer.hidden = !(status?.mode === "encrypted" && status.recoveryAvailable === true && status.state !== "ready");
 
@@ -357,7 +361,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
       convertTitle.textContent = text.title;
       convertNote.textContent = text.note;
       convertPick.textContent = text.pick;
-      convertSource.textContent = `変換元（このVault・そのまま残ります）: ${status.vaultPath}`;
+      convertSource.textContent = t("vaultConvertSourceLine", String(status.vaultPath));
       convertAckRow.hidden = direction !== "decrypt";
     } else {
       convertAck.checked = false;
@@ -374,14 +378,10 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     if (conversion && !converted && !onboarding) showConversionPending(conversion);
 
     if (status?.defaultPath) {
-      defaultPathText.textContent = status.defaultExists
-        ? `既定の場所に既にファイルがあります: ${status.defaultPath}\n開く場合は「既存のVaultを開く」を使ってください。`
-        : status.defaultPath;
+      defaultPathText.textContent = status.defaultExists ? t("vaultDefaultExists", String(status.defaultPath)) : status.defaultPath;
     } else {
       defaultPathText.textContent = "";
     }
-    updateButtons();
-    onStatus(status);
   }
 
   function setMessage(text) {
@@ -406,7 +406,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
       } catch (error) {
         if (request !== statusRequest) return latestStatus;
         status = null;
-        setMessage(error instanceof SearchError ? error.message : "Vaultの状態を取得できませんでした。");
+        setMessage(error instanceof SearchError ? error.message : t("vaultStatusFailed"));
       }
       render();
       return status;
@@ -417,7 +417,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
 
   function showApproval(type, params, response) {
     pendingApproval = { type, params: { ...params, path: response.path, approveWarnings: true } };
-    approvalTitle.textContent = `この場所をActive Vaultにすると、同期による破損やデータ消失の恐れがあります:\n${response.path}`;
+    approvalTitle.textContent = t("vaultLocationWarning", String(response.path));
     fillList(approvalReasons, describeReasons(response.location?.reasons));
     approvalBox.hidden = false;
     approveButton.focus();
@@ -425,22 +425,24 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
 
   function successMessage(type, response) {
     if (type === "vault_backup") {
-      const format = typeof response.format === "string" ? `（形式${response.format}）` : "";
-      const policy = response.policyCopy === true ? "\nプライバシー設定のコピーを含めました。" : "";
-      return `バックアップを作成しました${format}。\nバックアップ元: ${response.vaultPath}\n保存先: ${response.backupPath}${policy}`;
+      const created =
+        typeof response.format === "string"
+          ? t("vaultBackupCreatedFormat", response.format, String(response.vaultPath), String(response.backupPath))
+          : t("vaultBackupCreated", String(response.vaultPath), String(response.backupPath));
+      return response.policyCopy === true ? `${created}\n${t("vaultBackupPolicyIncluded")}` : created;
     }
-    if (type === "vault_restore_activate") return `復元したVaultを使い始めました:\n${response.path}\nMCPへの公開は未承認です。必要なら下で承認してください。`;
-    if (type === "vault_restore_discard") return "復元したVault（または中断された復元）を破棄しました。Active Vaultは変更していません。";
-    if (type === "vault_publication_confirm") return "このVaultをMCPに公開しました。プライバシー設定を通過した記録だけが読まれます。";
-    if (type === "vault_publication_revoke") return "このVaultのMCPへの公開を停止しました。MCPクライアントには内容を返しません。";
-    if (type === "vault_create") return `新しいVaultを作成し、使用を開始しました:\n${response.path}`;
-    if (type === "vault_create_encrypted_commit") return `暗号化Vaultを作成し、使用を開始しました:\n${response.path}\nMCPへの公開は未承認です。必要なら下で承認してください。`;
-    if (type === "vault_create_encrypted_cancel") return "作成途中の暗号化Vaultを破棄しました。Active Vaultは変更していません。";
-    if (type === "vault_recover") return `ふっかつのじゅもんで復旧し、このWindowsユーザーで開けるようにしました:\n${response.path}\nMCPへの公開は未承認です。`;
-    if (type === "vault_convert_activate") return `変換したVaultを使い始めました:\n${response.path}\n変換元のVaultは削除していません。MCPへの公開は未承認です。必要なら下で承認してください。`;
-    if (type === "vault_convert_keep") return `変換したVaultを、切り替えずに保存しました:\n${response.path}\nActive Vaultは変更していません。使うときは「既存のVaultを開く」で開いてください。`;
-    if (type === "vault_convert_discard") return "変換したVault（または変換途中のファイル）を破棄しました。元のVaultとActive Vaultは変更していません。";
-    return `Vaultを開きました:\n${response.path}`;
+    if (type === "vault_restore_activate") return t("vaultRestoreActivated", String(response.path));
+    if (type === "vault_restore_discard") return t("vaultRestoreDiscarded");
+    if (type === "vault_publication_confirm") return t("vaultPublicationApproved");
+    if (type === "vault_publication_revoke") return t("vaultPublicationRevoked");
+    if (type === "vault_create") return t("vaultCreated", String(response.path));
+    if (type === "vault_create_encrypted_commit") return t("vaultEncryptedCreated", String(response.path));
+    if (type === "vault_create_encrypted_cancel") return t("vaultCreationDiscarded");
+    if (type === "vault_recover") return t("vaultRecovered", String(response.path));
+    if (type === "vault_convert_activate") return t("vaultConvertActivated", String(response.path));
+    if (type === "vault_convert_keep") return t("vaultConvertKept", String(response.path));
+    if (type === "vault_convert_discard") return t("vaultConvertDiscarded");
+    return t("vaultOpened", String(response.path));
   }
 
   async function run(type, params = {}) {
@@ -451,8 +453,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     const namesShown = NAMES_SHOWN_TYPES.has(type) || isPublication;
     const source = namesShown ? backupSource() : null;
     if (namesShown && !source) {
-      const what = isPublication ? null : type === "vault_convert_start" ? "変換する" : "バックアップする";
-      setMessage(isPublication ? "対象のVaultを確認できないため、MCPへの公開の設定は変更していません。表示を更新します。" : `${what}Vaultを確認できないため、開始しませんでした。表示を更新します。`);
+      setMessage(t(isPublication ? "vaultPublicationSourceUnknown" : type === "vault_convert_start" ? "vaultConvertSourceUnknown" : "vaultBackupSourceUnknown"));
       await refresh();
       return;
     }
@@ -463,12 +464,13 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     pendingApproval = null;
     updateButtons();
     const usesDialog = DIALOG_TYPES.has(type) && !params.path && !params.directory && !params.useDefault;
-    setMessage(usesDialog ? "Windowsのダイアログで選択してください。\n表示されない場合はタスクバーを確認してください。" : "処理中…");
     try {
+      // Inside the try: a missing message sends nothing and still ends the step (busy, secrets, acknowledgement).
+      setMessage(t(usesDialog ? "vaultChooseInDialog" : "vaultWorking"));
       const response = await vaultRequest(type, params, { send });
       if (type === "vault_backup" && response.vaultToken !== source.vaultToken) {
         // The host only backs up the vault named; an answer naming another is reported, not trusted.
-        setMessage(`バックアップ元が表示中のVaultと一致しません。作成されたファイルを確認してください。\nバックアップ元: ${response.vaultPath}\n保存先: ${response.backupPath}`);
+        setMessage(t("vaultBackupSourceMismatch", String(response.vaultPath), String(response.backupPath)));
         return;
       }
       if (type === "vault_create_encrypted") {
@@ -484,7 +486,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
         // Restored, but not active: the user decides after seeing what was restored.
         closeRestore();
         showRestored(response);
-        setMessage("復元が完了しました。内容を確認して、使い始めるか破棄してください。");
+        setMessage(t("vaultRestoreDone"));
         return;
       }
       if (type === "vault_convert_start") {
@@ -493,7 +495,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
         if (convertMakesSpell(response.direction)) startOnboarding(response, "convert");
         else {
           showConverted(response);
-          setMessage("暗号化を解除した新しいVaultを作成し、内容を検証しました。使い始めるか、切り替えずに保存するか、破棄してください。");
+          setMessage(t("vaultDecryptCreated"));
         }
         return;
       }
@@ -501,7 +503,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
         const shown = { ...response, direction: onboarding?.direction ?? "encrypt", sourcePath: onboarding?.sourcePath, counts: onboarding?.counts };
         clearOnboarding();
         showConverted(shown);
-        setMessage("ふっかつのじゅもんの確認が完了しました。使い始めるか、切り替えずに保存するか、破棄してください。");
+        setMessage(t("vaultConvertSpellConfirmed"));
         return;
       }
       if (RESTORE_END_TYPES.has(type)) closeRestored();
@@ -524,22 +526,22 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
       if (error.code === "recovery_spell_invalid") {
         setMessage(describeSpellProblem(response));
       } else if ((error.code === "key_unavailable" || error.code === "vault_locked" || error.code === "vault_decrypt_failed") && response?.recoveryAvailable === true && response.path) {
-        setMessage(`${error.message}\nふっかつのじゅもんで復旧できます。`);
+        setMessage(`${error.message}\n${t("vaultRecoverableHint")}`);
         startRecovery(response.path);
       } else if (source && error.code === "vault_switched") {
-        const unchanged = isPublication ? "MCPへの公開の設定は変更していません。" : type === "vault_convert_start" ? "変換は開始していません。" : "バックアップは作成していません。";
-        setMessage(`表示していたVault（${source.vaultPath}）は、もうActiveではありません。${unchanged}\n表示を最新の状態に更新しました。確認してから、もう一度実行してください。`);
+        const switched = isPublication ? "vaultSwitchedPublication" : type === "vault_convert_start" ? "vaultSwitchedConvert" : "vaultSwitchedBackup";
+        setMessage(t(switched, String(source.vaultPath)));
       } else if (isPublication && typeof error.code === "string" && error.code.startsWith("policy_")) {
-        setMessage("プライバシー設定を読み取れない（未初期化・破損・使用中など）ため、MCPへの公開を承認していません。下の「プライバシー設定」を確認してください。");
+        setMessage(t("vaultPublicationPolicyUnreadable"));
       } else if (error.code === "location_needs_approval" && response?.path) {
         setMessage("");
         showApproval(type, params, response);
       } else {
         const reasons = describeReasons(response?.location?.reasons);
-        const lines = [error instanceof SearchError ? error.message : "操作に失敗しました。"];
-        if (response?.created) lines.push("Vaultファイルは作成されましたが、使用開始に失敗しました。「既存のVaultを開く」で開けます。");
+        const lines = [error instanceof SearchError ? error.message : t("errorGeneric")];
+        if (response?.created) lines.push(t("vaultCreatedNotActive"));
         if (response?.path) lines.push(response.path);
-        if (reasons.length) lines.push(...reasons.map((reason) => `・${reason}`));
+        if (reasons.length) lines.push(...reasons.map((reason) => t("vaultReasonBullet", String(reason))));
         setMessage(lines.join("\n"));
       }
     } finally {
@@ -638,20 +640,19 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   function startOnboarding(response, kind = "create") {
     const spell = typeof response?.recoverySpell === "string" ? response.recoverySpell : "";
     if (checkSpell(spell) !== null || spell !== normalizeSpellInput(spell)) {
-      setMessage(
-        kind === "convert"
-          ? "ふっかつのじゅもんを受け取れませんでした。変換したVaultを破棄して、もう一度変換してください。"
-          : "ふっかつのじゅもんを受け取れませんでした。作成途中のVaultを破棄して、作成し直してください。",
-      );
+      setMessage(t(kind === "convert" ? "vaultSpellNotReceivedConvert" : "vaultSpellNotReceivedCreate"));
       return;
     }
-    onboarding = { spell, path: response.path, kind, direction: response.direction ?? null, sourcePath: response.sourcePath ?? null, counts: response.counts ?? null };
-    spellConfirm.textContent = confirmLabel[kind];
-    onboardingCancel.textContent = cancelLabel[kind];
-    onboardingPath.textContent =
+    // Every text is read before the step starts: a missing message stops here, with nothing shown.
+    const labels = { confirm: confirmLabel[kind], cancel: cancelLabel[kind] };
+    const pathText =
       kind === "convert"
-        ? `変換先（新しい暗号化Vault）: ${response.path}\n変換元（そのまま残ります）: ${response.sourcePath ?? ""}\n${CONVERT_SPELL_NOTE}${response.direction === "reissue" ? `\n${REISSUE_SPELL_NOTE}` : ""}`
-        : `保存先: ${response.path}`;
+        ? `${t("vaultOnboardingConvertPaths", String(response.path), String(response.sourcePath ?? ""))}\n${texts.CONVERT_SPELL_NOTE}${response.direction === "reissue" ? `\n${texts.REISSUE_SPELL_NOTE}` : ""}`
+        : t("vaultLocationLine", String(response.path));
+    onboarding = { spell, path: response.path, kind, direction: response.direction ?? null, sourcePath: response.sourcePath ?? null, counts: response.counts ?? null };
+    spellConfirm.textContent = labels.confirm;
+    onboardingCancel.textContent = labels.cancel;
+    onboardingPath.textContent = pathText;
     showSpell();
     onboardingBox.hidden = false;
     setMessage("");
@@ -660,20 +661,21 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
 
   /** Forgets the spell: memory, DOM and the confirmation input. */
   function clearOnboarding() {
+    // The spell leaves the page first: a missing message for the labels below must not leave it shown.
     onboarding = null;
-    spellConfirm.textContent = confirmLabel.create;
-    onboardingCancel.textContent = cancelLabel.create;
     spellText.textContent = "";
     spellConfirmInput.value = "";
     onboardingPath.textContent = "";
     spellShow.hidden = false;
     spellCheck.hidden = true;
     onboardingBox.hidden = true;
+    spellConfirm.textContent = confirmLabel.create;
+    onboardingCancel.textContent = cancelLabel.create;
   }
 
   function startRecovery(path) {
     recoveryTarget = path;
-    recoveryTitle.textContent = `${RECOVERY_TITLE}\n対象: ${path}`;
+    recoveryTitle.textContent = `${texts.RECOVERY_TITLE}\n${t("vaultTargetLine", String(path))}`;
     recoveryInput.value = "";
     recoveryBox.hidden = false;
     recoveryInput.focus();
@@ -689,9 +691,9 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     if (!onboarding) return;
     try {
       await copyText(onboarding.spell);
-      setMessage("コピーしました。安全な場所に保管したら、クリップボード（Windowsのクリップボード履歴を含む）から消去してください。");
+      setMessage(t("vaultSpellCopied"));
     } catch {
-      setMessage("コピーできませんでした。表示された呪文を書き写してください。");
+      setMessage(t("vaultSpellCopyFailed"));
     }
   });
   spellWritten.addEventListener("click", () => {
@@ -712,8 +714,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     const converting = onboarding.kind === "convert";
     if (!spellMatches(onboarding.spell, typed)) {
       const problem = checkSpell(typed);
-      const notYet = converting ? "変換はまだ完了していません。元のVaultは変更していません" : "Vaultはまだ作成していません";
-      setMessage(`${problem ?? "入力した呪文が、表示したふっかつのじゅもんと一致しません。"}\n記録した内容を確認して、もう一度入力してください（${notYet}）。`);
+      setMessage(`${problem ?? t("vaultSpellMismatch")}\n${t(converting ? "vaultSpellRetryConvert" : "vaultSpellRetryCreate")}`);
       spellConfirmInput.focus();
       return;
     }
@@ -728,7 +729,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     if (!recoveryTarget || busy) return;
     const problem = checkSpell(recoveryInput.value);
     if (problem) {
-      setMessage(`${problem}\nVaultも鍵も変更していません。`);
+      setMessage(`${problem}\n${t("vaultRecoveryUnchanged")}`);
       recoveryInput.focus();
       return;
     }
@@ -736,7 +737,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   });
   recoveryCancel.addEventListener("click", () => {
     closeRecovery();
-    setMessage("キャンセルしました。Vaultも鍵も変更していません。");
+    setMessage(t("vaultRecoveryCancelled"));
   });
 
   createDefault.addEventListener("click", () => void run(createType(), { useDefault: true }));
@@ -758,7 +759,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     const params = { backupPath: restoreSource.backupPath };
     if (restoreSource.needsPassword) {
       if (!restorePassword.value) {
-        setMessage("バックアップのパスワードを入力してください。");
+        setMessage(t("vaultRestorePasswordRequired"));
         restorePassword.focus();
         return;
       }
@@ -767,7 +768,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     if (restoreSource.needsSpell) {
       const problem = checkSpell(restoreSpell.value);
       if (problem) {
-        setMessage(`${problem}\n何も復元していません。`);
+        setMessage(`${problem}\n${t("vaultNothingRestored")}`);
         restoreSpell.focus();
         return;
       }
@@ -777,7 +778,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
   });
   restoreCancel.addEventListener("click", () => {
     closeRestore();
-    setMessage("キャンセルしました。何も復元していません。");
+    setMessage(t("vaultRestoreCancelled"));
   });
   restoreActivate.addEventListener("click", () => {
     if (restored?.vaultToken) void run("vault_restore_activate", { expectedVaultToken: restored.vaultToken });
@@ -788,7 +789,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     const direction = convertDirection(status?.mode);
     if (!direction || busy) return;
     if (direction === "decrypt" && !convertAck.checked) {
-      setMessage("暗号化を解除すると、閲覧履歴や画像が暗号化されずにディスクへ保存されます。確認のチェックを入れてから実行してください。");
+      setMessage(t("vaultDecryptNotAcknowledged"));
       return;
     }
     const params = { direction };
@@ -810,7 +811,7 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     button.addEventListener("click", () => {
       const value = manualInput.value.trim();
       if (!value) {
-        setMessage("パスを入力してください。");
+        setMessage(t("vaultEnterPath"));
         manualInput.focus();
         return;
       }
@@ -830,20 +831,20 @@ export function createVaultPanel({ send, onVaultChanged, reveal = () => {}, onSt
     approvalBox.hidden = true;
     // A recovery waiting for this approval carries the spell: forget it with the request.
     pendingApproval = null;
-    setMessage("キャンセルしました。");
+    setMessage(t("vaultCancelled"));
   });
   // Confirming takes two steps: what publishing means and which vault, then the approval itself.
   publicationConfirm.addEventListener("click", () => {
     const source = backupSource();
     if (busy || !source || status?.publication !== "pending") return;
-    publicationReviewTitle.textContent = `${PUBLICATION_REVIEW}\n対象: ${source.vaultPath}`;
+    publicationReviewTitle.textContent = `${texts.PUBLICATION_REVIEW}\n${t("vaultTargetLine", String(source.vaultPath))}`;
     publicationReview.hidden = false;
     publicationApprove.focus();
   });
   publicationApprove.addEventListener("click", () => void run("vault_publication_confirm"));
   publicationCancel.addEventListener("click", () => {
     publicationReview.hidden = true;
-    setMessage("キャンセルしました。MCPへの公開は承認していません。");
+    setMessage(t("vaultPublicationCancelled"));
   });
   publicationRevoke.addEventListener("click", () => void run("vault_publication_revoke"));
 

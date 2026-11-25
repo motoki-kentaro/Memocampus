@@ -1,4 +1,4 @@
-// Opt-in Chrome runtime dogfood for Issue #77 Slice 2 (Side Panel i18n). A fresh temporary profile and a
+// Opt-in Chrome runtime dogfood for Issue #77 Slices 2 and 3 (Side Panel i18n, Vault section included). A fresh temporary profile and a
 // temporary copy of the extension only; no registry, no Vault, no installed Native Host. In the copy, the
 // Side Panel's Native Messaging is bridged (CDP Runtime.addBinding) to the tests' fake host
 // (tests/extension/fake-dom.js createHost, delete-fixtures.js), and the service worker's is a stub that
@@ -7,17 +7,19 @@
 //   node tests/dogfood/sidepanel-i18n-chrome.mjs <chrome.exe> [outDir] [--keep]
 //
 // For ja and en, and for widths of 320, 400 and 600 px, it opens sidepanel.html and checks: i18n-dom.js
-// applied (<html lang>, the Vault section lang="ja"), no horizontal scroll, no control outside the viewport,
-// no two controls overlapping, no clipped control text, no console error; in English no Japanese outside
-// the Vault section. Scenarios: URL tab, host-wide rule dialog, deletion dialog, calendar, Image details,
-// Page tab. Screenshots and the measurements are written to outDir.
+// applied (<html lang>, no part with a language of its own), no horizontal scroll, no control outside the
+// viewport, no two controls overlapping, no clipped control text, no console error; in English no Japanese at
+// all. Scenarios: URL tab, host-wide rule dialog, deletion dialog, calendar, Image details, Page tab, and the
+// Vault section's states (Slice 3): settings, password backup, Recovery Spell shown and re-entered, restore,
+// restored, removing encryption, converted, interrupted steps, MCP approval. The spell on screen is the fixed
+// test value of fake-dom.js, never a real one. Screenshots and the measurements are written to outDir.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHost, imageSummary } from "../extension/fake-dom.js";
+import { TEST_SPELL, createHost, imageSummary } from "../extension/fake-dom.js";
 import { createDeletePort, visitRow } from "../extension/delete-fixtures.js";
 
 const args = process.argv.slice(2).filter((arg) => !arg.startsWith("--"));
@@ -106,7 +108,7 @@ class CDP {
 }
 
 // The fake host's data: long English and Japanese titles, so wrapping is exercised; web text is never translated.
-function fakeHost() {
+function fakeHost(options = {}) {
   const rows = [
     { url: "https://docs.example.test/guides/a-very-long-path/with/many/segments?query=string&and=more", title: "A rather long English page title that has to wrap inside a narrow side panel", lastVisitedAt: new Date().toISOString(), lastCapturedAt: new Date().toISOString(), lastActivityAt: new Date().toISOString(), source: "visit" },
     { url: "https://news.example.test/article", title: "Short title", lastVisitedAt: "2026-10-12T00:00:00.000Z", lastCapturedAt: null, lastActivityAt: "2026-10-12T00:00:00.000Z", source: "visit" },
@@ -116,7 +118,14 @@ function fakeHost() {
     vaults: { "C:\\dogfood\\memocampus.sqlite3": rows }, active: "C:\\dogfood\\memocampus.sqlite3",
     capabilities: ["navigation_v1", "vault_items_v1", "visit_calendar_v1", "item_delete_v1"],
     images: { "C:\\dogfood\\memocampus.sqlite3": Array.from({ length: 7 }, (_, i) => imageSummary(i + 1, Date.now() - i * 60_000)) },
+    encryption: Boolean(options.vault), restore: Boolean(options.vault), convert: Boolean(options.vault),
   });
+  if (options.encrypted) host.encrypted.add(host.active);
+  if (options.backup) host.backupFiles[host.restoreDialog] = { format: "D", mode: "encrypted", password: "dogfood password", spell: TEST_SPELL, pages: rows, policyCopy: { state: "valid", revision: 7, policy: { revision: 7 }, approvedDomains: [] } };
+  if (options.interrupted) {
+    host.creation = { path: "C:\\dogfood\\a-rather-long-folder-name\\memocampus-encrypted.sqlite3", spell: TEST_SPELL };
+    host.restorePending = { path: "C:\\dogfood\\restored\\memocampus-restored.sqlite3", phase: "restoring", format: "D", mode: "encrypted", vaultToken: null };
+  }
   host.visits = { [host.active]: rows.flatMap((row, i) => [visitRow(`v${i}a`, row.url, row.title), visitRow(`v${i}b`, row.url, row.title)]) };
   host.snapshots = { [host.active]: [rows[0].url] };
   // All three privacy states on screen, so their longest English labels are measured too.
@@ -139,7 +148,18 @@ const MEASURE = `(() => {
     .map((el) => (el.id || el.className || el.tagName) + ": " + el.textContent.trim().slice(0, 40));
   // Only what is on top counts: a popover or dialog over the list is the design, not an overlap.
   const onTop = (el) => { const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return hit !== null && (hit === el || el.contains(hit)); };
-  const boxes = controls.filter((el) => el.matches("button, input, select") && onTop(el)).map((el) => [el, el.getBoundingClientRect()]);
+  // The part of a control that can be seen: clipped by every scrolling ancestor (a control scrolled half out of
+  // a scrolling panel is not under the tab bar outside that panel).
+  const seen = (el) => {
+    let { left, top, right, bottom } = el.getBoundingClientRect();
+    for (let p = el.parentElement; p; p = p.parentElement) {
+      if (!/(auto|scroll|hidden)/.test(getComputedStyle(p).overflowY)) continue;
+      const c = p.getBoundingClientRect();
+      left = Math.max(left, c.left); top = Math.max(top, c.top); right = Math.min(right, c.right); bottom = Math.min(bottom, c.bottom);
+    }
+    return { left, top, right, bottom };
+  };
+  const boxes = controls.filter((el) => el.matches("button, input, select") && onTop(el)).map((el) => [el, seen(el)]);
   const overlaps = [];
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
     const [a, ra] = boxes[i], [b, rb] = boxes[j];
@@ -152,11 +172,12 @@ const MEASURE = `(() => {
     const x = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left), y = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
     if (x > 1 && y > 1) overlaps.push((a.id || a.className) + " × " + (b.id || b.className));
   }
-  const vault = document.querySelector("#vault-panel");
-  const text = [...document.querySelectorAll("body *")].filter((el) => !vault.contains(el) && visible(el) && el.children.length === 0).map((el) => el.textContent.trim()).filter(Boolean);
-  const attributes = [...document.querySelectorAll("[aria-label], [title], [placeholder]")].filter((el) => !vault.contains(el)).flatMap((el) => ["aria-label", "title", "placeholder"].map((a) => el.getAttribute(a)).filter(Boolean));
+  // Visible text: the direct text of every visible element (so labels that hold a control count too).
+  const text = [...document.querySelectorAll("body *")].filter(visible)
+    .map((el) => [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim()).filter(Boolean);
+  const attributes = [...document.querySelectorAll("[aria-label], [title], [placeholder]")].flatMap((el) => ["aria-label", "title", "placeholder"].map((a) => el.getAttribute(a)).filter(Boolean));
   return { width, scrollWidth: document.documentElement.scrollWidth, outside, clipped, overlaps, text, attributes,
-    lang: document.documentElement.lang, vaultLang: vault.getAttribute("lang") };
+    lang: document.documentElement.lang, partLangs: [...document.querySelectorAll("body [lang]")].map((el) => el.id || el.tagName) };
 })()`;
 
 async function session(lang, run) {
@@ -172,11 +193,11 @@ async function session(lang, run) {
     const endpoint = `http://127.0.0.1:${port}`;
     const target = await until(async () => (await fetch(`${endpoint}/json/list`).then((r) => r.json())).find((t) => t.type === "service_worker" && t.url.endsWith("/service-worker.js")), "extension service worker");
     const base = `chrome-extension://${new URL(target.url).host}`;
-    const open = async (width) => {
+    const open = async (width, hostOptions) => {
       const created = await fetch(`${endpoint}/json/new?about:blank`, { method: "PUT" }).then((r) => r.json());
       const page = await CDP.connect(created.webSocketDebuggerUrl);
       sockets.push(page.ws);
-      const host = fakeHost();
+      const host = fakeHost(hostOptions);
       const ports = new Map();
       const errors = [];
       page.on("Runtime.exceptionThrown", (p) => errors.push(`exception: ${p.exceptionDetails.exception?.description ?? p.exceptionDetails.text}`));
@@ -245,7 +266,80 @@ const SCENARIOS = {
     await page.evaluate(`document.querySelector("#tab-page").click()`);
     await pause(600);
   },
+  // --- Slice 3: the Vault section ---
+  vault: async (page) => {
+    await openVault(page);
+    await show(page, "#vault-panel");
+  },
+  "vault-password": async (page) => {
+    await openVault(page);
+    await page.evaluate(`document.querySelector("#vault-backup-password").click()`);
+    await until(() => page.evaluate(`!document.querySelector("#vault-backup-password-fields").hidden`), "password fields");
+    await show(page, "#vault-backup-options");
+  },
+  "vault-spell": async (page) => {
+    await openVault(page);
+    await page.evaluate(`document.querySelector("#vault-create-default").click()`);
+    await until(() => page.evaluate(`!document.querySelector("#vault-onboarding").hidden`), "spell shown");
+    await show(page, "#vault-onboarding");
+  },
+  "vault-spell-check": async (page) => {
+    await SCENARIOS["vault-spell"](page);
+    await page.evaluate(`document.querySelector("#vault-spell-written").click()`);
+    await page.evaluate(`(() => { document.querySelector("#vault-spell-confirm-input").value = "too short"; document.querySelector("#vault-spell-confirm").click(); })()`);
+    await until(() => page.evaluate(`document.querySelector("#vault-message").textContent.length > 0`), "spell check message");
+    await show(page, "#vault-spell-check");
+  },
+  "vault-restore": async (page) => {
+    await openVault(page);
+    await page.evaluate(`document.querySelector("#vault-restore-pick").click()`);
+    await until(() => page.evaluate(`!document.querySelector("#vault-restore").hidden`), "restore asked");
+    await show(page, "#vault-restore");
+  },
+  "vault-restored": async (page) => {
+    await SCENARIOS["vault-restore"](page);
+    await page.evaluate(`(() => { document.querySelector("#vault-restore-password").value = "dogfood password"; document.querySelector("#vault-restore-spell").value = ${JSON.stringify(TEST_SPELL)}; document.querySelector("#vault-restore-submit").click(); })()`);
+    await until(() => page.evaluate(`!document.querySelector("#vault-restored").hidden`), "restored");
+    await show(page, "#vault-restored");
+  },
+  "vault-decrypt": async (page) => {
+    await openVault(page);
+    await until(() => page.evaluate(`!document.querySelector("#vault-convert").hidden && !document.querySelector("#vault-convert-ack-row").hidden`), "decrypt offered");
+    await show(page, "#vault-convert");
+  },
+  "vault-converted": async (page) => {
+    await SCENARIOS["vault-decrypt"](page);
+    await page.evaluate(`(() => { document.querySelector("#vault-convert-ack").click(); document.querySelector("#vault-convert-pick").click(); })()`);
+    await until(() => page.evaluate(`!document.querySelector("#vault-converted").hidden`), "converted");
+    await show(page, "#vault-converted");
+  },
+  "vault-interrupted": async (page) => {
+    await openVault(page);
+    await until(() => page.evaluate(`!document.querySelector("#vault-creation-pending").hidden && !document.querySelector("#vault-restored").hidden`), "interrupted steps");
+    await show(page, "#vault-creation-pending");
+  },
+  "vault-publication": async (page) => {
+    await openVault(page);
+    await page.evaluate(`document.querySelector("#vault-publication-confirm").click()`);
+    await until(() => page.evaluate(`!document.querySelector("#vault-publication-review").hidden`), "approval review");
+    await show(page, "#vault-publication");
+  },
 };
+// The fake host of each Vault scenario (the others use the plain one).
+const VAULT_HOSTS = {
+  vault: { vault: true }, "vault-password": { vault: true }, "vault-spell": { vault: true }, "vault-spell-check": { vault: true },
+  "vault-restore": { vault: true, backup: true }, "vault-restored": { vault: true, backup: true },
+  "vault-decrypt": { vault: true, encrypted: true }, "vault-converted": { vault: true, encrypted: true },
+  "vault-interrupted": { vault: true, interrupted: true }, "vault-publication": { vault: true },
+};
+async function openVault(page) {
+  await page.evaluate(`document.querySelector("#tab-settings").click()`);
+  await until(() => page.evaluate(`document.querySelector("#vault-state").textContent.length > 0 && !document.querySelector("#panel-settings").hidden`), "Vault settings");
+}
+async function show(page, selector) {
+  await pause(200);
+  await page.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: "start" })`);
+}
 
 const results = { root, outDir, sessions: {} };
 const problems = [];
@@ -255,7 +349,7 @@ try {
       const out = {};
       for (const width of WIDTHS) {
         for (const [name, scenario] of Object.entries(SCENARIOS)) {
-          const { page, errors } = await open(width);
+          const { page, errors } = await open(width, VAULT_HOSTS[name]);
           await scenario(page);
           await pause(200);
           const m = await page.evaluate(MEASURE);
@@ -263,11 +357,11 @@ try {
           const file = path.join(outDir, `sidepanel-${lang}-${width}-${name}.png`);
           writeFileSync(file, Buffer.from(shot.data, "base64"));
           const japanese = lang === "en" ? [...m.text, ...m.attributes].filter((s) => JAPANESE.test(s) && !s.includes("日本語のページタイトル")) : [];
-          const entry = { scrollWidth: m.scrollWidth, outside: m.outside, clipped: m.clipped, overlaps: m.overlaps, errors, japanese, lang: m.lang, vaultLang: m.vaultLang, screenshot: path.basename(file) };
+          const entry = { scrollWidth: m.scrollWidth, outside: m.outside, clipped: m.clipped, overlaps: m.overlaps, errors, japanese, lang: m.lang, partLangs: m.partLangs, screenshot: path.basename(file) };
           out[`${width}-${name}`] = entry;
           const where = `${lang} ${width}px ${name}`;
           if (m.lang !== lang) problems.push(`${where}: <html lang="${m.lang}">`);
-          if (m.vaultLang !== "ja") problems.push(`${where}: the Vault section is not lang="ja"`);
+          for (const item of m.partLangs) problems.push(`${where}: ${item} keeps a language of its own`);
           if (m.scrollWidth > width) problems.push(`${where}: horizontal scroll (${m.scrollWidth}px)`);
           for (const item of m.outside) problems.push(`${where}: outside the viewport: ${item}`);
           for (const item of m.overlaps) problems.push(`${where}: overlap: ${item}`);

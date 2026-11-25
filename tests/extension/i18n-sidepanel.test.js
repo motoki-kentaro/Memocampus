@@ -1,6 +1,6 @@
 // Issue #77 Slice 2: the Side Panel in Japanese and English. Static text comes from sidepanel.html through
-// i18n-dom.js; dynamic text from the modules through t(). The Vault section stays Japanese until Slice 3 and
-// says so (lang="ja"). The language never changes what is sent to the host or what a choice means.
+// i18n-dom.js; dynamic text from the modules through t(). The Vault section is localized in Slice 3
+// (i18n-vault.test.js). The language never changes what is sent to the host or what a choice means.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -37,14 +37,13 @@ function localizeHtml(locale) {
 
 // --- Static HTML -------------------------------------------------------------------------------------------
 
-test("sidepanel.html: Japanese text only inside the marked Vault section, which says lang=\"ja\"", () => {
-  const start = html.indexOf(VAULT_START), end = html.indexOf(VAULT_END);
-  assert.ok(start > 0 && end > start, "the Vault section is marked for Slice 3");
-  const vault = html.slice(start, end);
-  assert.match(vault, /<section id="vault-panel" class="vault-panel" aria-labelledby="vault-heading" lang="ja">/);
-  assert.doesNotMatch(vault, /data-i18n/, "nothing in the Vault section is marked as localized yet");
-  const outside = (html.slice(0, start) + html.slice(end)).split("\n");
-  assert.deepEqual(outside.filter((line) => JAPANESE.test(line)), []);
+test("sidepanel.html: no Japanese text anywhere, and the Vault section follows the page language (Slice 3)", () => {
+  assert.deepEqual(html.split("\n").filter((line) => JAPANESE.test(line) && !/^\s*<!--/.test(line)), []);
+  assert.ok(!html.includes(VAULT_START) && !html.includes(VAULT_END), "the Slice 2 markers are gone");
+  assert.match(html, /<section id="vault-panel" class="vault-panel" aria-labelledby="vault-heading">/);
+  // Only <html lang> (set from the catalog by i18n-dom.js); no part of the panel keeps a language of its own.
+  assert.deepEqual(html.match(/\slang="[^"]*"/g), [' lang="ja"']);
+  assert.match(html, /^<!doctype html>\n<html lang="ja">/i);
   // i18n-dom.js runs as a classic script after the markup and before the page's module.
   assert.ok(html.indexOf('<script src="i18n-dom.js"></script>') < html.indexOf('<script type="module" src="sidepanel.js"></script>'));
   assert.equal((html.match(/<script/g) ?? []).length, 2, "no other script; CSP unchanged");

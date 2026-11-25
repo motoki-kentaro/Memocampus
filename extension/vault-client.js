@@ -1,6 +1,8 @@
-// Vault management requests (`vault_*`) and their display text.
+// Vault management requests (`vault_*`) and their display text. Text comes from the catalogs
+// (Issue #77 Slice 3); nothing here reads display text to decide anything.
 
 import { SEARCH_TIMEOUT_MS, callHost } from "./search-client.js";
+import { formatNumber, messageTable, t } from "./i18n.js";
 
 /** Operations that may show a Windows file dialog wait for the user, so they get a long timeout. */
 export const DIALOG_TIMEOUT_MS = 10 * 60_000;
@@ -13,57 +15,66 @@ export function vaultRequest(type, params, options) {
   );
 }
 
-export const STATE_TEXT = {
-  ready: "接続中",
-  not_configured: "Vaultが未設定です",
-  missing: "Vaultファイルが見つかりません",
-  invalid: "Vaultの形式が不正です",
-  vault_schema_mismatch: "このVaultは現在の形式に対応していません。自動変換は行いません",
-  config_invalid: "設定ファイルを読み取れません",
-  app_dir_unavailable: "設定フォルダを特定できません",
+const STATE_TEXT_KEYS = Object.freeze({
+  ready: "vaultStateReady",
+  not_configured: "vaultStateNotConfigured",
+  missing: "vaultStateMissing",
+  invalid: "vaultStateInvalid",
+  vault_schema_mismatch: "vaultStateSchemaMismatch",
+  config_invalid: "vaultStateConfigInvalid",
+  app_dir_unavailable: "vaultStateAppDirUnavailable",
   // Issue #51: an encrypted or misdescribed vault is reported as such, never as invalid.
-  vault_mode_mismatch: "Vaultファイルが設定上の形式（暗号化／平文）と一致しません。ファイルは変更していません",
-  vault_encryption_unsupported: "この環境では暗号化Vaultを開けません。ファイルは変更していません",
-  key_unavailable: "このWindowsユーザーでは暗号化Vaultの鍵を取得できません。ファイルは変更していません",
-  vault_locked: "暗号化Vaultがロックされています。ファイルは変更していません",
-  vault_decrypt_failed: "暗号化Vaultを復号できません。ファイルは変更していません",
-};
+  vault_mode_mismatch: "vaultStateModeMismatch",
+  vault_encryption_unsupported: "vaultStateEncryptionUnsupported",
+  key_unavailable: "vaultStateKeyUnavailable",
+  vault_locked: "vaultStateLocked",
+  vault_decrypt_failed: "vaultStateDecryptFailed",
+});
+/** One-line state text by `status.state`; only own entries count (no prototype names). */
+export const STATE_TEXT = messageTable(STATE_TEXT_KEYS);
+
+/** The text of `table` for `code`, or undefined when `code` is not one of its own entries. */
+const lookup = (table, code) => (typeof code === "string" && Object.hasOwn(table, code) ? table[code] : undefined);
 
 /** Issue #51 Slice B: encrypted vaults. */
-export const ENCRYPTION_NOTE =
-  "暗号化すると、Vaultファイルが盗まれたりコピーされたりしても、鍵がなければ中身を読めません。" +
-  "このWindowsユーザーでは、毎回パスワードを入力せずに使えます。作成時に一度だけ表示する「ふっかつのじゅもん（Recovery Spell）」は、" +
-  "PCの入れ替えやWindowsの再インストール後に開くときと、暗号化Vaultのバックアップから復元するときに必要です。";
+const NOTE_KEYS = Object.freeze({
+  encryption: "vaultEncryptionNote",
+  spellTitle: "vaultSpellTitle",
+  spellLead: "vaultSpellLead",
+  spellCaution: "vaultSpellCaution",
+  spellNote: "vaultSpellNote",
+  backupSpell: "vaultBackupSpellNote",
+  restore: "vaultRestoreNote",
+  convertSpell: "vaultConvertSpellNote",
+  reissueSpell: "vaultReissueSpellNote",
+  publicationReview: "vaultPublicationReview",
+  location: "vaultLocationNote",
+});
+const NOTE = messageTable(NOTE_KEYS);
 
 /** Issue #51: the Recovery Spell (ふっかつのじゅもん), 256 random bits as 43 base64url characters. */
-export const SPELL_NAME = "ふっかつのじゅもん";
-export const SPELL_NAME_EN = "Recovery Spell";
 export const SPELL_LENGTH = 43;
 const SPELL_ALPHABET = /^[A-Za-z0-9_-]$/;
 // The last of 43 characters carries 4 data bits and 2 unused bits, which must be zero.
 const SPELL_LAST = "AEIMQUYcgkosw048";
 
-export const SPELL_TITLE = `${SPELL_NAME}（${SPELL_NAME_EN}）`;
-
-export const SPELL_LEAD = "あなたの記憶を取り戻すための、復活の呪文を記録してください。決して忘れないでくださいね。";
-
-export const SPELL_CAUTION = "この呪文は一度しか表示されません。安全な場所に保管してください。失うとバックアップから復元できなくなる場合があります。";
-
-export const SPELL_NOTE =
-  "・この呪文と暗号化Vaultのファイル1個（またはそのバックアップ）があれば、別のPC、Windowsの再インストール後、別のWindowsユーザーでも記憶を取り戻せます。ほかのファイルは必要ありません。\n" +
-  "・Memocampusは呪文を保存せず、再表示もできません。呪文をなくしたときは、Vaultを開けるうちに「ふっかつのじゅもんを再発行する」で、新しい呪文の新しいVaultを作れます。\n" +
-  "・呪文を知っている人は、Vaultファイル（またはバックアップ）があれば中身を読めます。誰にも伝えないでください。\n" +
-  "・英字の大文字と小文字は区別されます。紙に書き写すときは、0（ゼロ）とO（オー）、1とlとI、-（ハイフン）と_（アンダースコア）の違いに注意してください。\n" +
-  "・「コピー」を押すと、呪文がクリップボードに入ります。クリップボードやWindowsのクリップボード履歴に残る場合があるため、保管し終えたら消去してください。";
-
-export const SPELL_CHECK_TITLE =
-  `記録した${SPELL_NAME}を、${SPELL_LENGTH}文字すべて入力するか貼り付けてください。表示した呪文と完全に一致するまで、Vaultの作成は完了しません。\n` +
-  "※この確認は、呪文を安全に保管したことの証明にはなりません。PCとは別の安全な場所に保管してください。";
-
-export const RECOVERY_TITLE =
-  "このWindowsユーザーには、この暗号化Vaultの鍵が保存されていません（別のPC・再インストール後・別のユーザーなど）。\n" +
-  `作成時に記録した${SPELL_NAME}（${SPELL_LENGTH}文字）を入力すると、鍵をこのWindowsユーザー用に保存し直して開きます。\n` +
-  "呪文はこのPCに保存しません。";
+// Notes are read from the catalog where they are used (the getters follow the catalog in use).
+export const texts = Object.freeze({
+  get ENCRYPTION_NOTE() { return NOTE.encryption; },
+  get SPELL_TITLE() { return NOTE.spellTitle; },
+  get SPELL_LEAD() { return NOTE.spellLead; },
+  get SPELL_CAUTION() { return NOTE.spellCaution; },
+  get SPELL_NOTE() { return NOTE.spellNote; },
+  get SPELL_CHECK_TITLE() { return t("vaultSpellCheckTitle", SPELL_LENGTH); },
+  get RECOVERY_TITLE() { return t("vaultRecoveryTitle", SPELL_LENGTH); },
+  get PASSWORD_NOTE() { return t("vaultBackupPasswordNote", PASSWORD_MIN_CHARS); },
+  get BACKUP_SPELL_NOTE() { return NOTE.backupSpell; },
+  get RESTORE_NOTE() { return NOTE.restore; },
+  get CONVERT_SPELL_NOTE() { return NOTE.convertSpell; },
+  get REISSUE_SPELL_NOTE() { return NOTE.reissueSpell; },
+  get PUBLICATION_REVIEW() { return NOTE.publicationReview; },
+  get LOCATION_NOTE() { return NOTE.location; },
+});
 
 /** What the user typed or pasted, with surrounding whitespace removed (nothing else is changed). */
 export function normalizeSpellInput(text) {
@@ -72,14 +83,15 @@ export function normalizeSpellInput(text) {
 
 /**
  * Null when `text` (after `normalizeSpellInput`) has the form of a Recovery Spell; otherwise what is
- * wrong. The host checks the same rules again and whether the spell opens the vault.
+ * wrong. The host checks the same rules again and whether the spell opens the vault. The message never
+ * contains the input.
  */
 export function checkSpell(text) {
   const chars = [...normalizeSpellInput(text)];
-  if (chars.length !== SPELL_LENGTH) return `${SPELL_NAME}は${SPELL_LENGTH}文字です（${chars.length}文字でした）。`;
+  if (chars.length !== SPELL_LENGTH) return t("vaultSpellLength", SPELL_LENGTH, chars.length);
   const bad = chars.findIndex((c) => !SPELL_ALPHABET.test(c));
-  if (bad >= 0) return `${bad + 1}文字目に使えない文字があります。使える文字は英字（大文字・小文字）、数字、「-」「_」だけです（空白や全角文字は使えません）。`;
-  if (!SPELL_LAST.includes(chars[SPELL_LENGTH - 1])) return "最後の文字が正しくありません。記録した呪文と照らし合わせてください。";
+  if (bad >= 0) return t("vaultSpellCharacter", bad + 1);
+  if (!SPELL_LAST.includes(chars[SPELL_LENGTH - 1])) return t("vaultSpellLastCharacter");
   return null;
 }
 
@@ -90,10 +102,10 @@ export function spellMatches(shown, typed) {
 
 /** Message for a spell the host refused (`recovery_spell_invalid` details). Never echoes the input. */
 export function describeSpellProblem(response) {
-  if (response?.reason === "length") return `${SPELL_NAME}は${SPELL_LENGTH}文字です（${Number(response.count) || 0}文字でした）。`;
-  if (response?.reason === "character") return `${Number(response.position) || "?"}文字目に使えない文字があります。使える文字は英字（大文字・小文字）、数字、「-」「_」だけです。`;
-  if (response?.reason === "non_canonical") return "最後の文字が正しくありません。記録した呪文と照らし合わせてください。";
-  return `${SPELL_NAME}の形式が正しくありません。`;
+  if (response?.reason === "length") return t("vaultSpellLength", SPELL_LENGTH, Number(response.count) || 0);
+  if (response?.reason === "character") return t("vaultSpellCharacterHost", Number(response.position) || "?");
+  if (response?.reason === "non_canonical") return t("vaultSpellLastCharacter");
+  return t("errorRecoverySpellInvalid");
 }
 
 /** Issue #51 Slice C: backup formats. A plain vault's normal backup is A; see `backupFormat`. */
@@ -103,57 +115,45 @@ export function backupFormat(mode, protection) {
   return encrypted ? "B" : "A";
 }
 
-export const BACKUP_FORMAT_NOTE = {
-  A: "形式A: 通常のSQLiteファイルとして保存します（暗号化なし）。プライバシー設定のコピーは含みません。",
-  B: "形式B: 暗号化したまま1つのファイルに保存します。復元にはふっかつのじゅもんが必要です（このPCの鍵は不要）。作成時に、お手元の呪文でこのVaultを復旧できることを確認します。プライバシー設定のコピーを暗号化して含みます。",
-  C: "形式C: バックアップ全体をパスワードで暗号化します。復元にはこのパスワードが必要です。元のVault自体は暗号化されません。プライバシー設定のコピーを含みます。",
-  D: "形式D: 暗号化Vaultを、さらにパスワードで保護します。復元にはパスワードとふっかつのじゅもんの両方が必要です。作成時に、お手元の呪文でこのVaultを復旧できることを確認します。プライバシー設定のコピーを含みます。",
-};
+const BACKUP_FORMAT_NOTE_KEYS = Object.freeze({ A: "vaultBackupFormatA", B: "vaultBackupFormatB", C: "vaultBackupFormatC", D: "vaultBackupFormatD" });
+export const BACKUP_FORMAT_NOTE = messageTable(BACKUP_FORMAT_NOTE_KEYS);
 
 export const PASSWORD_MIN_CHARS = 8;
 
-export const PASSWORD_NOTE =
-  `パスワードは${PASSWORD_MIN_CHARS}文字以上にしてください。パスワードはどこにも保存しません。忘れると、このバックアップは復元できません（Memocampusは再発行できません）。`;
-
-export const BACKUP_SPELL_NOTE =
-  "暗号化Vaultのバックアップは、復元にふっかつのじゅもんが必要です。記録した呪文（43文字）を入力してください。このVaultを復旧できる呪文でなければ、バックアップは作成しません。呪文は保存しません。";
-
 /** Null when the two entries make a usable backup password, otherwise what is wrong. */
 export function checkBackupPassword(password, confirmation) {
-  if (typeof password !== "string" || [...password].length < PASSWORD_MIN_CHARS) return `パスワードは${PASSWORD_MIN_CHARS}文字以上で入力してください。`;
-  if (password !== confirmation) return "確認用のパスワードが一致しません。";
+  if (typeof password !== "string" || [...password].length < PASSWORD_MIN_CHARS) return t("vaultBackupPasswordShort", PASSWORD_MIN_CHARS);
+  if (password !== confirmation) return t("vaultBackupPasswordMismatch");
   return null;
 }
 
-export const RESTORE_FORMAT_TEXT = {
-  A: "形式A（平文Vaultの通常バックアップ）。暗号化されていません。プライバシー設定のコピーは含まれません。",
-  B: "形式B（暗号化Vaultの通常バックアップ）。復元にはふっかつのじゅもんが必要です。",
-  C: "形式C（パスワード保護）。復元にはバックアップのパスワードが必要です。",
-  D: "形式D（暗号化Vault＋パスワード保護）。復元にはパスワードとふっかつのじゅもんの両方が必要です。",
-};
+const RESTORE_FORMAT_TEXT_KEYS = Object.freeze({ A: "vaultRestoreFormatA", B: "vaultRestoreFormatB", C: "vaultRestoreFormatC", D: "vaultRestoreFormatD" });
+export const RESTORE_FORMAT_TEXT = messageTable(RESTORE_FORMAT_TEXT_KEYS);
 
-export const RESTORE_NOTE =
-  "復元は常に新しいVaultとして作成します。既存のファイルやVaultは上書きしません。" +
-  "現在のVaultは、復元したVaultを「使い始める」まで変わりません。復元したVaultのMCPへの公開は、未承認から始まります。";
+/** "閲覧 …件・スナップショット …件・画像 …件" (and the saved pages), numbers formatted for the language. */
+function countLines(counts, key) {
+  const lines = [];
+  if (counts && Number.isSafeInteger(counts.visits)) {
+    lines.push(t(key, formatNumber(counts.visits), formatNumber(counts.snapshots), formatNumber(counts.images)));
+    if (Number.isSafeInteger(counts.pages)) lines.push(t("vaultPageCounts", formatNumber(counts.pages), formatNumber(counts.pageBlobs)));
+  }
+  return lines;
+}
 
 /** What the user is asked before a restore (`vault_restore_inspect` answer). */
 export function describeRestoreSource(info) {
-  const lines = [`復元するバックアップ: ${info.backupPath}`, RESTORE_FORMAT_TEXT[info.format] || "形式を確認できません。"];
-  if (info.policyCopy === true) lines.push("プライバシー設定のコピーが含まれています（復元後に内容を確認できます。自動では適用しません）。");
-  lines.push(RESTORE_NOTE);
+  const lines = [t("vaultRestoreSourcePath", String(info.backupPath)), lookup(RESTORE_FORMAT_TEXT, info.format) ?? t("vaultRestoreFormatUnknown")];
+  if (info.policyCopy === true) lines.push(t("vaultRestorePolicyIncluded"));
+  lines.push(texts.RESTORE_NOTE);
   return lines.join("\n");
 }
 
 /** The restored vault, for the user's confirmation before it becomes active. */
 export function describeRestored(restored) {
-  const counts = restored?.counts;
-  const lines = [`復元しました（まだ使用していません）: ${restored?.path ?? ""}`];
-  lines.push(restored?.mode === "encrypted" ? "暗号化Vault（このWindowsユーザーで鍵を保存しました）" : "平文のVault");
-  if (counts && Number.isSafeInteger(counts.visits)) {
-    lines.push(`閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件・画像 ${counts.images.toLocaleString("ja-JP")}件`);
-    if (Number.isSafeInteger(counts.pages)) lines.push(`Page保存 ${counts.pages.toLocaleString("ja-JP")}件・MHTML原本 ${counts.pageBlobs.toLocaleString("ja-JP")}件`);
-  }
-  lines.push("「使い始める」を押すと、このVaultをActive Vaultにします。MCPへの公開は未承認のままです。");
+  const lines = [t("vaultRestoredPath", String(restored?.path ?? ""))];
+  lines.push(restored?.mode === "encrypted" ? t("vaultRestoredEncrypted") : t("vaultRestoredPlain"));
+  lines.push(...countLines(restored?.counts, "vaultRestoredCounts"));
+  lines.push(t("vaultRestoredStartNote"));
   return lines.join("\n");
 }
 
@@ -161,13 +161,13 @@ export function describeRestored(restored) {
 export function describePolicyCopy(copy) {
   switch (copy?.state) {
     case "valid":
-      return `このバックアップには、プライバシー設定のコピー（改訂${Number(copy.revision) || "?"}）が含まれています。現在のプライバシー設定には自動で適用しません。内容を確認し、必要なら「プライバシー設定」で同じ設定にしてください。`;
+      return t("vaultPolicyCopyValid", Number(copy.revision) || "?");
     case "invalid":
-      return "プライバシー設定のコピーを読み取れません（破損または未対応の版）。適用はしません。";
+      return t("vaultPolicyCopyInvalid");
     case "absent":
-      return "このバックアップには、プライバシー設定のコピーは含まれていません。";
+      return t("vaultPolicyCopyAbsent");
     case "not_supported":
-      return "形式Aのバックアップには、プライバシー設定のコピーは含まれません。";
+      return t("vaultPolicyCopyNotSupported");
     default:
       return "";
   }
@@ -175,40 +175,20 @@ export function describePolicyCopy(copy) {
 
 /** A restore recorded by the host but not activated (`status.restorePending`). */
 export function describeRestorePending(pending) {
-  if (pending?.phase === "restored" || pending?.phase === "verified") {
-    return `復元済みで、まだ使用していないVaultがあります:\n${pending.path}\n使い始めるか、破棄してください。`;
-  }
-  return `中断された復元があります${pending?.path ? `:\n${pending.path}` : ""}\n途中のファイルを破棄してから、もう一度復元してください。`;
+  if (pending?.phase === "restored" || pending?.phase === "verified") return t("vaultRestorePendingReady", String(pending.path));
+  return pending?.path ? t("vaultRestoreInterruptedPath", String(pending.path)) : t("vaultRestoreInterrupted");
 }
 
 /** Issue #51 Slice D: converting the vault shown between plain and encrypted. */
-export const CONVERT_TEXT = {
-  encrypt: {
-    title: "このVaultを暗号化する",
-    note:
-      "現在のVaultの内容を、新しい暗号化Vaultへコピーします。元のVaultは削除されません。" +
-      "コピーの後に、新しいVaultの「ふっかつのじゅもん」を一度だけ表示します。記録して全文を入力し直すまで、変換は完了しません。" +
-      "変換したVaultを使い始めるかどうかは、その後で選べます。",
-    pick: "保存先を選んで暗号化…",
-  },
-  decrypt: {
-    title: "このVaultの暗号化を解除する",
-    note:
-      "新しい平文Vaultを作成します。閲覧履歴や保存画像などが暗号化されずにディスクへ保存されます。元の暗号化Vaultは削除されません。" +
-      "平文Vaultには、ふっかつのじゅもんはありません（元の暗号化Vaultの呪文は、元のVaultにだけ使えます）。",
-    pick: "保存先を選んで暗号化を解除…",
-  },
-  // Issue #51 Slice E: a new spell means a new vault (a new key and a new salt).
-  reissue: {
-    title: "ふっかつのじゅもんを再発行する",
-    note:
-      "新しいふっかつのじゅもんで暗号化した新しいVaultへ、現在のVaultの内容をコピーします。元のVaultは削除されません。" +
-      "コピーの後に新しい呪文を一度だけ表示します。記録して全文を入力し直すまで、再発行は完了しません。\n" +
-      "再発行しても、古い呪文は失効しません。古い呪文は、元のVaultとその古いバックアップを引き続き開けます。" +
-      "古い呪文を他人に知られたおそれがあるときは、新しいVaultを使い始めた後で、元のVaultと古いバックアップを安全に処分してください。",
-    pick: "保存先を選んで再発行…",
-  },
-};
+const CONVERT_ENCRYPT_KEYS = Object.freeze({ title: "vaultConvertEncryptTitle", note: "vaultConvertEncryptNote", pick: "vaultConvertEncryptPick" });
+const CONVERT_DECRYPT_KEYS = Object.freeze({ title: "vaultConvertDecryptTitle", note: "vaultConvertDecryptNote", pick: "vaultConvertDecryptPick" });
+// Issue #51 Slice E: a new spell means a new vault (a new key and a new salt).
+const CONVERT_REISSUE_KEYS = Object.freeze({ title: "vaultReissueTitle", note: "vaultReissueNote", pick: "vaultReissuePick" });
+export const CONVERT_TEXT = Object.freeze({
+  encrypt: messageTable(CONVERT_ENCRYPT_KEYS),
+  decrypt: messageTable(CONVERT_DECRYPT_KEYS),
+  reissue: messageTable(CONVERT_REISSUE_KEYS),
+});
 
 /** Which conversion the vault shown offers: by its mode. */
 export function convertDirection(mode) {
@@ -227,111 +207,88 @@ export function convertMakesSpell(direction) {
   return direction === "encrypt" || direction === "reissue";
 }
 
-/** For the spell step of a conversion: the spell belongs to the new vault only. */
-export const CONVERT_SPELL_NOTE =
-  "これは新しい暗号化Vaultのふっかつのじゅもんです。以前に記録した呪文（ほかのVaultの呪文）では、このVaultを復旧できません。";
-
-/** Re-issuing (Slice E): the old spell is not revoked. */
-export const REISSUE_SPELL_NOTE =
-  "古い呪文は失効しません。元のVaultと古いバックアップは、古い呪文で開けるままです。";
-
 /** A converted vault (start or confirm answer), for the user's decision. */
 export function describeConverted(converted) {
   const reissue = converted?.direction === "reissue";
   const encrypt = convertMakesSpell(converted?.direction);
-  const lines = [`${reissue ? "再発行しました" : "変換しました"}（まだ使用していません）: ${converted?.path ?? ""}`];
-  if (converted?.sourcePath) lines.push(`${reissue ? "元のVault" : "変換元"}（そのまま残ります）: ${converted.sourcePath}`);
+  const lines = [t(reissue ? "vaultReissuedPath" : "vaultConvertedPath", String(converted?.path ?? ""))];
+  if (converted?.sourcePath) lines.push(t(reissue ? "vaultReissuedSource" : "vaultConvertedSource", String(converted.sourcePath)));
   if (reissue) {
-    lines.push("新しいふっかつのじゅもんで暗号化した新しいVault（古い呪文では開けません。鍵はこのWindowsユーザー用に保存しました）");
-    lines.push(REISSUE_SPELL_NOTE);
+    lines.push(t("vaultReissuedKind"));
+    lines.push(texts.REISSUE_SPELL_NOTE);
   } else {
-    lines.push(encrypt ? "新しい暗号化Vault（鍵はこのWindowsユーザー用に保存しました）" : "新しい平文Vault（暗号化されていません）");
+    lines.push(encrypt ? t("vaultConvertedEncrypted") : t("vaultConvertedPlain"));
   }
-  const counts = converted?.counts;
-  if (counts && Number.isSafeInteger(counts.visits)) {
-    lines.push(`検証済み: 閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件・画像 ${counts.images.toLocaleString("ja-JP")}件（変換元と全件一致）`);
-    if (Number.isSafeInteger(counts.pages)) lines.push(`Page保存 ${counts.pages.toLocaleString("ja-JP")}件・MHTML原本 ${counts.pageBlobs.toLocaleString("ja-JP")}件`);
-  }
-  lines.push(
-    "「使い始める」を押すと、その時点までに変換元へ記録された内容も取り込んでから、このVaultをActive Vaultにします。MCPへの公開は未承認から始まります。",
-    "「切り替えずに保存」を選ぶと、変換した時点の内容のまま残します（後で「既存のVaultを開く」で開けます。その後の記録は変換元にだけ残ります）。",
-  );
+  lines.push(...countLines(converted?.counts, "vaultConvertedCounts"));
+  lines.push(t("vaultConvertedActivateNote"), t("vaultConvertedKeepNote"));
   return lines.join("\n");
 }
 
 /** A conversion recorded by the host but not finished in this page (`status.conversionPending`). */
 export function describeConversionPending(pending) {
-  const what =
-    pending?.direction === "decrypt" ? "暗号化を解除した平文Vault" : pending?.direction === "reissue" ? "新しいふっかつのじゅもんのVault" : "暗号化した新しいVault";
-  if (pending?.phase === "converted") {
-    return `変換済みで、まだ使用していない${what}があります:\n${pending.path}\n使い始めるか、切り替えずに保存するか、破棄してください。`;
-  }
-  if (pending?.phase === "verified" && convertMakesSpell(pending.direction)) {
-    return `ふっかつのじゅもんの確認前に中断された変換があります:\n${pending.path}\n呪文は再表示できないため、破棄してから、もう一度変換してください。元のVaultは変更していません。`;
-  }
-  if (pending?.phase === "verified") {
-    return `変換済みで、まだ使用していない${what}があります:\n${pending.path}\n使い始めるか、切り替えずに保存するか、破棄してください。`;
-  }
-  return `中断された変換があります${pending?.path ? `:\n${pending.path}` : ""}\n途中のファイルを破棄してから、もう一度変換してください。元のVaultは変更していません。`;
+  const ready =
+    pending?.direction === "decrypt" ? "vaultConversionPendingDecrypt" : pending?.direction === "reissue" ? "vaultConversionPendingReissue" : "vaultConversionPendingEncrypt";
+  if (pending?.phase === "converted") return t(ready, String(pending.path));
+  if (pending?.phase === "verified" && convertMakesSpell(pending.direction)) return t("vaultConversionPendingSpell", String(pending.path));
+  if (pending?.phase === "verified") return t(ready, String(pending.path));
+  return pending?.path ? t("vaultConversionInterruptedPath", String(pending.path)) : t("vaultConversionInterrupted");
 }
 
 /** MCP access to the vault shown (Issue #51): `status.publication` from a host that knows it. */
-export const PUBLICATION_TEXT = {
-  confirmed: "MCPへの公開: 承認済み",
-  pending: "MCPへの公開: 未承認",
-};
+const PUBLICATION_TEXT_KEYS = Object.freeze({ confirmed: "vaultPublicationConfirmed", pending: "vaultPublicationPending" });
+export const PUBLICATION_TEXT = messageTable(PUBLICATION_TEXT_KEYS);
 
-export const PUBLICATION_NOTE = {
-  confirmed: "MCPクライアントは、プライバシー設定を通過した記録と、MCP公開にした画像だけを読めます。設定の変更は次の読み取りから反映されます。",
-  pending: "MCPクライアントには、このVaultの内容を一切返しません。新規作成・切り替え・置き換えたVaultは、承認するまでこの状態です。",
-  unusable: "Vaultを開けないため、承認できません。",
-};
-
-export const PUBLICATION_REVIEW =
-  "このVaultを、MCPクライアント（Claudeなど）から読めるようにします。\n" +
-  "読めるのは、現在のプライバシー設定（保存しないグループ・MCPサーバに見せないグループ・基本保護）を通過した記録と、MCP公開にした画像だけです。\n" +
-  "承認の前に、下の「プライバシー設定」で内容を確認してください。承認は、このVaultファイルにだけ適用されます。";
+const PUBLICATION_NOTE_KEYS = Object.freeze({
+  confirmed: "vaultPublicationNoteConfirmed",
+  pending: "vaultPublicationNotePending",
+  unusable: "vaultPublicationNoteUnusable",
+});
+export const PUBLICATION_NOTE = messageTable(PUBLICATION_NOTE_KEYS);
 
 export function describePublication(status) {
-  const text = PUBLICATION_TEXT[status?.publication];
+  const text = lookup(PUBLICATION_TEXT, status?.publication);
   if (!text) return "";
   const revision = status.publicationPolicyRevision;
-  return status.publication === "confirmed" && Number.isSafeInteger(revision) ? `${text}（プライバシー設定 改訂${revision}の時点で承認）` : text;
+  return status.publication === "confirmed" && Number.isSafeInteger(revision) ? t("vaultPublicationConfirmedRevision", formatNumber(revision, { useGrouping: false })) : text;
 }
 
-export const REASON_TEXT = {
-  network_path: "ネットワーク共有(UNC)上です",
-  network_drive: "ネットワークドライブ上です",
-  optical_drive: "光学ドライブです",
-  ram_disk: "RAMディスクです（再起動で消えます）",
-  unknown_drive: "ドライブの種類を判定できません",
-  executable_directory: "Native Hostの実行ファイルと同じフォルダです",
-  removable_drive: "取り外し可能なドライブです",
-  non_local_filesystem: "NTFS/ReFS以外のファイルシステムです",
-  volume_info_unavailable: "ボリューム情報を取得できません",
-  google_drive: "Google Driveのドライブ上です",
-  sync_folder: "同期フォルダ(OneDrive等)の中です",
-  cloud_files: "クラウド同期ファイルの属性があります",
-};
+const REASON_TEXT_KEYS = Object.freeze({
+  network_path: "vaultReasonNetworkPath",
+  network_drive: "vaultReasonNetworkDrive",
+  optical_drive: "vaultReasonOpticalDrive",
+  ram_disk: "vaultReasonRamDisk",
+  unknown_drive: "vaultReasonUnknownDrive",
+  executable_directory: "vaultReasonExecutableDirectory",
+  removable_drive: "vaultReasonRemovableDrive",
+  non_local_filesystem: "vaultReasonNonLocalFilesystem",
+  volume_info_unavailable: "vaultReasonVolumeInfoUnavailable",
+  google_drive: "vaultReasonGoogleDrive",
+  sync_folder: "vaultReasonSyncFolder",
+  cloud_files: "vaultReasonCloudFiles",
+});
+export const REASON_TEXT = messageTable(REASON_TEXT_KEYS);
 
-export const VERDICT_TEXT = {
-  no_issue_detected: "既知の問題は検出されませんでした",
-  needs_approval: "注意が必要な場所です",
-  rejected: "Active Vaultには使用できない場所です",
-};
+const VERDICT_TEXT_KEYS = Object.freeze({
+  no_issue_detected: "vaultVerdictNoIssue",
+  needs_approval: "vaultVerdictNeedsApproval",
+  rejected: "vaultVerdictRejected",
+});
+export const VERDICT_TEXT = messageTable(VERDICT_TEXT_KEYS);
 
-export const LOCATION_NOTE =
-  "未登録の同期ツール（Syncthing等）は判定できません。Active Vaultは同期・ネットワーク外のローカルディスクに置いてください。";
+/** The text of a location verdict; an unknown verdict is shown as its code. */
+export function describeVerdict(verdict) {
+  return lookup(VERDICT_TEXT, verdict) ?? String(verdict);
+}
 
 export function describeReasons(reasons) {
-  return Array.isArray(reasons) ? reasons.map((reason) => REASON_TEXT[reason] || reason) : [];
+  return Array.isArray(reasons) ? reasons.map((reason) => lookup(REASON_TEXT, reason) ?? reason) : [];
 }
 
 /** Text for the one-line summary at the top of the vault settings. */
 export function describeStatus(status) {
   if (!status) return "";
-  if (status.overridden) return `開発用DB(MEMOCAMPUS_DB)を使用中（${STATE_TEXT[status.state] || status.state}）`;
-  return STATE_TEXT[status.state] || "Vaultの状態を確認できません";
+  if (status.overridden) return t("vaultStateOverridden", lookup(STATE_TEXT, status.state) ?? String(status.state));
+  return lookup(STATE_TEXT, status.state) ?? t("vaultStateUnknown");
 }
 
 /** True when the host answered and no usable vault is active, so the settings tab needs a visit. */
@@ -341,6 +298,8 @@ export function vaultNeedsAttention(status) {
 
 export function formatCounts(counts) {
   if (!counts) return "";
-  const pages = Number.isSafeInteger(counts.pages) ? `・Page保存 ${counts.pages.toLocaleString("ja-JP")}件・MHTML原本 ${counts.pageBlobs.toLocaleString("ja-JP")}件` : "";
-  return `閲覧 ${counts.visits.toLocaleString("ja-JP")}件・スナップショット ${counts.snapshots.toLocaleString("ja-JP")}件${pages}`;
+  if (Number.isSafeInteger(counts.pages)) {
+    return t("vaultCountsWithPages", formatNumber(counts.visits), formatNumber(counts.snapshots), formatNumber(counts.pages), formatNumber(counts.pageBlobs));
+  }
+  return t("vaultCounts", formatNumber(counts.visits), formatNumber(counts.snapshots));
 }
