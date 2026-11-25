@@ -2,8 +2,9 @@
 // a visit that is there, a visit the person deleted on purpose (`sourceCensored`, set only by that deletion), and a
 // source that was never known, stored or allowed (a bare null). `[CENSORED]` is display text only: it is never
 // stored in place of a URL or a title, and a null alone never produces it.
+import { t } from "./i18n.js";
+
 export const CENSORED_LABEL = "[CENSORED]";
-export const UNKNOWN_SOURCE_LABEL = "不明";
 
 /** `{ state: "present" | "censored" | "unknown", text }`; null for a row no host writes (a source that is also censored). */
 export function navigationSource({ sourceVisitId = null, sourceCensored = false, describe = (id) => id } = {}) {
@@ -12,5 +13,5 @@ export function navigationSource({ sourceVisitId = null, sourceCensored = false,
     return { state: "present", text: describe(sourceVisitId) };
   }
   if (sourceCensored === true) return { state: "censored", text: CENSORED_LABEL };
-  return { state: "unknown", text: UNKNOWN_SOURCE_LABEL };
+  return { state: "unknown", text: t("navigationSourceUnknown") };
 }

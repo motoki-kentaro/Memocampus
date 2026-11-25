@@ -4335,5 +4335,1915 @@
   "vaultSwitchNote": {
     "message": "別のVaultに切り替えても、データは移行されず、元のVaultは削除されません。",
     "description": "Side Panel, Vault settings (sidepanel.html). Note at the end of the Vault settings."
+  },
+  "historyBrandTag": {
+    "message": "閲覧記憶タイムライン",
+    "description": "History page (history.html). Subtitle under the page title Memocampus History."
+  },
+  "historySideLabel": {
+    "message": "日付と検索条件",
+    "description": "History page (history.html). Accessible name of the side column (calendar and domain filter)."
+  },
+  "historyCalendarLabel": {
+    "message": "カレンダー",
+    "description": "History page (history.html). Accessible name of the calendar section."
+  },
+  "historyDaysLabel": {
+    "message": "日付の一覧",
+    "description": "History page (history.html). Accessible name of the month grid."
+  },
+  "historyChooseMonth": {
+    "message": "年と月を選ぶ",
+    "description": "History page (history.html). Accessible name of the calendar title button before the month is known."
+  },
+  "historyJumpToSelected": {
+    "message": "選択中の日の月へ戻る",
+    "description": "History page (history.html). Link-style button."
+  },
+  "historyCalendarLegend": {
+    "message": "記録のある日（現在のドメイン条件に一致）",
+    "description": "History page (history.html). Legend of the dot that marks a day."
+  },
+  "historyDomainLabel": {
+    "message": "ドメイン絞り込み",
+    "description": "History page (history.html). Label of the domain field."
+  },
+  "historyDomainPlaceholder": {
+    "message": "未入力ならすべてのドメイン",
+    "description": "History page (history.html). Placeholder of the domain field."
+  },
+  "historyMatchLegend": {
+    "message": "照合方法",
+    "description": "History page (history.html). Legend of the exact / regular expression choice."
+  },
+  "historyMatchExact": {
+    "message": "完全一致",
+    "description": "History page (history.html). Choice: the host name equals the text (sub-domains not included). Internal value exact."
+  },
+  "historyMatchRegex": {
+    "message": "正規表現",
+    "description": "History page (history.html). Choice: the host name matches a regular expression. Internal value regex."
+  },
+  "historyPageSizeLabel": {
+    "message": "表示件数",
+    "description": "History page (history.html). Label of the page size choice."
+  },
+  "historyPageSize25": {
+    "message": "25件",
+    "description": "History page (history.html). Page size option (internal value 25)."
+  },
+  "historyPageSize50": {
+    "message": "50件",
+    "description": "History page (history.html). Page size option (internal value 50)."
+  },
+  "historyPageSize100": {
+    "message": "100件",
+    "description": "History page (history.html). Page size option (internal value 100)."
+  },
+  "historyPagerLabel": {
+    "message": "ページ",
+    "description": "History page (history.html). Accessible name of the page navigation."
+  },
+  "historyErrorInvalidRegex": {
+    "message": "正規表現が正しくありません。構文を確認してください。",
+    "description": "History page (history-app.js). Error of the domain field."
+  },
+  "historyErrorUnsupportedRegex": {
+    "message": "この正規表現は使えません（先読み・後方参照は未対応です）。",
+    "description": "History page (history-app.js). Error of the domain field."
+  },
+  "historyErrorRegexLimit": {
+    "message": "正規表現が複雑すぎます。簡単な式にしてください。",
+    "description": "History page (history-app.js). Error of the domain field."
+  },
+  "historyErrorRegexTooLong": {
+    "message": "正規表現が長すぎます（512バイトまで）。",
+    "description": "History page (history-app.js). Error of the domain field."
+  },
+  "historyErrorInvalidDomain": {
+    "message": "ドメインの形式が正しくありません。ホスト名だけを入力してください（例: github.com）。",
+    "description": "History page (history-app.js). Error of the domain field."
+  },
+  "historyErrorResponseTooLarge": {
+    "message": "この日の表示データが大きすぎて取得できません。ページサイズを小さくするか、条件を絞ってください。",
+    "description": "History page (history-app.js). Error."
+  },
+  "historyErrorVisitNotFound": {
+    "message": "この訪問は見つかりません（削除された可能性があります）。",
+    "description": "History page (history-app.js). Error of a visit's details."
+  },
+  "historyErrorVaultUnstable": {
+    "message": "Vaultが何度も切り替わっているため、表示を止めました。「再読み込み」を押してください。",
+    "description": "History page (history-app.js). Error; the quote is the Reload button."
+  },
+  "historyHintExact": {
+    "message": "完全一致の例: github.com（サブドメインは含みません）",
+    "description": "History page (history-app.js). Hint under the domain field."
+  },
+  "historyHintRegex": {
+    "message": "正規表現の例: (^|\\.)github\\.com$$（ホスト名の一部に一致）",
+    "description": "History page (history-app.js). Hint under the domain field; the example is a regular expression and must stay as is (the double dollar shows one)."
+  },
+  "historyPrevYear": {
+    "message": "前の年",
+    "description": "History page (history-app.js). Calendar button in the month list."
+  },
+  "historyNextYear": {
+    "message": "次の年",
+    "description": "History page (history-app.js). Calendar button in the month list."
+  },
+  "historyDayHeading": {
+    "message": "$date$の訪問履歴",
+    "description": "History page (history-app.js). Heading of the list; [date] is a long date with weekday.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyLongDate": {
+    "message": "$date$（$weekday$）",
+    "description": "History page, visit rows and details (history-view.js). A day with its weekday; [date] is the formatted date, [weekday] a short weekday name.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "weekday": {
+        "content": "$2"
+      }
+    }
+  },
+  "historyNoMatches": {
+    "message": "条件に一致する訪問はありません。",
+    "description": "History page (history-app.js). Empty list with a domain filter."
+  },
+  "historyNoVisits": {
+    "message": "この日の訪問履歴はありません。",
+    "description": "History page (history-app.js). Empty list."
+  },
+  "historyCountZero": {
+    "message": "0件",
+    "description": "History page (history-app.js). Result count of an empty list."
+  },
+  "historyCount": {
+    "message": "$count$件（$page$ / $pages$ページ）",
+    "description": "History page (history-app.js). Result count; [count] is formatted.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "page": {
+        "content": "$2"
+      },
+      "pages": {
+        "content": "$3"
+      }
+    }
+  },
+  "historyCountOne": {
+    "message": "$count$件（$page$ / $pages$ページ）",
+    "description": "History page (history-app.js). Result count, English singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "page": {
+        "content": "$2"
+      },
+      "pages": {
+        "content": "$3"
+      }
+    }
+  },
+  "historyCountMatching": {
+    "message": "条件に一致する訪問 $count$件（$page$ / $pages$ページ）",
+    "description": "History page (history-app.js). Result count with a domain filter.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "page": {
+        "content": "$2"
+      },
+      "pages": {
+        "content": "$3"
+      }
+    }
+  },
+  "historyCountMatchingOne": {
+    "message": "条件に一致する訪問 $count$件（$page$ / $pages$ページ）",
+    "description": "History page (history-app.js). Result count with a domain filter, English singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "page": {
+        "content": "$2"
+      },
+      "pages": {
+        "content": "$3"
+      }
+    }
+  },
+  "historyVaultSwitched": {
+    "message": "Vaultが切り替わったため、表示を読み込み直しています。",
+    "description": "History page (history-app.js). Status."
+  },
+  "historyLoading": {
+    "message": "読み込み中…",
+    "description": "History page (history-app.js). State of the list while it loads."
+  },
+  "historyFixConditions": {
+    "message": "検索条件を修正してください。",
+    "description": "History page (history-app.js). No list is shown for a condition that cannot be applied."
+  },
+  "historyPageOutOfRange": {
+    "message": "ページ番号が範囲外です。",
+    "description": "History page (history-app.js). Error."
+  },
+  "historyDaysFailed": {
+    "message": "記録のある日を取得できませんでした。",
+    "description": "History page (history-app.js). Calendar error."
+  },
+  "historyUnsupported": {
+    "message": "このNative HostはHistory画面に対応していません。Memocampusを更新してください。",
+    "description": "History page (history-app.js). Error."
+  },
+  "historyFullUrlFailed": {
+    "message": "完全なURLを取得できなかったため、開きません。",
+    "description": "History page (history-app.js). Status: nothing was opened."
+  },
+  "historyOpenFullUrl": {
+    "message": "完全なURLを取得して新しいタブで開きます",
+    "description": "History page, visit rows and details (history-view.js). Tooltip of a title whose URL was shortened in the list."
+  },
+  "historyNoHost": {
+    "message": "（ホスト名なし）",
+    "description": "History page, visit rows and details (history-view.js). A visit without a host name."
+  },
+  "historyShowDetail": {
+    "message": "詳細を表示",
+    "description": "History page, visit rows and details (history-view.js). Button."
+  },
+  "historyHideDetail": {
+    "message": "詳細を閉じる",
+    "description": "History page, visit rows and details (history-view.js). Button."
+  },
+  "historyDetailLabel": {
+    "message": "$title$の詳細",
+    "description": "History page, visit rows and details (history-view.js). Accessible name of a detail region; [title] is the page title as recorded.",
+    "placeholders": {
+      "title": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyFirstPage": {
+    "message": "最初のページ",
+    "description": "History page, visit rows and details (history-view.js). Pager button."
+  },
+  "historyPrevPage": {
+    "message": "前のページ",
+    "description": "History page, visit rows and details (history-view.js). Pager button."
+  },
+  "historyNextPage": {
+    "message": "次のページ",
+    "description": "History page, visit rows and details (history-view.js). Pager button."
+  },
+  "historyLastPage": {
+    "message": "最後のページ",
+    "description": "History page, visit rows and details (history-view.js). Pager button."
+  },
+  "historyPageNumber": {
+    "message": "$page$ページ",
+    "description": "History page, visit rows and details (history-view.js). Pager button.",
+    "placeholders": {
+      "page": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyPageNumberCurrent": {
+    "message": "$page$ページ（現在）",
+    "description": "History page, visit rows and details (history-view.js). Pager button of the page shown.",
+    "placeholders": {
+      "page": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyDetailLoading": {
+    "message": "詳細を読み込み中…",
+    "description": "History page, visit rows and details (history-view.js). Status."
+  },
+  "historyVisitHeading": {
+    "message": "訪問情報",
+    "description": "History page, visit rows and details (history-view.js). Heading of the visit card."
+  },
+  "historyVisitedAt": {
+    "message": "訪問日時",
+    "description": "History page, visit rows and details (history-view.js). Field name."
+  },
+  "historyFieldTitle": {
+    "message": "タイトル",
+    "description": "History page, visit rows and details (history-view.js). Field name."
+  },
+  "historyNavigationType": {
+    "message": "記録された遷移の種類",
+    "description": "History page, visit rows and details (history-view.js). Field name; the value is the browser's own code."
+  },
+  "historySourceHeading": {
+    "message": "遷移元",
+    "description": "History page, visit rows and details (history-view.js). Heading: the visit this one was reached from."
+  },
+  "historySourceDeleted": {
+    "message": "遷移元の閲覧履歴は削除されています",
+    "description": "History page, visit rows and details (history-view.js). The source was deleted on purpose; shown with [CENSORED]."
+  },
+  "historySourceUnknown": {
+    "message": "遷移元：不明",
+    "description": "History page, visit rows and details (history-view.js). The source was not recorded; must not read as direct access."
+  },
+  "historySourceUnknownNote": {
+    "message": "遷移元は記録されていないか、確定できませんでした。",
+    "description": "History page, visit rows and details (history-view.js). Note."
+  },
+  "historyTargetsHeading": {
+    "message": "遷移先",
+    "description": "History page, visit rows and details (history-view.js). Heading: visits reached from this one."
+  },
+  "historyTargets": {
+    "message": "遷移先 $count$件",
+    "description": "History page, visit rows and details (history-view.js). [count] is formatted.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyTargetsTruncated": {
+    "message": "遷移先 $count$件（先頭$shown$件を表示）",
+    "description": "History page, visit rows and details (history-view.js). [count] and [shown] are formatted.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "shown": {
+        "content": "$2"
+      }
+    }
+  },
+  "historyNoTargets": {
+    "message": "記録された遷移先はありません",
+    "description": "History page, visit rows and details (history-view.js). Note."
+  },
+  "historyNoTargetVisits": {
+    "message": "表示できる遷移先の訪問がありません。",
+    "description": "History page, visit rows and details (history-view.js). Note."
+  },
+  "historyPageInfoHeading": {
+    "message": "取得したページ情報",
+    "description": "History page, visit rows and details (history-view.js). Heading."
+  },
+  "historyPageInfoNoteAt": {
+    "message": "この訪問に紐づく取得（$time$）。訪問時点の内容とは限りません。",
+    "description": "History page, visit rows and details (history-view.js). [time] is a date and time.",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyPageInfoNote": {
+    "message": "この訪問に紐づく取得。訪問時点の内容とは限りません。",
+    "description": "History page, visit rows and details (history-view.js). Note."
+  },
+  "historyFieldDescription": {
+    "message": "説明",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata."
+  },
+  "historyFieldOgTitle": {
+    "message": "OGタイトル",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata (Open Graph)."
+  },
+  "historyFieldOgDescription": {
+    "message": "OG説明",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata (Open Graph)."
+  },
+  "historyFieldSiteName": {
+    "message": "サイト名",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata."
+  },
+  "historyFieldImageUrl": {
+    "message": "画像URL",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata."
+  },
+  "historyFieldFaviconUrl": {
+    "message": "ファビコンURL",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata."
+  },
+  "historyMetaSeparator": {
+    "message": "・",
+    "description": "History page, visit rows and details (history-view.js). Separator between the host, the time and the navigation type of a visit line (spaces are added around it)."
+  },
+  "historyFlowIntoVisit": {
+    "message": "↓ 遷移（この訪問へ）",
+    "description": "History page, visit rows and details (history-view.js). Connector under the Came from card (shown through CSS)."
+  },
+  "historyFlowFromVisit": {
+    "message": "↓ 後続遷移（この訪問から）",
+    "description": "History page, visit rows and details (history-view.js). Connector under the visit card (shown through CSS)."
+  },
+  "navigationSourceUnknown": {
+    "message": "不明",
+    "description": "A navigation whose source was never known, stored or allowed (navigation-text.js). Never the same as [CENSORED], a source deleted on purpose."
+  },
+  "optionsTitle": {
+    "message": "Memocampus — Privacy設定",
+    "description": "Privacy settings page (options.html). Page title and heading."
+  },
+  "optionsOnboardingHeading": {
+    "message": "はじめに — 自動記録はまだOFFです",
+    "description": "Privacy settings page (options.html). First use."
+  },
+  "optionsOnboardingRecords": {
+    "message": "「記憶を開始する」を押すと、通常ウィンドウのhttp/httpsページについて、閲覧URL・タイトル・訪問日時とページメタデータ（説明・OGP・faviconなど）を自動記録します。シークレットブラウジングの自動履歴は対象外です。",
+    "description": "Privacy settings page (options.html). First use: what is recorded. The quote is the start button."
+  },
+  "optionsOnboardingLocal": {
+    "message": "保存先は利用者が作成・選択したローカルVaultです。Memocampus自体は閲覧データを外部サービスへ送信しません。後日MCPでAIに公開する場合は別途承認が必要で、接続先AIのデータの扱いも関係します。記録を開始しても、MCPへの公開は承認待ちのままです。",
+    "description": "Privacy settings page (options.html). PRIVACY/MCP: first use."
+  },
+  "optionsOnboardingZones": {
+    "message": "Blind Zone（保存しないグループ）は一致するページを自動記録しません。Private Zone（MCPサーバに見せないグループ）はローカルに記録しますが、MCP/AIへ公開しません。Blind Zoneを設定しても、保存済みの履歴は自動削除されません。",
+    "description": "Privacy settings page (options.html). PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history. PRIVACY: the Hide from MCP group (Private Zone) keeps recording but never shows matching URLs to the MCP server. MCP visibility is not general publication. Blind Zone and Private Zone are product names."
+  },
+  "optionsOnboardingPreset": {
+    "message": "以下はNative Hostから取得した初期候補（Draft）です。基本保護は認証関連・認証情報をBlind Zone、行政サイト・Webメール・AIチャットをPrivate Zoneにします。対象例とON/OFFは下の「基本保護」で確認できます。すべての機密サイト・URLを網羅するものではありません。ルール表示・URLチェッカーでの編集・検証を行い、必要な保護を追加してください。",
+    "description": "Privacy settings page (options.html). PRIVACY: first use; the protections are not complete."
+  },
+  "optionsOnboardingNotYet": {
+    "message": "画面を開く・候補を表示する・検証するだけでは開始しません。開始前の閲覧イベントは保存せず、開始後にも遡って収集しません。下書きはこの画面のメモリにだけ保持されます。",
+    "description": "Privacy settings page (options.html). PRIVACY: nothing starts without the start button."
+  },
+  "optionsOpenVaultSettings": {
+    "message": "Vault設定を開く（作成・選択）",
+    "description": "Privacy settings page (options.html). Link to the Side Panel's Vault settings."
+  },
+  "optionsVaultRecheck": {
+    "message": "Vaultを再確認",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsActiveHeading": {
+    "message": "適用中のプライバシー設定",
+    "description": "Privacy settings page (options.html). Heading."
+  },
+  "optionsStateLabel": {
+    "message": "状態",
+    "description": "Privacy settings page (options.html). Term of the policy facts."
+  },
+  "optionsReload": {
+    "message": "再読み込み",
+    "description": "Privacy settings page (options.html). Button: reads the policy again; quoted in messages."
+  },
+  "optionsReloadConfirm": {
+    "message": "未適用の変更があります。再読み込みすると、この変更は失われます。",
+    "description": "Privacy settings page (options.html). DESTRUCTIVE: asked before reloading discards the draft."
+  },
+  "optionsReloadDiscard": {
+    "message": "変更を破棄して再読み込み",
+    "description": "Privacy settings page (options.html). DESTRUCTIVE: button."
+  },
+  "optionsCancel": {
+    "message": "やめる",
+    "description": "Privacy settings page (options.html). Button that closes a confirmation without changing anything."
+  },
+  "optionsBasicProtections": {
+    "message": "基本保護",
+    "description": "Privacy settings page (options.html). Heading of the built-in protections; quoted in messages."
+  },
+  "optionsBasicProtectionsNote": {
+    "message": "Memocampusに組み込まれた保護です。ONの項目に一致したURLは、それぞれのグループと同じ扱いになります。",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsCategoryAuthentication": {
+    "message": "認証関連",
+    "description": "Privacy settings page (options.html). Basic protection (Never Save group)."
+  },
+  "optionsCategoryCredentials": {
+    "message": "認証情報",
+    "description": "Privacy settings page (options.html). Basic protection (Never Save group)."
+  },
+  "optionsCategoryGovernment": {
+    "message": "行政サイト",
+    "description": "Privacy settings page (options.html). Basic protection (Hide from MCP group)."
+  },
+  "optionsCategoryWebmail": {
+    "message": "Webメール",
+    "description": "Privacy settings page (options.html). Basic protection (Hide from MCP group)."
+  },
+  "optionsCategoryAiChats": {
+    "message": "AIチャット",
+    "description": "Privacy settings page (options.html). Basic protection (Hide from MCP group)."
+  },
+  "optionsCategoryAuthenticationDetail": {
+    "message": "Google・Microsoft・OpenAI・Appleのログイン画面と、ログインやパスワード再設定のページ（/login、/signin、/reset-password など）。",
+    "description": "Privacy settings page (options.html). What the protection covers."
+  },
+  "optionsCategoryCredentialsDetail": {
+    "message": "トークン・パスワード・APIキー・署名などをURLに含むページ、ユーザー名やパスワード付きのURL、OAuthの認可コードを含むURL。",
+    "description": "Privacy settings page (options.html). What the protection covers."
+  },
+  "optionsCategoryGovernmentDetail": {
+    "message": "マイナポータル（*.myna.go.jp）と国税庁（*.nta.go.jp）。",
+    "description": "Privacy settings page (options.html). What the protection covers."
+  },
+  "optionsCategoryWebmailDetail": {
+    "message": "Gmail（mail.google.com）とOutlook（outlook.live.com、outlook.office.com）。",
+    "description": "Privacy settings page (options.html). What the protection covers."
+  },
+  "optionsCategoryAiChatsDetail": {
+    "message": "ChatGPT（chatgpt.com）・Claude（claude.ai）・Gemini（gemini.google.com）。",
+    "description": "Privacy settings page (options.html). What the protection covers."
+  },
+  "optionsCategoryAuthenticationWarning": {
+    "message": "OFFにすると、これらのページもMemocampusに保存されるようになります。",
+    "description": "Privacy settings page (options.html). PRIVACY: warning when the protection is turned off."
+  },
+  "optionsCategoryCredentialsWarning": {
+    "message": "OFFにすると、認証情報を含むURLもMemocampusに保存されるようになります。",
+    "description": "Privacy settings page (options.html). PRIVACY: warning when the protection is turned off."
+  },
+  "optionsCategoryGovernmentWarning": {
+    "message": "OFFにすると、これらのページがMCPサーバ向けの公開対象になります。",
+    "description": "Privacy settings page (options.html). PRIVACY/MCP: warning when the protection is turned off."
+  },
+  "optionsCategoryWebmailWarning": {
+    "message": "OFFにすると、メールのページがMCPサーバ向けの公開対象になります。",
+    "description": "Privacy settings page (options.html). PRIVACY/MCP: warning when the protection is turned off."
+  },
+  "optionsCategoryAiChatsWarning": {
+    "message": "OFFにすると、AIチャットのページがMCPサーバ向けの公開対象になります。",
+    "description": "Privacy settings page (options.html). PRIVACY/MCP: warning when the protection is turned off."
+  },
+  "optionsCheckerHeading": {
+    "message": "URLチェッカー",
+    "description": "Privacy settings page (options.html). Heading; quoted in messages."
+  },
+  "optionsRuleKindLegend": {
+    "message": "ルールの種類",
+    "description": "Privacy settings page (options.html). Legend of the rule types (Pattern, Regex, Domain Wildcard, Exact URL are fixed names)."
+  },
+  "optionsRuleLabel": {
+    "message": "ルール",
+    "description": "Privacy settings page (options.html). Label of the rule field and table column."
+  },
+  "optionsRuleHelpLabel": {
+    "message": "ルールの書き方について",
+    "description": "Privacy settings page (options.html). Accessible name of the help button."
+  },
+  "optionsRuleHelp": {
+    "message": "PatternはMemocampusのパターン照合です。RegexはRust Regex構文で判定します。先読み・後読みには対応していません。Domain Wildcardは「*.example.com」の形で、example.com 自身とそのすべてのサブドメインに一致します（ホスト名だけで判定し、パス・クエリ・ポートは見ません）。*.com や *.co.jp のような公開サフィックスは指定できません。Exact URLは、スキーム（httpsなど）から始まるURL全体1つだけに一致します（スキーム・ホスト・ポート・パス・クエリ・フラグメントがすべて同じURL。ホスト名の大文字小文字と既定のポートは区別しません。末尾の / やクエリが違えば別のURLです）。",
+    "description": "Privacy settings page (options.html). PRIVACY: how each rule type matches; must not read wider or narrower than the matching rules."
+  },
+  "optionsDomainWildcardNote": {
+    "message": "スキーム（httpsなど）やパスは含めず、「*.example.com」の形で書きます。example.com 自身にも一致します。",
+    "description": "Privacy settings page (options.html). Note for the Domain Wildcard type."
+  },
+  "optionsCheckerUrlLabel": {
+    "message": "チェック対象URL",
+    "description": "Privacy settings page (options.html). Label."
+  },
+  "optionsCheckerUrlNote": {
+    "message": "入力したルールとURLは確認のためにNative Hostへ送られますが、保存されません。この画面を閉じると消えます。",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsCheckMatch": {
+    "message": "マッチングを確認",
+    "description": "Privacy settings page (options.html). Button; quoted in messages."
+  },
+  "optionsCheckerResultLabel": {
+    "message": "判定結果",
+    "description": "Privacy settings page (options.html). Label of the check result."
+  },
+  "optionsCheckerNotChecked": {
+    "message": "未チェック",
+    "description": "Privacy settings page (options.html). Check result before any check (also options-page.js)."
+  },
+  "optionsCheckerCaveat": {
+    "message": "この結果はルール単体の一致確認です。実際の保存判定は、適用中のPolicy全体で決まります。",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsPslTitle": {
+    "message": "Public Suffix Listによる制限",
+    "description": "Privacy settings page (options.html). Heading of the domain approval."
+  },
+  "optionsPslEffect": {
+    "message": "制限を理解したうえで、このドメインを承認できます。承認はこのドメインだけに有効で、このドメインを指定する今後のDomain Wildcardルールにも使われます。承認だけではルールは追加されず、URLを保存するかどうかも変わりません。承認したあと、もう一度一致を確認してから追加します。",
+    "description": "Privacy settings page (options.html). PRIVACY: an approval is not a rule."
+  },
+  "optionsApproveDomain": {
+    "message": "このドメインを承認する",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsAddNeverSave": {
+    "message": "保存しないグループに追加",
+    "description": "Privacy settings page (options.html). Button: adds the matched rule to the draft only. PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history."
+  },
+  "optionsAddSaveButNoMcp": {
+    "message": "MCPサーバに見せないグループに追加",
+    "description": "Privacy settings page (options.html). Button: adds the matched rule to the draft only. PRIVACY: the Hide from MCP group (Private Zone) keeps recording but never shows matching URLs to the MCP server. MCP visibility is not general publication."
+  },
+  "optionsReplaceRule": {
+    "message": "変更を反映",
+    "description": "Privacy settings page (options.html). Button: replaces the edited rule in the draft only; quoted in messages."
+  },
+  "optionsStopEditing": {
+    "message": "編集をやめる",
+    "description": "Privacy settings page (options.html). Button; quoted in messages."
+  },
+  "optionsNeverSaveNote": {
+    "message": "一致したURLはMemocampusに保存されません。",
+    "description": "Privacy settings page (options.html). PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history."
+  },
+  "optionsSaveButNoMcpNote": {
+    "message": "一致したURLはVaultに保存されますが、MCPサーバ向けの公開対象から除外されます。",
+    "description": "Privacy settings page (options.html). PRIVACY: the Hide from MCP group (Private Zone) keeps recording but never shows matching URLs to the MCP server. MCP visibility is not general publication."
+  },
+  "optionsGroupEnable": {
+    "message": "このグループを有効にする",
+    "description": "Privacy settings page (options.html). Checkbox label."
+  },
+  "optionsNeverSaveOffWarning": {
+    "message": "無効にすると、このグループのルールと基本保護（認証関連・認証情報）が判定に使われなくなり、これらに一致するURLもMemocampusに保存されるようになります。ルールは削除されません。",
+    "description": "Privacy settings page (options.html). PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history."
+  },
+  "optionsSaveButNoMcpOffWarning": {
+    "message": "無効にすると、このグループのルールと基本保護（行政サイト・Webメール・AIチャット）が判定に使われなくなり、これらに一致するURLもMCPサーバ向けの公開対象になります。ルールは削除されません。",
+    "description": "Privacy settings page (options.html). PRIVACY: the Hide from MCP group (Private Zone) keeps recording but never shows matching URLs to the MCP server. MCP visibility is not general publication."
+  },
+  "optionsNeverSaveCaption": {
+    "message": "保存しないグループのルール",
+    "description": "Privacy settings page (options.html). Table caption for screen readers."
+  },
+  "optionsSaveButNoMcpCaption": {
+    "message": "MCPサーバに見せないグループのルール",
+    "description": "Privacy settings page (options.html). Table caption for screen readers."
+  },
+  "optionsColumnType": {
+    "message": "種類",
+    "description": "Privacy settings page (options.html). Table column."
+  },
+  "optionsColumnActions": {
+    "message": "操作",
+    "description": "Privacy settings page (options.html). Table column."
+  },
+  "optionsGroupHint": {
+    "message": "新しいルールは、URLチェッカーで一致を確認してから追加します。内容の変更は「チェッカーで編集」から行います。",
+    "description": "Privacy settings page (options.html). The quote is a row button."
+  },
+  "optionsNeverSaveExportNote": {
+    "message": "Blind Zoneの編集中のルール（下書き）だけをkind,pattern形式で出力します。Pattern / Regex / Domain Wildcard / Exact URLの型と、未適用の変更・不正な文字列もそのまま保持します。URLチェッカーの未反映入力・基本保護・有効/無効設定は含みません。Exportは検証・適用ではありません。",
+    "description": "Privacy settings page (options.html). CSV: kind,pattern is the fixed CSV header; the data itself is never translated."
+  },
+  "optionsSaveButNoMcpExportNote": {
+    "message": "Private Zoneの編集中のルール（下書き）だけをkind,pattern形式で出力します。Pattern / Regex / Domain Wildcard / Exact URLの型と、未適用の変更・不正な文字列もそのまま保持します。URLチェッカーの未反映入力・基本保護・有効/無効設定は含みません。Exportは検証・適用ではありません。",
+    "description": "Privacy settings page (options.html). CSV: kind,pattern is the fixed CSV header; the data itself is never translated."
+  },
+  "optionsCsvSafetyNote": {
+    "message": "CSVはルール文字列を変更せず出力します。=、+、-、@などで始まる値は、Excel等で開くと数式として実行される危険があります。信頼できないCSVは表計算ソフトで開かず、テキストエディタで確認してください。CSV自体にもプライベートなルールが含まれるため、保存先と共有先に注意してください。",
+    "description": "Privacy settings page (options.html). SAFETY: formula injection warning for the CSV export."
+  },
+  "optionsPrivateCsvSafetyNote": {
+    "message": "CSVをExcel等で開くと、=、+、-、@などで始まる値が数式として実行される危険があります。信頼できないCSVはテキストエディタで確認してください。プライベートなルールの保存先と共有先にも注意してください。",
+    "description": "Privacy settings page (options.html). SAFETY: formula injection warning for the CSV export."
+  },
+  "optionsNeverSaveExport": {
+    "message": "Blind ZoneをCSV Export",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsSaveButNoMcpExport": {
+    "message": "Private ZoneをCSV Export",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsNeverSaveImportNote": {
+    "message": "CSV ImportはBlind Zoneの現在の下書きの末尾へ追加します。全件をNative Hostで検証し、不正行があれば全件取り消します。重複は自動除去せず、Hostが許容するものは順序どおり保持します。Active Policyは「適用」まで変わらず、既存のローカル履歴も自動削除しません。初期化済みのv2 Policyで利用できます。",
+    "description": "Privacy settings page (options.html). CSV import: all or nothing."
+  },
+  "optionsSaveButNoMcpImportNote": {
+    "message": "CSV ImportはPrivate Zoneの現在の下書きの末尾へ追加します。全件をNative Hostで検証し、不正行があれば全件取り消します。重複は自動除去せず、Hostが許容するものは順序どおり保持します。Active Policyは「適用」まで変わらず、既存のローカル履歴も自動削除しません。初期化済みのv2 Policyで利用できます。",
+    "description": "Privacy settings page (options.html). CSV import: all or nothing."
+  },
+  "optionsNeverSaveImport": {
+    "message": "Blind ZoneにCSV Import",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsSaveButNoMcpImport": {
+    "message": "Private ZoneにCSV Import",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsNeverSaveImportFile": {
+    "message": "Blind Zoneへ追加するCSV",
+    "description": "Privacy settings page (options.html). Accessible name of the file input."
+  },
+  "optionsSaveButNoMcpImportFile": {
+    "message": "Private Zoneへ追加するCSV",
+    "description": "Privacy settings page (options.html). Accessible name of the file input."
+  },
+  "optionsCsvImportLimits": {
+    "message": "kind,pattern形式のUTF-8 CSVを選択してください（BOM可）。上限はファイル1 MiB、CSV1,000件、追加後も各ゾーン1,000件、Regex合計128件、フィールド32,768バイト（Regexは4,096バイト）、Draft JSON 1 MiBです。検証中は編集・適用・再読み込みを停止します。",
+    "description": "Privacy settings page (options.html). CSV import limits."
+  },
+  "optionsUrlTestHeading": {
+    "message": "Policy全体テスト",
+    "description": "Privacy settings page (options.html). Heading."
+  },
+  "optionsUrlTestNote": {
+    "message": "URLが、編集中の下書き全体（基本保護と両グループ）でどう判定されるかをNative Hostで確認します。ルール1つの一致を確かめるURLチェッカーとは別の機能です。",
+    "description": "Privacy settings page (options.html). Explanation."
+  },
+  "optionsUrlTestLabel": {
+    "message": "テストするURL（http または https のURL）",
+    "description": "Privacy settings page (options.html). Label."
+  },
+  "optionsUrlTestRun": {
+    "message": "このURLを判定",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsUrlTestPrivacy": {
+    "message": "入力したURLは判定のためにNative Hostへ送られますが、Memocampusには保存されません。この画面を閉じると消えます。判定結果は記録を許可するものではありません。",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsUrlTestCaveat": {
+    "message": "これは編集中の設定によるテスト結果です。現在適用されている設定とは異なる場合があります。",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsApprovalsHeading": {
+    "message": "承認したドメイン",
+    "description": "Privacy settings page (options.html). Heading."
+  },
+  "optionsApprovalsNote": {
+    "message": "Public Suffix Listで登録境界を確認できない、または広い範囲に及ぶドメインのうち、Domain Wildcardで使うことを承認したドメインです。承認はルールではなく、ルールの一覧とは別に管理します。取り消すと、そのドメインのDomain Wildcardは再び承認するまで使えません。",
+    "description": "Privacy settings page (options.html). Explanation."
+  },
+  "optionsManageHeading": {
+    "message": "管理",
+    "description": "Privacy settings page (options.html). Heading of planned features."
+  },
+  "optionsPlannedMigration": {
+    "message": "旧形式（v1）からの明示的な移行（Migration）— 今後実装予定",
+    "description": "Privacy settings page (options.html). Not available yet."
+  },
+  "optionsPlannedRecovery": {
+    "message": "読み取れなくなったプライバシー設定の復旧 — 今後実装予定",
+    "description": "Privacy settings page (options.html). Not available yet."
+  },
+  "optionsApplyBarLabel": {
+    "message": "変更の適用",
+    "description": "Privacy settings page (options.html). Accessible name of the footer."
+  },
+  "optionsValidate": {
+    "message": "検証",
+    "description": "Privacy settings page (options.html). Button: the host checks the draft; quoted in messages."
+  },
+  "optionsDiscard": {
+    "message": "変更を破棄",
+    "description": "Privacy settings page (options.html). DESTRUCTIVE: drops the draft's changes only."
+  },
+  "optionsApply": {
+    "message": "適用",
+    "description": "Privacy settings page (options.html). Button: stores the draft as the policy; quoted in messages."
+  },
+  "optionsStartRecording": {
+    "message": "記憶を開始する",
+    "description": "Privacy settings page (options.html). Button: first use, starts automatic recording; quoted in messages."
+  },
+  "optionsStartRecheck": {
+    "message": "開始状態を再確認",
+    "description": "Privacy settings page (options.html). Button; quoted in messages."
+  },
+  "optionsApplyRecheck": {
+    "message": "適用結果を再確認",
+    "description": "Privacy settings page (options.html). Button; quoted in messages."
+  },
+  "optionsRelaxTitle": {
+    "message": "保護が弱くなる可能性がある変更が含まれています",
+    "description": "Privacy settings page (options.html). PRIVACY: confirmation before applying."
+  },
+  "optionsRelaxText": {
+    "message": "この変更により、これまで保存されなかったURLが保存されるようになる可能性があります。また、MCPサーバ向けに非公開だったURLが公開対象になる可能性があります。変更を適用しますか？",
+    "description": "Privacy settings page (options.html). PRIVACY: confirmation before applying."
+  },
+  "optionsRelaxNote": {
+    "message": "変更内容を単純に比べた注意です。実際に保護が弱くなるかどうかを判定したものではありません。",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsRelaxCancel": {
+    "message": "キャンセル",
+    "description": "Privacy settings page (options.html). Button of the confirmation; focused first."
+  },
+  "optionsRelaxApply": {
+    "message": "適用する",
+    "description": "Privacy settings page (options.html). Button of the confirmation."
+  },
+  "optionsPslPublicSuffix": {
+    "message": "この指定は、複数の登録者が利用する可能性がある広いドメイン範囲に一致します。$date$時点のPublic Suffix Listでは、「$domain$」は公開サフィックス（誰でもその下にドメインを登録できる範囲）です。",
+    "description": "Privacy settings page (options-page.js). Why a Domain Wildcard needs approval; [date] is the date of the bundled list, [domain] the domain.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "domain": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsPslDelegatedBoundary": {
+    "message": "この指定は、複数の登録者が利用する可能性がある広いドメイン範囲に一致します。$date$時点のPublic Suffix Listでは、「$domain$」の配下に公開サフィックスがあります。",
+    "description": "Privacy settings page (options-page.js). Why a Domain Wildcard needs approval.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "domain": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsPslUnknownSuffix": {
+    "message": "$date$時点のPublic Suffix Listでは、このドメイン（$domain$）の登録境界を確認できません。末尾が一覧にないドメインです。",
+    "description": "Privacy settings page (options-page.js). Why a Domain Wildcard needs approval.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "domain": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsPslNotRegistrable": {
+    "message": "$date$時点のPublic Suffix Listでは、「$domain$」は登録可能なドメインそのものではなく、そのサブドメインです。この範囲だけを対象にするには承認が必要です。",
+    "description": "Privacy settings page (options-page.js). Why a Domain Wildcard needs approval.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "domain": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsStateLoading": {
+    "message": "確認中…",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateReady": {
+    "message": "Ready（利用可能）",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateUninitialized": {
+    "message": "Not Initialized（未初期化）",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateInvalid": {
+    "message": "Invalid（設定ファイルが無効です）",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateUnsupported": {
+    "message": "Unsupported（現在のバージョンでは対応していません）",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateBusy": {
+    "message": "Unavailable（使用中）",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateUnavailable": {
+    "message": "Unavailable（アクセスできません）",
+    "description": "Privacy settings page (options-page.js). Policy state; also for an unknown state."
+  },
+  "optionsStateHostUnavailable": {
+    "message": "Unavailable（Native Hostに接続できません）",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateInvalidResponse": {
+    "message": "Unavailable（不正な応答）",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsNotShown": {
+    "message": "現在のプライバシー設定を取得できていないため、内容は表示していません。",
+    "description": "Privacy settings page (options-page.js). PRIVACY: fails closed."
+  },
+  "optionsExplainUninitialized": {
+    "message": "プライバシー設定はまだ初期化されていません。自動記録は行われません。初回案内と下書きを確認し、「記憶を開始する」を押すと記録を開始します。",
+    "description": "Privacy settings page (options-page.js). PRIVACY."
+  },
+  "optionsExplainInvalid": {
+    "message": "プライバシー設定を読み取れない（欠落・破損）ため、自動記録を停止しています。設定ファイルは変更していません。復旧機能は今後この画面に追加します。",
+    "description": "Privacy settings page (options-page.js). PRIVACY: fails closed. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsExplainUnsupported": {
+    "message": "プライバシー設定に、現在のバージョンでは対応していない内容が含まれているため、自動記録を停止しています。設定ファイルは変更していません。新しいバージョンで作られた設定であれば、Native Hostを更新してください。",
+    "description": "Privacy settings page (options-page.js). PRIVACY: fails closed. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsExplainBusy": {
+    "message": "プライバシー設定が使用中です。しばらくしてから再読み込みしてください。",
+    "description": "Privacy settings page (options-page.js). Explanation."
+  },
+  "optionsReadyV1": {
+    "message": "この設定は旧形式（v1）のため、この画面では編集できません。編集するには明示的な移行（Migration）が必要です。移行機能は今後この画面に追加します。自動では移行しません。",
+    "description": "Privacy settings page (options-page.js). Explanation."
+  },
+  "optionsReadyV2": {
+    "message": "基本保護とルールを変更できます。変更は下書きとしてこの画面にだけ保持され、「適用」を押すまで反映されません。",
+    "description": "Privacy settings page (options-page.js). Explanation."
+  },
+  "optionsProblemInvalidPattern": {
+    "message": "パターンの書き方が正しくありません（空欄、空白や \\ ? # @ : を含む、ホスト名がない、など）。",
+    "description": "Privacy settings page (options-page.js). Host validation result; never shows the rule text."
+  },
+  "optionsProblemInvalidRegex": {
+    "message": "正規表現の書き方が正しくありません。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemUnsupportedRegex": {
+    "message": "このバージョンでは使えない正規表現です（先読み・後読み・後方参照）。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemRegexLimit": {
+    "message": "正規表現が長すぎるか複雑すぎます。上限は正規表現ルールの数によって変わります。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidDomainWildcard": {
+    "message": "Domain Wildcardの書き方が正しくありません。ドメインのみを指定してください（例: *.example.com）。スキーム・パス・ポート・クエリ・空白・途中のワイルドカードは使えず、承認によっても使えるようにはなりません。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemDomainNotApproved": {
+    "message": "このDomain Wildcardのドメインは、Public Suffix Listによる制限があり、承認されていません。URLチェッカーで確認して承認するか、ルールを変更してください。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemPslUnavailable": {
+    "message": "Public Suffix Listを読み込めないため、Domain Wildcardを判定できません。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidExactUrl": {
+    "message": "Exact URLには、スキーム（httpまたはhttps）から始まるURL全体を1つ書いてください（空欄、空白や \\ を含むもの、不正なパーセントエンコードは使えません）。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidRule": {
+    "message": "ルールの形式が正しくありません。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemTooManyRules": {
+    "message": "このグループのルールが多すぎます（上限1,000件）。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemTooManyRegexRules": {
+    "message": "正規表現ルールが多すぎます（2つのグループの合計で上限128件）。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemPolicyTooLarge": {
+    "message": "設定が大きすぎて保存できません。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidVersion": {
+    "message": "設定のバージョンが正しくありません。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidRevision": {
+    "message": "設定のRevisionが正しくありません。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidDocument": {
+    "message": "設定の形式が正しくありません。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidPolicy": {
+    "message": "この下書きは使用できません。",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsErrorPolicyInvalid": {
+    "message": "下書きに問題があります。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorPolicyUnsupported": {
+    "message": "下書きに、このバージョンでは使えない正規表現が含まれています。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorPolicyConflict": {
+    "message": "ほかの画面またはプロセスでプライバシー設定が変更されています。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorPolicyBusy": {
+    "message": "プライバシー設定が使用中です。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorPolicyUnavailable": {
+    "message": "プライバシー設定にアクセスできません。",
+    "description": "Privacy settings page (options-page.js). Host error, also the explanation of that state."
+  },
+  "optionsErrorPolicyNotInitialized": {
+    "message": "プライバシー設定が初期化されていません。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorVersionMismatch": {
+    "message": "下書きと現在の設定のバージョンが一致しません。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorInvalidEtag": {
+    "message": "適用に必要な情報（ETag）が正しくありません。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorDraftTooLarge": {
+    "message": "下書きが大きすぎます（上限1 MiB）。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorInvalidDraft": {
+    "message": "下書きの形式が正しくありません。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorInvalidUrl": {
+    "message": "このURLは判定に使えません（長すぎるなど）。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorTimeout": {
+    "message": "Native Hostから応答がありません。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorHostUnavailable": {
+    "message": "Native Hostに接続できません。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorInvalidResponse": {
+    "message": "Native Hostから不正な応答を受け取りました。",
+    "description": "Privacy settings page (options-page.js). Host error, also the explanation of that state."
+  },
+  "optionsErrorUnknownType": {
+    "message": "Native Hostがこの操作に対応していません。Hostを更新してください。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorDomainInUse": {
+    "message": "適用中の設定でこのドメインのルールが使われているため、取り消せません。先に該当ルールを削除または変更して、適用してください。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorApprovalsUnavailable": {
+    "message": "承認したドメインの情報を読み書きできません。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorDomainMismatch": {
+    "message": "確認したドメインと一致しないため、承認しませんでした。もう一度確認してください。",
+    "description": "Privacy settings page (options-page.js). Host error. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsErrorDomainNotRestricted": {
+    "message": "このドメインは承認しなくても使えます。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorInvalidDomain": {
+    "message": "ドメインの指定が正しくありません。",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsLoadReason": {
+    "message": "（状態: $state$）",
+    "description": "Privacy settings page (options-page.js). Why the policy was not read; [state] is a policy state.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsLoadReasonError": {
+    "message": "（状態: $state$、$error$）",
+    "description": "Privacy settings page (options-page.js). Why the policy was not read; [error] is a sentence.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      },
+      "error": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsDecisionNeverSave": {
+    "message": "保存しません",
+    "description": "Privacy settings page (options-page.js). Whole-policy test result. PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history."
+  },
+  "optionsDecisionSaveButNoMcp": {
+    "message": "Vaultに保存しますが、MCPには見せません",
+    "description": "Privacy settings page (options-page.js). Whole-policy test result. PRIVACY: the Hide from MCP group (Private Zone) keeps recording but never shows matching URLs to the MCP server. MCP visibility is not general publication."
+  },
+  "optionsDecisionAllow": {
+    "message": "保存対象です",
+    "description": "Privacy settings page (options-page.js). Whole-policy test result: the draft lets the URL be recorded."
+  },
+  "optionsDecision": {
+    "message": "判定: $decision$",
+    "description": "Privacy settings page (options-page.js). [decision] is a test result.",
+    "placeholders": {
+      "decision": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsRelaxCategory": {
+    "message": "基本保護「$name$」をOFFにする",
+    "description": "Privacy settings page (options-page.js). PRIVACY: one change that may weaken protection.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsRelaxLayer": {
+    "message": "「$name$」を無効にする",
+    "description": "Privacy settings page (options-page.js). PRIVACY: one change that may weaken protection; [name] is a group.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsRelaxRules": {
+    "message": "「$name$」の既存のルール$count$件を削除するか、内容・種類を変更する",
+    "description": "Privacy settings page (options-page.js). PRIVACY: one change that may weaken protection; [count] is a number of rules.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      },
+      "count": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsCheckerDescription": {
+    "message": "ルールがURLに一致するかをNative Hostで確認し、一致したルールだけをグループに追加できます。追加は下書きへの追加で、「$button$」を押すまで反映されません。",
+    "description": "Privacy settings page (options-page.js). [button] is the Apply or Start remembering button.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsV1NotEditable": {
+    "message": "旧形式（v1）のため編集できません。",
+    "description": "Privacy settings page (options-page.js). Note."
+  },
+  "optionsCategoryLayerOff": {
+    "message": "「$name$」が無効のため、現在この項目は判定に使われていません。",
+    "description": "Privacy settings page (options-page.js). PRIVACY: [name] is a group.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsKindPatternV1": {
+    "message": "Pattern（v1）",
+    "description": "Privacy settings page (options-page.js). Rule type of an old-format rule."
+  },
+  "optionsNotEditable": {
+    "message": "編集不可",
+    "description": "Privacy settings page (options-page.js). Table cell."
+  },
+  "optionsRowPlace": {
+    "message": "$layer$ $row$行目",
+    "description": "Privacy settings page (options-page.js). Where a rule is; part of an accessible name.",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      },
+      "row": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsEditInChecker": {
+    "message": "チェッカーで編集",
+    "description": "Privacy settings page (options-page.js). Row button; quoted in a hint."
+  },
+  "optionsEditRuleLabel": {
+    "message": "$place$のルールをURLチェッカーで編集",
+    "description": "Privacy settings page (options-page.js). Accessible name; [place] is a group and row.",
+    "placeholders": {
+      "place": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsDelete": {
+    "message": "削除",
+    "description": "Privacy settings page (options-page.js). Row button: removes the rule from the draft only."
+  },
+  "optionsDeleteRuleLabel": {
+    "message": "$place$のルールを削除",
+    "description": "Privacy settings page (options-page.js). Accessible name; removes the rule from the draft only.",
+    "placeholders": {
+      "place": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsLayerOn": {
+    "message": "このグループは有効です。ルール $count$件。",
+    "description": "Privacy settings page (options-page.js). Group state.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsLayerOff": {
+    "message": "このグループは無効です（ルールと基本保護は判定に使われません）。ルール $count$件。",
+    "description": "Privacy settings page (options-page.js). PRIVACY: group state.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsNoRules": {
+    "message": "ルールはありません。",
+    "description": "Privacy settings page (options-page.js). Empty group."
+  },
+  "optionsErrorPrefix": {
+    "message": "エラー: $message$",
+    "description": "Privacy settings page (options-page.js). Validation problems of a row or group.",
+    "placeholders": {
+      "message": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsValidating": {
+    "message": "検証しています…",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsValidated": {
+    "message": "検証しました。この下書きは適用できます。",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsValidationProblems": {
+    "message": "検証の結果、下書きに問題があります（$count$件）。",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsValidationProblemsPlaced": {
+    "message": "検証の結果、下書きに問題があります（$count$件）。該当する行とグループに表示しています。",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsValidationFailed": {
+    "message": "検証できませんでした。$error$",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsReasonOnboarding": {
+    "message": "この下書きは未適用です。確認後「記憶を開始する」で初めて記録を有効にします。",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonNoDraft": {
+    "message": "設定を読み込めていないため、適用できません。",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonV1": {
+    "message": "旧形式（v1）の設定は、この画面では適用できません。",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonApplying": {
+    "message": "適用の処理中です。",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonValidating": {
+    "message": "検証中です。",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonImporting": {
+    "message": "CSV Import中です。下書きの編集・適用は完了後に行ってください。",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonReload": {
+    "message": "最新の設定を再読み込みするまで適用できません。",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonCheckResult": {
+    "message": "適用の結果を確認するまで、もう一度適用することはできません。",
+    "description": "Privacy settings page (options-page.js). Why applying waits. SAFETY: nothing is retried automatically."
+  },
+  "optionsReasonClean": {
+    "message": "未適用の変更はありません。",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonReady": {
+    "message": "適用の前に、Native Hostで下書き全体を検証します。",
+    "description": "Privacy settings page (options-page.js). Note under Apply."
+  },
+  "optionsDirty": {
+    "message": "未適用の変更があります",
+    "description": "Privacy settings page (options-page.js). Footer status."
+  },
+  "optionsExportRequested": {
+    "message": "操作時点の下書きのCSVダウンロードを要求しました。保存完了はブラウザで確認してください。",
+    "description": "Privacy settings page (options-page.js). CSV export: requested, not confirmed."
+  },
+  "optionsExportUnknownKind": {
+    "message": "CSV出力できません。未知のルール型が含まれています。一部だけの出力や型の変換は行いません。下書きは変更していません。",
+    "description": "Privacy settings page (options-page.js). CSV export fails closed. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsExportInvalidData": {
+    "message": "CSV出力できません。ルールの内部データ形式が不正です。kindとpatternは文字列である必要があります。一部だけの出力や値の変換は行いません。下書きは変更していません。",
+    "description": "Privacy settings page (options-page.js). CSV export fails closed. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsExportFailed": {
+    "message": "CSVのダウンロードを開始できませんでした。下書きは変更していません。ブラウザの設定を確認して再度お試しください。",
+    "description": "Privacy settings page (options-page.js). CSV export. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsCsvRead": {
+    "message": "ファイルを読み取れません。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvSize": {
+    "message": "ファイルが上限1 MiBを超えています。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvUtf8": {
+    "message": "UTF-8として読み取れません。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvEmpty": {
+    "message": "空ファイルです。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvHeader": {
+    "message": "ヘッダーは正確にkind,patternとしてください。",
+    "description": "Privacy settings page (options-page.js). CSV import error; kind,pattern is the fixed header."
+  },
+  "optionsCsvColumns": {
+    "message": "列数は2列である必要があります。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvQuote": {
+    "message": "引用符の構文が不正です。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvNewline": {
+    "message": "行区切りはLFまたはCRLFのいずれかに統一してください。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvControl": {
+    "message": "使用できない制御文字があります。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvKind": {
+    "message": "未知のkindです。",
+    "description": "Privacy settings page (options-page.js). CSV import error; kind is the CSV column name."
+  },
+  "optionsCsvField": {
+    "message": "フィールド長の上限（32,768バイト、Regexは4,096バイト）を超えています。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvRecords": {
+    "message": "CSV件数または追加後のゾーン件数が上限1,000件を超えています。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvRegexCount": {
+    "message": "追加後のRegex合計が上限128件を超えています。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvDraftSize": {
+    "message": "追加後のDraft JSONが上限1 MiBを超えています。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvReadonly": {
+    "message": "初期化済みの編集可能なv2 Policyが必要です。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvReadFailed": {
+    "message": "読み込みに失敗しました。",
+    "description": "Privacy settings page (options-page.js). CSV import error of an unknown code."
+  },
+  "optionsCsvImportIncomplete": {
+    "message": "CSV Importを完了できません。",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsImportPickerFailed": {
+    "message": "ファイル選択を開始できません。下書きは変更していません。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsImportConflict": {
+    "message": "Import中に下書きまたは画面の状態が変わりました。既存の変更は保持しています。内容を確認して再試行してください。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsImportNothing": {
+    "message": "CSVに追加するルールはありません。下書きは変更していません。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsImportPolicyFailed": {
+    "message": "候補全体のPolicyルール検証に失敗しました。",
+    "description": "Privacy settings page (options-page.js). CSV import: reason."
+  },
+  "optionsImportHostFailed": {
+    "message": "Native Hostとの通信または検証処理に失敗しました。",
+    "description": "Privacy settings page (options-page.js). CSV import: reason."
+  },
+  "optionsImportFailed": {
+    "message": "$reason$全件取り消し、下書きは変更していません。$detail$",
+    "description": "Privacy settings page (options-page.js). CSV import all or nothing: [reason] a sentence, [detail] empty or a host problem. SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      },
+      "detail": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsImportFailedAt": {
+    "message": "CSV $line$行目：$reason$全件取り消し、下書きは変更していません。$detail$",
+    "description": "Privacy settings page (options-page.js). CSV import all or nothing: [line] the CSV line, [reason] a sentence, [detail] empty or a host problem. SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "line": {
+        "content": "$1"
+      },
+      "reason": {
+        "content": "$2"
+      },
+      "detail": {
+        "content": "$3"
+      }
+    }
+  },
+  "optionsImportNoActive": {
+    "message": "Active Policyを確認できないためImportを中止しました。Native HostとPolicyの状態を確認してください。下書きは変更していません。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsImportEtagConflict": {
+    "message": "Active PolicyのETagが競合しました。下書きは保持しています。最新のPolicyを再読み込みしてから再試行してください。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsImportDone": {
+    "message": "$count$件を下書きに一括追加しました。Active Policyは変更していません。「適用」を押すまで反映されません。",
+    "description": "Privacy settings page (options-page.js). CSV import done (draft only).",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsEnterUrl": {
+    "message": "判定するURLを入力してください。",
+    "description": "Privacy settings page (options-page.js). Whole-policy test."
+  },
+  "optionsJudging": {
+    "message": "判定しています…",
+    "description": "Privacy settings page (options-page.js). Whole-policy test."
+  },
+  "optionsJudgeDraftProblem": {
+    "message": "下書きに問題があるため判定できませんでした。「検証」で問題の箇所を確認してください。",
+    "description": "Privacy settings page (options-page.js). Whole-policy test."
+  },
+  "optionsJudgeFailed": {
+    "message": "判定できませんでした。$error$",
+    "description": "Privacy settings page (options-page.js). Test or check failed; [error] is a sentence.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsCheckerNoDraft": {
+    "message": "設定を読み込めていないため、ルールを追加できません。",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added."
+  },
+  "optionsCheckerV1": {
+    "message": "旧形式（v1）の設定には、この画面からルールを追加できません。",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added."
+  },
+  "optionsCheckerLocked": {
+    "message": "適用の処理中は、ルールを追加・変更できません。",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added."
+  },
+  "optionsCheckerEditGone": {
+    "message": "編集対象のルールが変更または削除されたため、反映できません。「編集をやめる」を押してください。",
+    "description": "Privacy settings page (options-page.js). Why no rule can be changed."
+  },
+  "optionsCheckerCheckToAdd": {
+    "message": "「マッチングを確認」で一致を確認すると、追加できます。",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added yet."
+  },
+  "optionsCheckerEnter": {
+    "message": "ルールとチェック対象URLを入力し、「マッチングを確認」で一致を確認してください。",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added yet."
+  },
+  "optionsCheckerChecking": {
+    "message": "確認中です。",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added yet."
+  },
+  "optionsCheckerNoMatch": {
+    "message": "一致しなかったため、追加できません。ルールかURLを修正して、もう一度確認してください。",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added."
+  },
+  "optionsCheckerNotJudged": {
+    "message": "判定できなかったため、追加できません。",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added."
+  },
+  "optionsCheckerUnchanged": {
+    "message": "ルールが変更されていません。",
+    "description": "Privacy settings page (options-page.js). Why no rule can be changed."
+  },
+  "optionsCheckerDuplicate": {
+    "message": "同じルールがこのグループにすでにあります（登録済み）。",
+    "description": "Privacy settings page (options-page.js). Why no rule can be changed."
+  },
+  "optionsResultChecking": {
+    "message": "確認中…",
+    "description": "Privacy settings page (options-page.js). Check result."
+  },
+  "optionsResultMatch": {
+    "message": "一致しました",
+    "description": "Privacy settings page (options-page.js). Check result."
+  },
+  "optionsResultNoMatch": {
+    "message": "一致しませんでした",
+    "description": "Privacy settings page (options-page.js). Check result."
+  },
+  "optionsResultRuleError": {
+    "message": "ルールを確認してください。$problem$",
+    "description": "Privacy settings page (options-page.js). Check result; [problem] is a sentence.",
+    "placeholders": {
+      "problem": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsResultUrlError": {
+    "message": "URLを確認してください。$error$",
+    "description": "Privacy settings page (options-page.js). Check result; [error] is a sentence.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsResultApprovalNeeded": {
+    "message": "承認が必要です（Public Suffix Listによる制限）",
+    "description": "Privacy settings page (options-page.js). Check result."
+  },
+  "optionsEditingBanner": {
+    "message": "編集中: 「$layer$」の$row$行目のルール。一致を確認してから「変更を反映」を押すと、下書きのこのルールだけが置き換わります。",
+    "description": "Privacy settings page (options-page.js). [layer] a group, [row] a row number.",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      },
+      "row": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsCheckerAlreadyAdded": {
+    "message": "登録済み: このグループに同じルールがあります。",
+    "description": "Privacy settings page (options-page.js). Note at an add button."
+  },
+  "optionsCheckerGroupOff": {
+    "message": "このグループは無効です。ルールは追加されますが、適用後もグループを有効にするまで判定に使われません。",
+    "description": "Privacy settings page (options-page.js). PRIVACY: note at an add button."
+  },
+  "optionsCheckerAlsoNeverSave": {
+    "message": "同じルールが「保存しないグループ」にもあります。保存しないグループの判定が優先されるため、一致したURLは保存されません。",
+    "description": "Privacy settings page (options-page.js). PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history. The Never Save group takes precedence over the Hide from MCP group."
+  },
+  "optionsCheckerMatchReplace": {
+    "message": "一致しました。「変更を反映」で下書きのルールを置き換えられます。",
+    "description": "Privacy settings page (options-page.js). Checker state."
+  },
+  "optionsCheckerMatchAdd": {
+    "message": "一致しました。追加先のグループを選んでください。",
+    "description": "Privacy settings page (options-page.js). Checker state."
+  },
+  "optionsApprovalDomain": {
+    "message": "承認するドメイン: $domain$",
+    "description": "Privacy settings page (options-page.js). [domain] is the domain as the host named it.",
+    "placeholders": {
+      "domain": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApproved": {
+    "message": "「$domain$」を承認しました。ルールはまだ追加されていません。もう一度「マッチングを確認」を押して、一致を確認してください。",
+    "description": "Privacy settings page (options-page.js). PRIVACY: an approval adds no rule.",
+    "placeholders": {
+      "domain": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsNotApproved": {
+    "message": "承認しませんでした。$error$",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsRevoked": {
+    "message": "「$domain$」の承認を取り消しました。このドメインのDomain Wildcardは、再び承認するまで使えません。",
+    "description": "Privacy settings page (options-page.js). Result.",
+    "placeholders": {
+      "domain": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsNotRevoked": {
+    "message": "取り消しませんでした。$error$",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApprovalsLoading": {
+    "message": "読み込んでいます…",
+    "description": "Privacy settings page (options-page.js). Approved domains."
+  },
+  "optionsApprovalsFailed": {
+    "message": "承認したドメインを読み込めませんでした。$error$",
+    "description": "Privacy settings page (options-page.js). Approved domains.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApprovalsEmpty": {
+    "message": "承認したドメインはありません。",
+    "description": "Privacy settings page (options-page.js). Approved domains."
+  },
+  "optionsApprovalsPsl": {
+    "message": "判定に使うPublic Suffix List: $date$時点",
+    "description": "Privacy settings page (options-page.js). [date] is the date of the bundled list.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApprovedAt": {
+    "message": "承認済み（$date$）",
+    "description": "Privacy settings page (options-page.js). [date] is the approval time as the host gives it.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApprovalInUse": {
+    "message": "適用中の設定で使われています。取り消すには、先にこのドメインのルールを削除または変更して適用してください。",
+    "description": "Privacy settings page (options-page.js). Approved domains."
+  },
+  "optionsApprovalInUseUnknown": {
+    "message": "適用中の設定で使われているかを確認できません。",
+    "description": "Privacy settings page (options-page.js). Approved domains."
+  },
+  "optionsRevoke": {
+    "message": "承認を取り消す",
+    "description": "Privacy settings page (options-page.js). Button."
+  },
+  "optionsRevokeLabel": {
+    "message": "$domain$ の承認を取り消す",
+    "description": "Privacy settings page (options-page.js). Accessible name.",
+    "placeholders": {
+      "domain": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsAdded": {
+    "message": "「$layer$」の下書きに追加しました（$row$行目）。「$button$」を押すまで反映されません。",
+    "description": "Privacy settings page (options-page.js). Draft only.",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      },
+      "row": {
+        "content": "$2"
+      },
+      "button": {
+        "content": "$3"
+      }
+    }
+  },
+  "optionsReplaced": {
+    "message": "「$layer$」の$row$行目のルールを下書きで変更しました。「$button$」を押すまで反映されません。",
+    "description": "Privacy settings page (options-page.js). Draft only.",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      },
+      "row": {
+        "content": "$2"
+      },
+      "button": {
+        "content": "$3"
+      }
+    }
+  },
+  "optionsEditStopped": {
+    "message": "編集をやめました。下書きは変更していません。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsValidationStale": {
+    "message": "検証中に下書きが変更されたため、結果は表示していません。もう一度「検証」を押してください。",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsVaultReady": {
+    "message": "使用可能なVaultを再利用します。",
+    "description": "Privacy settings page (options-page.js). First use: Vault state."
+  },
+  "optionsVaultNotReady": {
+    "message": "$state$。Vault設定で作成または選択してください。",
+    "description": "Privacy settings page (options-page.js). First use: [state] is the Vault state (shared with the Side Panel).",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsVaultUnknown": {
+    "message": "Vaultの状態を取得できません。Native Hostの接続を確認してください。",
+    "description": "Privacy settings page (options-page.js). First use."
+  },
+  "optionsStartConfirmed": {
+    "message": "記録開始済みのPolicyを確認しました。現在の設定を表示しています。MCP公開にはVault設定で別途承認が必要です。",
+    "description": "Privacy settings page (options-page.js). PRIVACY/MCP."
+  },
+  "optionsStartNotStarted": {
+    "message": "確認した時点では未開始です。$error$ 自動では開始を再送しません。",
+    "description": "Privacy settings page (options-page.js). SAFETY: nothing is retried automatically.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsStartUnknown": {
+    "message": "開始状態を確認できません。$reason$ 開始リクエストは再送しません。「開始状態を再確認」または「再読み込み」を使ってください。",
+    "description": "Privacy settings page (options-page.js). SAFETY: nothing is retried automatically.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsStartInvalid": {
+    "message": "下書きを検証できないため、開始していません。検証結果を確認してください。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsStartedElsewhere": {
+    "message": "別の画面で記録開始済みです。現在の設定を表示しています。",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsApplyValidating": {
+    "message": "下書きを検証しています…",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsApplyDraftProblem": {
+    "message": "下書きに問題があるため、適用していません。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsApplyValidateFailed": {
+    "message": "下書きを検証できなかったため、適用していません。$error$",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplying": {
+    "message": "適用しています…",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsApplyConflict": {
+    "message": "ほかの画面またはプロセスでプライバシー設定が変更されていたため、適用しませんでした。自動では上書きしません。下書きはそのまま残しています。内容を確認してから「再読み込み」で最新の設定を読み込んでください（再読み込みすると、この下書きは破棄されます）。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsApplyRefused": {
+    "message": "適用しませんでした。$error$ 下書きはそのまま残しています。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsAppliedLoading": {
+    "message": "適用しました（Revision $revision$）。最新の状態を読み込んでいます…",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplied": {
+    "message": "適用しました（Revision $revision$）。",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsAppliedNewer": {
+    "message": "適用しました（Revision $revision$）。その後ほかの変更もあったため、最新の設定（Revision $latest$）を表示しています。",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      },
+      "latest": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsAppliedUnread": {
+    "message": "適用は成功しましたが（Revision $revision$）、最新状態を取得できませんでした。$reason$ 下書きは残しています。「適用結果を再確認」を押してください。",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      },
+      "reason": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsApplyUnknownChecking": {
+    "message": "適用の結果が不明です。$error$ 現在の設定を読み込んで確認しています…",
+    "description": "Privacy settings page (options-page.js). SAFETY: never reported as applied or as not applied before the check.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplyUnknown": {
+    "message": "適用の結果が不明です。適用されたかどうかを確認できませんでした。$reason$ 自動ではもう一度適用しません。下書きは残しています。Native Hostの状態を確かめてから「適用結果を再確認」を押してください。",
+    "description": "Privacy settings page (options-page.js). SAFETY: the outcome is unknown, never stated either way. SAFETY: nothing is retried automatically.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplyConfirmed": {
+    "message": "適用されたことを確認しました（Revision $revision$）。",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplyNotApplied": {
+    "message": "確認した時点では、設定は適用前のままでした（$error$）。自動ではもう一度適用しません。下書きは残しています。必要であれば、もう一度「適用」を押してください。",
+    "description": "Privacy settings page (options-page.js). SAFETY: nothing is retried automatically.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplyChanged": {
+    "message": "適用の結果が不明なうちに、プライバシー設定がこの下書きとは異なる内容に変わっていました（Revision $revision$）。自動では上書きしません。下書きは残しています。内容を確認してから「再読み込み」で最新の設定を読み込んでください。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsPresetFailed": {
+    "message": "初期候補を取得できません。開始していません。Native Hostを確認して再読み込みしてください。",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsDiscarded": {
+    "message": "変更を破棄しました。",
+    "description": "Privacy settings page (options-page.js). Status."
   }
 }

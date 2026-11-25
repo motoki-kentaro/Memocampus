@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CENSORED_LABEL, UNKNOWN_SOURCE_LABEL, navigationSource } from "../../extension/navigation-text.js";
+import { CENSORED_LABEL, navigationSource } from "../../extension/navigation-text.js";
+import { t } from "../../extension/i18n.js";
+
+const UNKNOWN_SOURCE_LABEL = t("navigationSourceUnknown");
 
 test("a deleted source is [CENSORED], an absent one is unknown, and a null alone is never censored", () => {
   assert.equal(CENSORED_LABEL, "[CENSORED]");

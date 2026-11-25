@@ -17,39 +17,39 @@
         </span>
         <div class="brand-titles">
           <h1>Memocampus History</h1>
-          <span class="brand-tag">閲覧記憶タイムライン</span>
+          <span class="brand-tag" data-i18n="historyBrandTag"></span>
         </div>
       </div>
       <p id="history-status" class="history-status" role="status" aria-live="polite" hidden></p>
     </header>
 
     <div class="history-layout">
-      <aside class="history-side" aria-label="日付と検索条件">
-        <section class="calendar" aria-label="カレンダー">
+      <aside class="history-side" data-i18n-aria-label="historySideLabel">
+        <section class="calendar" data-i18n-aria-label="historyCalendarLabel">
           <div class="calendar-head">
-            <button id="cal-prev" type="button" class="icon-button cal-nav cal-prev" aria-label="前の月" title="前の月">◀</button>
-            <button id="cal-title" type="button" class="calendar-title" aria-label="年と月を選ぶ" aria-expanded="false" aria-live="polite"></button>
-            <button id="cal-next" type="button" class="icon-button cal-nav cal-next" aria-label="次の月" title="次の月">▶</button>
+            <button id="cal-prev" type="button" class="icon-button cal-nav cal-prev" data-i18n-aria-label="calendarPrevMonth" data-i18n-title="calendarPrevMonth">◀</button>
+            <button id="cal-title" type="button" class="calendar-title" data-i18n-aria-label="historyChooseMonth" aria-expanded="false" aria-live="polite"></button>
+            <button id="cal-next" type="button" class="icon-button cal-nav cal-next" data-i18n-aria-label="calendarNextMonth" data-i18n-title="calendarNextMonth">▶</button>
           </div>
-          <table id="cal-table" class="cal-table" aria-label="日付の一覧"></table>
+          <table id="cal-table" class="cal-table" data-i18n-aria-label="historyDaysLabel"></table>
           <div id="cal-months" class="calendar-months" hidden></div>
-          <button id="cal-jump" type="button" class="link-button cal-jump-button" hidden>選択中の日の月へ戻る</button>
+          <button id="cal-jump" type="button" class="link-button cal-jump-button" hidden data-i18n="historyJumpToSelected"></button>
           <p id="cal-status" class="note" role="status" hidden></p>
-          <p id="cal-legend" class="note cal-legend"><span class="cal-dot-sample" aria-hidden="true"></span> 記録のある日（現在のドメイン条件に一致）</p>
+          <p id="cal-legend" class="note cal-legend"><span class="cal-dot-sample" aria-hidden="true"></span> <span data-i18n="historyCalendarLegend"></span></p>
         </section>
 
         <section class="domain-filter" aria-labelledby="domain-label">
           <div class="filter-header">
-            <label id="domain-label" for="domain-input">ドメイン絞り込み</label>
+            <label id="domain-label" for="domain-input" data-i18n="historyDomainLabel"></label>
           </div>
           <div class="search-input-wrap">
-            <input id="domain-input" type="search" maxlength="256" placeholder="未入力ならすべてのドメイン" autocomplete="off" spellcheck="false" aria-describedby="domain-hint domain-error">
+            <input id="domain-input" type="search" maxlength="256" data-i18n-placeholder="historyDomainPlaceholder" autocomplete="off" spellcheck="false" aria-describedby="domain-hint domain-error">
           </div>
           <fieldset class="mode-switch">
-            <legend>照合方法</legend>
+            <legend data-i18n="historyMatchLegend"></legend>
             <div class="segmented-control">
-              <label class="segmented-item"><input id="mode-exact" type="radio" name="mode" value="exact" checked> <span>完全一致</span></label>
-              <label class="segmented-item"><input id="mode-regex" type="radio" name="mode" value="regex"> <span>正規表現</span></label>
+              <label class="segmented-item"><input id="mode-exact" type="radio" name="mode" value="exact" checked> <span data-i18n="historyMatchExact"></span></label>
+              <label class="segmented-item"><input id="mode-regex" type="radio" name="mode" value="regex"> <span data-i18n="historyMatchRegex"></span></label>
             </div>
           </fieldset>
           <p id="domain-hint" class="note"></p>
@@ -63,23 +63,24 @@
             <h2 id="selected-heading" tabindex="-1"></h2>
             <p id="result-count" class="note result-count-badge" role="status" aria-live="polite"></p>
           </div>
-          <label class="size-label">表示件数
+          <label class="size-label"><span data-i18n="historyPageSizeLabel"></span>
             <select id="size-select">
-              <option value="25">25件</option>
-              <option value="50" selected>50件</option>
-              <option value="100">100件</option>
+              <option value="25" data-i18n="historyPageSize25"></option>
+              <option value="50" selected data-i18n="historyPageSize50"></option>
+              <option value="100" data-i18n="historyPageSize100"></option>
             </select>
           </label>
         </div>
         <div id="history-state" class="state-panel">
           <p id="history-state-text" role="status"></p>
-          <button id="history-retry" type="button" hidden>再読み込み</button>
-          <button id="history-settings" type="button" hidden>Vault設定を開く</button>
+          <button id="history-retry" type="button" hidden data-i18n="calendarReload"></button>
+          <button id="history-settings" type="button" hidden data-i18n="panelOpenVaultSettings"></button>
         </div>
         <ol id="history-list" class="visit-list" aria-labelledby="selected-heading" hidden></ol>
-        <nav id="history-pager" class="pager" aria-label="ページ" hidden></nav>
+        <nav id="history-pager" class="pager" data-i18n-aria-label="historyPagerLabel" hidden></nav>
       </main>
     </div>
+    <script src="i18n-dom.js"></script>
     <script type="module" src="history.js"></script>
   </body>
 </html>

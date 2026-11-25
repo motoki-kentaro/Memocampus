@@ -4335,5 +4335,1915 @@
   "vaultSwitchNote": {
     "message": "Switching to another Vault does not move any data, and the original Vault is not deleted.",
     "description": "Side Panel, Vault settings (sidepanel.html). Note at the end of the Vault settings."
+  },
+  "historyBrandTag": {
+    "message": "Browsing memory timeline",
+    "description": "History page (history.html). Subtitle under the page title Memocampus History."
+  },
+  "historySideLabel": {
+    "message": "Date and search conditions",
+    "description": "History page (history.html). Accessible name of the side column (calendar and domain filter)."
+  },
+  "historyCalendarLabel": {
+    "message": "Calendar",
+    "description": "History page (history.html). Accessible name of the calendar section."
+  },
+  "historyDaysLabel": {
+    "message": "Days of the month",
+    "description": "History page (history.html). Accessible name of the month grid."
+  },
+  "historyChooseMonth": {
+    "message": "Choose year and month",
+    "description": "History page (history.html). Accessible name of the calendar title button before the month is known."
+  },
+  "historyJumpToSelected": {
+    "message": "Back to the month of the selected day",
+    "description": "History page (history.html). Link-style button."
+  },
+  "historyCalendarLegend": {
+    "message": "Days with records (matching the current domain condition)",
+    "description": "History page (history.html). Legend of the dot that marks a day."
+  },
+  "historyDomainLabel": {
+    "message": "Filter by domain",
+    "description": "History page (history.html). Label of the domain field."
+  },
+  "historyDomainPlaceholder": {
+    "message": "All domains when empty",
+    "description": "History page (history.html). Placeholder of the domain field."
+  },
+  "historyMatchLegend": {
+    "message": "Match type",
+    "description": "History page (history.html). Legend of the exact / regular expression choice."
+  },
+  "historyMatchExact": {
+    "message": "Exact",
+    "description": "History page (history.html). Choice: the host name equals the text (sub-domains not included). Internal value exact."
+  },
+  "historyMatchRegex": {
+    "message": "Regular expression",
+    "description": "History page (history.html). Choice: the host name matches a regular expression. Internal value regex."
+  },
+  "historyPageSizeLabel": {
+    "message": "Per page",
+    "description": "History page (history.html). Label of the page size choice."
+  },
+  "historyPageSize25": {
+    "message": "25",
+    "description": "History page (history.html). Page size option (internal value 25)."
+  },
+  "historyPageSize50": {
+    "message": "50",
+    "description": "History page (history.html). Page size option (internal value 50)."
+  },
+  "historyPageSize100": {
+    "message": "100",
+    "description": "History page (history.html). Page size option (internal value 100)."
+  },
+  "historyPagerLabel": {
+    "message": "Pages",
+    "description": "History page (history.html). Accessible name of the page navigation."
+  },
+  "historyErrorInvalidRegex": {
+    "message": "The regular expression is not valid. Check its syntax.",
+    "description": "History page (history-app.js). Error of the domain field."
+  },
+  "historyErrorUnsupportedRegex": {
+    "message": "This regular expression cannot be used (look-around and back-references are not supported).",
+    "description": "History page (history-app.js). Error of the domain field."
+  },
+  "historyErrorRegexLimit": {
+    "message": "The regular expression is too complex. Use a simpler one.",
+    "description": "History page (history-app.js). Error of the domain field."
+  },
+  "historyErrorRegexTooLong": {
+    "message": "The regular expression is too long (up to 512 bytes).",
+    "description": "History page (history-app.js). Error of the domain field."
+  },
+  "historyErrorInvalidDomain": {
+    "message": "The domain is not in a valid form. Enter only a host name (for example github.com).",
+    "description": "History page (history-app.js). Error of the domain field."
+  },
+  "historyErrorResponseTooLarge": {
+    "message": "The data for this day is too large to retrieve. Use a smaller page size or narrow the conditions.",
+    "description": "History page (history-app.js). Error."
+  },
+  "historyErrorVisitNotFound": {
+    "message": "This visit cannot be found (it may have been deleted).",
+    "description": "History page (history-app.js). Error of a visit's details."
+  },
+  "historyErrorVaultUnstable": {
+    "message": "The Vault keeps switching, so the display was stopped. Choose “Reload”.",
+    "description": "History page (history-app.js). Error; the quote is the Reload button."
+  },
+  "historyHintExact": {
+    "message": "Exact match example: github.com (sub-domains are not included)",
+    "description": "History page (history-app.js). Hint under the domain field."
+  },
+  "historyHintRegex": {
+    "message": "Regular expression example: (^|\\.)github\\.com$$ (matches part of the host name)",
+    "description": "History page (history-app.js). Hint under the domain field; the example is a regular expression and must stay as is (the double dollar shows one)."
+  },
+  "historyPrevYear": {
+    "message": "Previous year",
+    "description": "History page (history-app.js). Calendar button in the month list."
+  },
+  "historyNextYear": {
+    "message": "Next year",
+    "description": "History page (history-app.js). Calendar button in the month list."
+  },
+  "historyDayHeading": {
+    "message": "Visits on $date$",
+    "description": "History page (history-app.js). Heading of the list; [date] is a long date with weekday.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyLongDate": {
+    "message": "$weekday$, $date$",
+    "description": "History page, visit rows and details (history-view.js). A day with its weekday; [date] is the formatted date, [weekday] a short weekday name.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "weekday": {
+        "content": "$2"
+      }
+    }
+  },
+  "historyNoMatches": {
+    "message": "No visits match the conditions.",
+    "description": "History page (history-app.js). Empty list with a domain filter."
+  },
+  "historyNoVisits": {
+    "message": "There are no visits on this day.",
+    "description": "History page (history-app.js). Empty list."
+  },
+  "historyCountZero": {
+    "message": "0 visits",
+    "description": "History page (history-app.js). Result count of an empty list."
+  },
+  "historyCount": {
+    "message": "$count$ visits (page $page$ of $pages$)",
+    "description": "History page (history-app.js). Result count; [count] is formatted.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "page": {
+        "content": "$2"
+      },
+      "pages": {
+        "content": "$3"
+      }
+    }
+  },
+  "historyCountOne": {
+    "message": "$count$ visit (page $page$ of $pages$)",
+    "description": "History page (history-app.js). Result count, English singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "page": {
+        "content": "$2"
+      },
+      "pages": {
+        "content": "$3"
+      }
+    }
+  },
+  "historyCountMatching": {
+    "message": "$count$ matching visits (page $page$ of $pages$)",
+    "description": "History page (history-app.js). Result count with a domain filter.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "page": {
+        "content": "$2"
+      },
+      "pages": {
+        "content": "$3"
+      }
+    }
+  },
+  "historyCountMatchingOne": {
+    "message": "$count$ matching visit (page $page$ of $pages$)",
+    "description": "History page (history-app.js). Result count with a domain filter, English singular form.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "page": {
+        "content": "$2"
+      },
+      "pages": {
+        "content": "$3"
+      }
+    }
+  },
+  "historyVaultSwitched": {
+    "message": "The Vault was switched, so the display is being reloaded.",
+    "description": "History page (history-app.js). Status."
+  },
+  "historyLoading": {
+    "message": "Loading…",
+    "description": "History page (history-app.js). State of the list while it loads."
+  },
+  "historyFixConditions": {
+    "message": "Correct the search conditions.",
+    "description": "History page (history-app.js). No list is shown for a condition that cannot be applied."
+  },
+  "historyPageOutOfRange": {
+    "message": "The page number is out of range.",
+    "description": "History page (history-app.js). Error."
+  },
+  "historyDaysFailed": {
+    "message": "The days with records could not be retrieved.",
+    "description": "History page (history-app.js). Calendar error."
+  },
+  "historyUnsupported": {
+    "message": "This Native Host does not support the History page. Update Memocampus.",
+    "description": "History page (history-app.js). Error."
+  },
+  "historyFullUrlFailed": {
+    "message": "The full URL could not be retrieved, so it is not opened.",
+    "description": "History page (history-app.js). Status: nothing was opened."
+  },
+  "historyOpenFullUrl": {
+    "message": "Retrieves the full URL and opens it in a new tab",
+    "description": "History page, visit rows and details (history-view.js). Tooltip of a title whose URL was shortened in the list."
+  },
+  "historyNoHost": {
+    "message": "(no host name)",
+    "description": "History page, visit rows and details (history-view.js). A visit without a host name."
+  },
+  "historyShowDetail": {
+    "message": "Show details",
+    "description": "History page, visit rows and details (history-view.js). Button."
+  },
+  "historyHideDetail": {
+    "message": "Hide details",
+    "description": "History page, visit rows and details (history-view.js). Button."
+  },
+  "historyDetailLabel": {
+    "message": "Details of $title$",
+    "description": "History page, visit rows and details (history-view.js). Accessible name of a detail region; [title] is the page title as recorded.",
+    "placeholders": {
+      "title": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyFirstPage": {
+    "message": "First page",
+    "description": "History page, visit rows and details (history-view.js). Pager button."
+  },
+  "historyPrevPage": {
+    "message": "Previous page",
+    "description": "History page, visit rows and details (history-view.js). Pager button."
+  },
+  "historyNextPage": {
+    "message": "Next page",
+    "description": "History page, visit rows and details (history-view.js). Pager button."
+  },
+  "historyLastPage": {
+    "message": "Last page",
+    "description": "History page, visit rows and details (history-view.js). Pager button."
+  },
+  "historyPageNumber": {
+    "message": "Page $page$",
+    "description": "History page, visit rows and details (history-view.js). Pager button.",
+    "placeholders": {
+      "page": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyPageNumberCurrent": {
+    "message": "Page $page$ (current)",
+    "description": "History page, visit rows and details (history-view.js). Pager button of the page shown.",
+    "placeholders": {
+      "page": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyDetailLoading": {
+    "message": "Loading details…",
+    "description": "History page, visit rows and details (history-view.js). Status."
+  },
+  "historyVisitHeading": {
+    "message": "Visit",
+    "description": "History page, visit rows and details (history-view.js). Heading of the visit card."
+  },
+  "historyVisitedAt": {
+    "message": "Visited",
+    "description": "History page, visit rows and details (history-view.js). Field name."
+  },
+  "historyFieldTitle": {
+    "message": "Title",
+    "description": "History page, visit rows and details (history-view.js). Field name."
+  },
+  "historyNavigationType": {
+    "message": "Recorded navigation type",
+    "description": "History page, visit rows and details (history-view.js). Field name; the value is the browser's own code."
+  },
+  "historySourceHeading": {
+    "message": "Came from",
+    "description": "History page, visit rows and details (history-view.js). Heading: the visit this one was reached from."
+  },
+  "historySourceDeleted": {
+    "message": "The visit it came from was deleted",
+    "description": "History page, visit rows and details (history-view.js). The source was deleted on purpose; shown with [CENSORED]."
+  },
+  "historySourceUnknown": {
+    "message": "Came from: unknown",
+    "description": "History page, visit rows and details (history-view.js). The source was not recorded; must not read as direct access."
+  },
+  "historySourceUnknownNote": {
+    "message": "Where this visit came from was not recorded or could not be determined.",
+    "description": "History page, visit rows and details (history-view.js). Note."
+  },
+  "historyTargetsHeading": {
+    "message": "Went to",
+    "description": "History page, visit rows and details (history-view.js). Heading: visits reached from this one."
+  },
+  "historyTargets": {
+    "message": "Next visits: $count$",
+    "description": "History page, visit rows and details (history-view.js). [count] is formatted.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyTargetsTruncated": {
+    "message": "Next visits: $count$ (showing the first $shown$)",
+    "description": "History page, visit rows and details (history-view.js). [count] and [shown] are formatted.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "shown": {
+        "content": "$2"
+      }
+    }
+  },
+  "historyNoTargets": {
+    "message": "No next visits were recorded",
+    "description": "History page, visit rows and details (history-view.js). Note."
+  },
+  "historyNoTargetVisits": {
+    "message": "There are no next visits that can be shown.",
+    "description": "History page, visit rows and details (history-view.js). Note."
+  },
+  "historyPageInfoHeading": {
+    "message": "Captured page information",
+    "description": "History page, visit rows and details (history-view.js). Heading."
+  },
+  "historyPageInfoNoteAt": {
+    "message": "Captured for this visit ($time$). It may differ from the page at the time of the visit.",
+    "description": "History page, visit rows and details (history-view.js). [time] is a date and time.",
+    "placeholders": {
+      "time": {
+        "content": "$1"
+      }
+    }
+  },
+  "historyPageInfoNote": {
+    "message": "Captured for this visit. It may differ from the page at the time of the visit.",
+    "description": "History page, visit rows and details (history-view.js). Note."
+  },
+  "historyFieldDescription": {
+    "message": "Description",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata."
+  },
+  "historyFieldOgTitle": {
+    "message": "OG title",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata (Open Graph)."
+  },
+  "historyFieldOgDescription": {
+    "message": "OG description",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata (Open Graph)."
+  },
+  "historyFieldSiteName": {
+    "message": "Site name",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata."
+  },
+  "historyFieldImageUrl": {
+    "message": "Image URL",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata."
+  },
+  "historyFieldFaviconUrl": {
+    "message": "Favicon URL",
+    "description": "History page, visit rows and details (history-view.js). Field name of page metadata."
+  },
+  "historyMetaSeparator": {
+    "message": "·",
+    "description": "History page, visit rows and details (history-view.js). Separator between the host, the time and the navigation type of a visit line (spaces are added around it)."
+  },
+  "historyFlowIntoVisit": {
+    "message": "↓ Navigation (into this visit)",
+    "description": "History page, visit rows and details (history-view.js). Connector under the Came from card (shown through CSS)."
+  },
+  "historyFlowFromVisit": {
+    "message": "↓ Next navigations (from this visit)",
+    "description": "History page, visit rows and details (history-view.js). Connector under the visit card (shown through CSS)."
+  },
+  "navigationSourceUnknown": {
+    "message": "Unknown",
+    "description": "A navigation whose source was never known, stored or allowed (navigation-text.js). Never the same as [CENSORED], a source deleted on purpose."
+  },
+  "optionsTitle": {
+    "message": "Memocampus — Privacy settings",
+    "description": "Privacy settings page (options.html). Page title and heading."
+  },
+  "optionsOnboardingHeading": {
+    "message": "Getting started — automatic recording is still OFF",
+    "description": "Privacy settings page (options.html). First use."
+  },
+  "optionsOnboardingRecords": {
+    "message": "When you choose “Start remembering”, Memocampus automatically records the URL, title and visit time of http/https pages in normal windows, with page metadata (description, OGP, favicon and so on). Incognito browsing is not recorded automatically.",
+    "description": "Privacy settings page (options.html). First use: what is recorded. The quote is the start button."
+  },
+  "optionsOnboardingLocal": {
+    "message": "Records are stored in a local Vault that you create or choose. Memocampus itself does not send browsing data to external services. Making it visible to an AI through MCP later needs a separate approval, and how the connected AI handles data also matters. Starting to record does not approve MCP access; it stays pending.",
+    "description": "Privacy settings page (options.html). PRIVACY/MCP: first use."
+  },
+  "optionsOnboardingZones": {
+    "message": "The Blind Zone (Never Save group) prevents automatic recording of matching pages. The Private Zone (Hide from MCP group) records them locally but does not make them visible to MCP or AI. Setting up the Blind Zone does not automatically delete history already saved.",
+    "description": "Privacy settings page (options.html). PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history. PRIVACY: the Hide from MCP group (Private Zone) keeps recording but never shows matching URLs to the MCP server. MCP visibility is not general publication. Blind Zone and Private Zone are product names."
+  },
+  "optionsOnboardingPreset": {
+    "message": "Below is the initial proposal (draft) from the Native Host. The basic protections put sign-in pages and credentials into the Blind Zone, and government sites, webmail and AI chats into the Private Zone. You can review examples and turn them ON or OFF under “Basic protections” below. They do not cover every sensitive site or URL. Review the rules, edit and check them with the URL checker, and add the protection you need.",
+    "description": "Privacy settings page (options.html). PRIVACY: first use; the protections are not complete."
+  },
+  "optionsOnboardingNotYet": {
+    "message": "Opening this page, showing the proposal or validating it does not start recording. Browsing before the start is not saved, and nothing is collected retroactively after the start. The draft is kept only in this page's memory.",
+    "description": "Privacy settings page (options.html). PRIVACY: nothing starts without the start button."
+  },
+  "optionsOpenVaultSettings": {
+    "message": "Open Vault settings (create or choose)",
+    "description": "Privacy settings page (options.html). Link to the Side Panel's Vault settings."
+  },
+  "optionsVaultRecheck": {
+    "message": "Check the Vault again",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsActiveHeading": {
+    "message": "Privacy settings in effect",
+    "description": "Privacy settings page (options.html). Heading."
+  },
+  "optionsStateLabel": {
+    "message": "State",
+    "description": "Privacy settings page (options.html). Term of the policy facts."
+  },
+  "optionsReload": {
+    "message": "Reload",
+    "description": "Privacy settings page (options.html). Button: reads the policy again; quoted in messages."
+  },
+  "optionsReloadConfirm": {
+    "message": "There are unapplied changes. Reloading discards them.",
+    "description": "Privacy settings page (options.html). DESTRUCTIVE: asked before reloading discards the draft."
+  },
+  "optionsReloadDiscard": {
+    "message": "Discard changes and reload",
+    "description": "Privacy settings page (options.html). DESTRUCTIVE: button."
+  },
+  "optionsCancel": {
+    "message": "Cancel",
+    "description": "Privacy settings page (options.html). Button that closes a confirmation without changing anything."
+  },
+  "optionsBasicProtections": {
+    "message": "Basic protections",
+    "description": "Privacy settings page (options.html). Heading of the built-in protections; quoted in messages."
+  },
+  "optionsBasicProtectionsNote": {
+    "message": "Protections built into Memocampus. URLs that match an item that is ON are treated like the group shown for it.",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsCategoryAuthentication": {
+    "message": "Sign-in pages",
+    "description": "Privacy settings page (options.html). Basic protection (Never Save group)."
+  },
+  "optionsCategoryCredentials": {
+    "message": "Credentials in URLs",
+    "description": "Privacy settings page (options.html). Basic protection (Never Save group)."
+  },
+  "optionsCategoryGovernment": {
+    "message": "Government sites",
+    "description": "Privacy settings page (options.html). Basic protection (Hide from MCP group)."
+  },
+  "optionsCategoryWebmail": {
+    "message": "Webmail",
+    "description": "Privacy settings page (options.html). Basic protection (Hide from MCP group)."
+  },
+  "optionsCategoryAiChats": {
+    "message": "AI chats",
+    "description": "Privacy settings page (options.html). Basic protection (Hide from MCP group)."
+  },
+  "optionsCategoryAuthenticationDetail": {
+    "message": "Sign-in screens of Google, Microsoft, OpenAI and Apple, and sign-in or password reset pages (/login, /signin, /reset-password and so on).",
+    "description": "Privacy settings page (options.html). What the protection covers."
+  },
+  "optionsCategoryCredentialsDetail": {
+    "message": "Pages whose URL contains a token, password, API key, signature or similar, URLs with a user name or password, and URLs with an OAuth authorization code.",
+    "description": "Privacy settings page (options.html). What the protection covers."
+  },
+  "optionsCategoryGovernmentDetail": {
+    "message": "Mynaportal (*.myna.go.jp) and the National Tax Agency (*.nta.go.jp).",
+    "description": "Privacy settings page (options.html). What the protection covers."
+  },
+  "optionsCategoryWebmailDetail": {
+    "message": "Gmail (mail.google.com) and Outlook (outlook.live.com, outlook.office.com).",
+    "description": "Privacy settings page (options.html). What the protection covers."
+  },
+  "optionsCategoryAiChatsDetail": {
+    "message": "ChatGPT (chatgpt.com), Claude (claude.ai) and Gemini (gemini.google.com).",
+    "description": "Privacy settings page (options.html). What the protection covers."
+  },
+  "optionsCategoryAuthenticationWarning": {
+    "message": "If turned OFF, these pages will also be recorded by Memocampus.",
+    "description": "Privacy settings page (options.html). PRIVACY: warning when the protection is turned off."
+  },
+  "optionsCategoryCredentialsWarning": {
+    "message": "If turned OFF, URLs containing credentials will also be recorded by Memocampus.",
+    "description": "Privacy settings page (options.html). PRIVACY: warning when the protection is turned off."
+  },
+  "optionsCategoryGovernmentWarning": {
+    "message": "If turned OFF, these pages can be shown to the MCP server.",
+    "description": "Privacy settings page (options.html). PRIVACY/MCP: warning when the protection is turned off."
+  },
+  "optionsCategoryWebmailWarning": {
+    "message": "If turned OFF, mail pages can be shown to the MCP server.",
+    "description": "Privacy settings page (options.html). PRIVACY/MCP: warning when the protection is turned off."
+  },
+  "optionsCategoryAiChatsWarning": {
+    "message": "If turned OFF, AI chat pages can be shown to the MCP server.",
+    "description": "Privacy settings page (options.html). PRIVACY/MCP: warning when the protection is turned off."
+  },
+  "optionsCheckerHeading": {
+    "message": "URL checker",
+    "description": "Privacy settings page (options.html). Heading; quoted in messages."
+  },
+  "optionsRuleKindLegend": {
+    "message": "Rule type",
+    "description": "Privacy settings page (options.html). Legend of the rule types (Pattern, Regex, Domain Wildcard, Exact URL are fixed names)."
+  },
+  "optionsRuleLabel": {
+    "message": "Rule",
+    "description": "Privacy settings page (options.html). Label of the rule field and table column."
+  },
+  "optionsRuleHelpLabel": {
+    "message": "How to write rules",
+    "description": "Privacy settings page (options.html). Accessible name of the help button."
+  },
+  "optionsRuleHelp": {
+    "message": "Pattern uses Memocampus pattern matching. Regex is judged with Rust regex syntax; look-ahead and look-behind are not supported. Domain Wildcard has the form “*.example.com” and matches example.com itself and all of its sub-domains (only the host name is judged; the path, query and port are not looked at). Public suffixes such as *.com or *.co.jp cannot be used. Exact URL matches exactly one whole URL starting with a scheme (such as https): the scheme, host, port, path, query and fragment must all be the same. The case of the host name and the default port make no difference. A different trailing / or query makes it a different URL.",
+    "description": "Privacy settings page (options.html). PRIVACY: how each rule type matches; must not read wider or narrower than the matching rules."
+  },
+  "optionsDomainWildcardNote": {
+    "message": "Write it as “*.example.com”, without a scheme (such as https) or a path. It also matches example.com itself.",
+    "description": "Privacy settings page (options.html). Note for the Domain Wildcard type."
+  },
+  "optionsCheckerUrlLabel": {
+    "message": "URL to check",
+    "description": "Privacy settings page (options.html). Label."
+  },
+  "optionsCheckerUrlNote": {
+    "message": "The rule and URL you enter are sent to the Native Host for the check but are not saved. They are gone when you close this page.",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsCheckMatch": {
+    "message": "Check match",
+    "description": "Privacy settings page (options.html). Button; quoted in messages."
+  },
+  "optionsCheckerResultLabel": {
+    "message": "Result",
+    "description": "Privacy settings page (options.html). Label of the check result."
+  },
+  "optionsCheckerNotChecked": {
+    "message": "Not checked",
+    "description": "Privacy settings page (options.html). Check result before any check (also options-page.js)."
+  },
+  "optionsCheckerCaveat": {
+    "message": "This result checks only whether this one rule matches. Whether a URL is actually recorded is decided by the whole Policy in effect.",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsPslTitle": {
+    "message": "Restricted by the Public Suffix List",
+    "description": "Privacy settings page (options.html). Heading of the domain approval."
+  },
+  "optionsPslEffect": {
+    "message": "If you understand the restriction, you can approve this domain. The approval applies only to this domain and is also used for later Domain Wildcard rules that name it. Approving adds no rule and does not change whether any URL is recorded. After approving, check the match again, then add the rule.",
+    "description": "Privacy settings page (options.html). PRIVACY: an approval is not a rule."
+  },
+  "optionsApproveDomain": {
+    "message": "Approve this domain",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsAddNeverSave": {
+    "message": "Add to the Never Save group",
+    "description": "Privacy settings page (options.html). Button: adds the matched rule to the draft only. PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history."
+  },
+  "optionsAddSaveButNoMcp": {
+    "message": "Add to the Hide from MCP group",
+    "description": "Privacy settings page (options.html). Button: adds the matched rule to the draft only. PRIVACY: the Hide from MCP group (Private Zone) keeps recording but never shows matching URLs to the MCP server. MCP visibility is not general publication."
+  },
+  "optionsReplaceRule": {
+    "message": "Replace the rule",
+    "description": "Privacy settings page (options.html). Button: replaces the edited rule in the draft only; quoted in messages."
+  },
+  "optionsStopEditing": {
+    "message": "Stop editing",
+    "description": "Privacy settings page (options.html). Button; quoted in messages."
+  },
+  "optionsNeverSaveNote": {
+    "message": "Matching URLs are not recorded automatically by Memocampus.",
+    "description": "Privacy settings page (options.html). PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history."
+  },
+  "optionsSaveButNoMcpNote": {
+    "message": "Matching URLs are recorded in the Vault but are never shown to the MCP server.",
+    "description": "Privacy settings page (options.html). PRIVACY: the Hide from MCP group (Private Zone) keeps recording but never shows matching URLs to the MCP server. MCP visibility is not general publication."
+  },
+  "optionsGroupEnable": {
+    "message": "Turn this group on",
+    "description": "Privacy settings page (options.html). Checkbox label."
+  },
+  "optionsNeverSaveOffWarning": {
+    "message": "If turned off, this group's rules and its basic protections (sign-in pages, credentials) are no longer used, and URLs that match them will also be recorded by Memocampus. The rules are not deleted.",
+    "description": "Privacy settings page (options.html). PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history."
+  },
+  "optionsSaveButNoMcpOffWarning": {
+    "message": "If turned off, this group's rules and its basic protections (government sites, webmail, AI chats) are no longer used, and URLs that match them can be shown to the MCP server. The rules are not deleted.",
+    "description": "Privacy settings page (options.html). PRIVACY: the Hide from MCP group (Private Zone) keeps recording but never shows matching URLs to the MCP server. MCP visibility is not general publication."
+  },
+  "optionsNeverSaveCaption": {
+    "message": "Rules of the Never Save group",
+    "description": "Privacy settings page (options.html). Table caption for screen readers."
+  },
+  "optionsSaveButNoMcpCaption": {
+    "message": "Rules of the Hide from MCP group",
+    "description": "Privacy settings page (options.html). Table caption for screen readers."
+  },
+  "optionsColumnType": {
+    "message": "Type",
+    "description": "Privacy settings page (options.html). Table column."
+  },
+  "optionsColumnActions": {
+    "message": "Actions",
+    "description": "Privacy settings page (options.html). Table column."
+  },
+  "optionsGroupHint": {
+    "message": "Add a new rule after checking the match in the URL checker. To change a rule, use “Edit in checker”.",
+    "description": "Privacy settings page (options.html). The quote is a row button."
+  },
+  "optionsNeverSaveExportNote": {
+    "message": "Exports only the rules being edited (the draft) of the Blind Zone, in kind,pattern form. The types (Pattern / Regex / Domain Wildcard / Exact URL), unapplied changes and invalid text are kept as they are. Input in the URL checker that is not added yet, the basic protections and the on/off setting are not included. Exporting does not validate or apply anything.",
+    "description": "Privacy settings page (options.html). CSV: kind,pattern is the fixed CSV header; the data itself is never translated."
+  },
+  "optionsSaveButNoMcpExportNote": {
+    "message": "Exports only the rules being edited (the draft) of the Private Zone, in kind,pattern form. The types (Pattern / Regex / Domain Wildcard / Exact URL), unapplied changes and invalid text are kept as they are. Input in the URL checker that is not added yet, the basic protections and the on/off setting are not included. Exporting does not validate or apply anything.",
+    "description": "Privacy settings page (options.html). CSV: kind,pattern is the fixed CSV header; the data itself is never translated."
+  },
+  "optionsCsvSafetyNote": {
+    "message": "The CSV contains the rule text unchanged. Values starting with =, +, -, @ and similar can be run as formulas when opened in Excel or similar programs. Do not open an untrusted CSV in a spreadsheet; check it in a text editor. The CSV itself contains private rules, so be careful where you save and share it.",
+    "description": "Privacy settings page (options.html). SAFETY: formula injection warning for the CSV export."
+  },
+  "optionsPrivateCsvSafetyNote": {
+    "message": "When the CSV is opened in Excel or similar programs, values starting with =, +, -, @ and similar can be run as formulas. Check an untrusted CSV in a text editor. Also be careful where you save and share private rules.",
+    "description": "Privacy settings page (options.html). SAFETY: formula injection warning for the CSV export."
+  },
+  "optionsNeverSaveExport": {
+    "message": "Export the Blind Zone as CSV",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsSaveButNoMcpExport": {
+    "message": "Export the Private Zone as CSV",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsNeverSaveImportNote": {
+    "message": "CSV Import adds to the end of the Blind Zone's current draft. Every row is validated by the Native Host; if any row is invalid, nothing is added. Duplicates are not removed automatically; what the host accepts is kept in order. The Active Policy does not change until you choose “Apply”, and existing local history is not deleted automatically. Available with an initialized v2 Policy.",
+    "description": "Privacy settings page (options.html). CSV import: all or nothing."
+  },
+  "optionsSaveButNoMcpImportNote": {
+    "message": "CSV Import adds to the end of the Private Zone's current draft. Every row is validated by the Native Host; if any row is invalid, nothing is added. Duplicates are not removed automatically; what the host accepts is kept in order. The Active Policy does not change until you choose “Apply”, and existing local history is not deleted automatically. Available with an initialized v2 Policy.",
+    "description": "Privacy settings page (options.html). CSV import: all or nothing."
+  },
+  "optionsNeverSaveImport": {
+    "message": "Import CSV into the Blind Zone",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsSaveButNoMcpImport": {
+    "message": "Import CSV into the Private Zone",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsNeverSaveImportFile": {
+    "message": "CSV to add to the Blind Zone",
+    "description": "Privacy settings page (options.html). Accessible name of the file input."
+  },
+  "optionsSaveButNoMcpImportFile": {
+    "message": "CSV to add to the Private Zone",
+    "description": "Privacy settings page (options.html). Accessible name of the file input."
+  },
+  "optionsCsvImportLimits": {
+    "message": "Choose a UTF-8 CSV in kind,pattern form (a BOM is allowed). Limits: file 1 MiB, 1,000 CSV rows, 1,000 rules per zone after adding, 128 Regex rules in total, fields of 32,768 bytes (4,096 bytes for Regex), draft JSON 1 MiB. Editing, applying and reloading are paused during validation.",
+    "description": "Privacy settings page (options.html). CSV import limits."
+  },
+  "optionsUrlTestHeading": {
+    "message": "Whole-Policy test",
+    "description": "Privacy settings page (options.html). Heading."
+  },
+  "optionsUrlTestNote": {
+    "message": "Checks with the Native Host how a URL is judged by the whole draft being edited (the basic protections and both groups). This is separate from the URL checker, which checks whether one rule matches.",
+    "description": "Privacy settings page (options.html). Explanation."
+  },
+  "optionsUrlTestLabel": {
+    "message": "URL to test (an http or https URL)",
+    "description": "Privacy settings page (options.html). Label."
+  },
+  "optionsUrlTestRun": {
+    "message": "Judge this URL",
+    "description": "Privacy settings page (options.html). Button."
+  },
+  "optionsUrlTestPrivacy": {
+    "message": "The URL you enter is sent to the Native Host to be judged but is not saved by Memocampus. It is gone when you close this page. The result does not permit recording.",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsUrlTestCaveat": {
+    "message": "This is a test result for the settings being edited. It may differ from the settings in effect.",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsApprovalsHeading": {
+    "message": "Approved domains",
+    "description": "Privacy settings page (options.html). Heading."
+  },
+  "optionsApprovalsNote": {
+    "message": "Domains whose registration boundary cannot be confirmed with the Public Suffix List, or that cover a wide range, and that you approved for use in Domain Wildcard rules. An approval is not a rule and is managed separately from the rule lists. If you revoke it, Domain Wildcard rules for that domain cannot be used until it is approved again.",
+    "description": "Privacy settings page (options.html). Explanation."
+  },
+  "optionsManageHeading": {
+    "message": "Management",
+    "description": "Privacy settings page (options.html). Heading of planned features."
+  },
+  "optionsPlannedMigration": {
+    "message": "Explicit migration from the old format (v1) — planned",
+    "description": "Privacy settings page (options.html). Not available yet."
+  },
+  "optionsPlannedRecovery": {
+    "message": "Recovery of privacy settings that can no longer be read — planned",
+    "description": "Privacy settings page (options.html). Not available yet."
+  },
+  "optionsApplyBarLabel": {
+    "message": "Applying changes",
+    "description": "Privacy settings page (options.html). Accessible name of the footer."
+  },
+  "optionsValidate": {
+    "message": "Validate",
+    "description": "Privacy settings page (options.html). Button: the host checks the draft; quoted in messages."
+  },
+  "optionsDiscard": {
+    "message": "Discard changes",
+    "description": "Privacy settings page (options.html). DESTRUCTIVE: drops the draft's changes only."
+  },
+  "optionsApply": {
+    "message": "Apply",
+    "description": "Privacy settings page (options.html). Button: stores the draft as the policy; quoted in messages."
+  },
+  "optionsStartRecording": {
+    "message": "Start remembering",
+    "description": "Privacy settings page (options.html). Button: first use, starts automatic recording; quoted in messages."
+  },
+  "optionsStartRecheck": {
+    "message": "Check the start state again",
+    "description": "Privacy settings page (options.html). Button; quoted in messages."
+  },
+  "optionsApplyRecheck": {
+    "message": "Check the apply result again",
+    "description": "Privacy settings page (options.html). Button; quoted in messages."
+  },
+  "optionsRelaxTitle": {
+    "message": "This includes changes that may weaken protection",
+    "description": "Privacy settings page (options.html). PRIVACY: confirmation before applying."
+  },
+  "optionsRelaxText": {
+    "message": "With this change, URLs that were not recorded until now may be recorded, and URLs that were hidden from the MCP server may be shown to it. Apply the change?",
+    "description": "Privacy settings page (options.html). PRIVACY: confirmation before applying."
+  },
+  "optionsRelaxNote": {
+    "message": "This notice comes from a simple comparison of the changes. It does not judge whether protection is actually weakened.",
+    "description": "Privacy settings page (options.html). PRIVACY."
+  },
+  "optionsRelaxCancel": {
+    "message": "Cancel",
+    "description": "Privacy settings page (options.html). Button of the confirmation; focused first."
+  },
+  "optionsRelaxApply": {
+    "message": "Apply",
+    "description": "Privacy settings page (options.html). Button of the confirmation."
+  },
+  "optionsPslPublicSuffix": {
+    "message": "This rule matches a wide domain range that may be used by several registrants. In the Public Suffix List as of $date$, “$domain$” is a public suffix (a range under which anyone can register a domain).",
+    "description": "Privacy settings page (options-page.js). Why a Domain Wildcard needs approval; [date] is the date of the bundled list, [domain] the domain.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "domain": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsPslDelegatedBoundary": {
+    "message": "This rule matches a wide domain range that may be used by several registrants. In the Public Suffix List as of $date$, there is a public suffix under “$domain$”.",
+    "description": "Privacy settings page (options-page.js). Why a Domain Wildcard needs approval.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "domain": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsPslUnknownSuffix": {
+    "message": "In the Public Suffix List as of $date$, the registration boundary of this domain ($domain$) cannot be confirmed. Its ending is not in the list.",
+    "description": "Privacy settings page (options-page.js). Why a Domain Wildcard needs approval.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "domain": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsPslNotRegistrable": {
+    "message": "In the Public Suffix List as of $date$, “$domain$” is not a registrable domain itself but a sub-domain of one. Approval is needed to target only this range.",
+    "description": "Privacy settings page (options-page.js). Why a Domain Wildcard needs approval.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      },
+      "domain": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsStateLoading": {
+    "message": "Checking…",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateReady": {
+    "message": "Ready",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateUninitialized": {
+    "message": "Not Initialized",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateInvalid": {
+    "message": "Invalid (the settings file is not valid)",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateUnsupported": {
+    "message": "Unsupported (not supported by this version)",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateBusy": {
+    "message": "Unavailable (in use)",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateUnavailable": {
+    "message": "Unavailable (cannot be accessed)",
+    "description": "Privacy settings page (options-page.js). Policy state; also for an unknown state."
+  },
+  "optionsStateHostUnavailable": {
+    "message": "Unavailable (cannot connect to the Native Host)",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsStateInvalidResponse": {
+    "message": "Unavailable (invalid response)",
+    "description": "Privacy settings page (options-page.js). Policy state."
+  },
+  "optionsNotShown": {
+    "message": "The current privacy settings could not be retrieved, so their contents are not shown.",
+    "description": "Privacy settings page (options-page.js). PRIVACY: fails closed."
+  },
+  "optionsExplainUninitialized": {
+    "message": "The privacy settings are not initialized yet. Nothing is recorded automatically. Review the introduction and the draft, then choose “Start remembering” to start recording.",
+    "description": "Privacy settings page (options-page.js). PRIVACY."
+  },
+  "optionsExplainInvalid": {
+    "message": "Automatic recording is stopped because the privacy settings cannot be read (missing or damaged). The settings file was not changed. A way to recover will be added to this page later.",
+    "description": "Privacy settings page (options-page.js). PRIVACY: fails closed. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsExplainUnsupported": {
+    "message": "Automatic recording is stopped because the privacy settings contain something this version does not support. The settings file was not changed. If the settings were made by a newer version, update the Native Host.",
+    "description": "Privacy settings page (options-page.js). PRIVACY: fails closed. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsExplainBusy": {
+    "message": "The privacy settings are in use. Wait a moment, then reload.",
+    "description": "Privacy settings page (options-page.js). Explanation."
+  },
+  "optionsReadyV1": {
+    "message": "These settings are in the old format (v1), so they cannot be edited on this page. Editing needs an explicit migration, which will be added to this page later. Nothing is migrated automatically.",
+    "description": "Privacy settings page (options-page.js). Explanation."
+  },
+  "optionsReadyV2": {
+    "message": "You can change the basic protections and rules. Changes are kept as a draft on this page only and take effect only when you choose “Apply”.",
+    "description": "Privacy settings page (options-page.js). Explanation."
+  },
+  "optionsProblemInvalidPattern": {
+    "message": "The pattern is not written correctly (it is empty, contains spaces or \\ ? # @ :, has no host name, or similar).",
+    "description": "Privacy settings page (options-page.js). Host validation result; never shows the rule text."
+  },
+  "optionsProblemInvalidRegex": {
+    "message": "The regular expression is not written correctly.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemUnsupportedRegex": {
+    "message": "This regular expression cannot be used in this version (look-ahead, look-behind or back-references).",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemRegexLimit": {
+    "message": "The regular expression is too long or too complex. The limit depends on the number of regular expression rules.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidDomainWildcard": {
+    "message": "The Domain Wildcard is not written correctly. Give only a domain (for example *.example.com). A scheme, path, port, query, spaces or a wildcard in the middle cannot be used, and an approval does not make them usable.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemDomainNotApproved": {
+    "message": "The domain of this Domain Wildcard is restricted by the Public Suffix List and has not been approved. Check it in the URL checker and approve it, or change the rule.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemPslUnavailable": {
+    "message": "Domain Wildcard rules cannot be judged because the Public Suffix List cannot be loaded.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidExactUrl": {
+    "message": "For Exact URL, write one whole URL starting with a scheme (http or https). It cannot be empty or contain spaces, \\ or invalid percent-encoding.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidRule": {
+    "message": "The rule is not in a valid form.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemTooManyRules": {
+    "message": "This group has too many rules (limit 1,000).",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemTooManyRegexRules": {
+    "message": "There are too many regular expression rules (limit 128 for both groups together).",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemPolicyTooLarge": {
+    "message": "The settings are too large to be stored.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidVersion": {
+    "message": "The settings version is not valid.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidRevision": {
+    "message": "The settings revision is not valid.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidDocument": {
+    "message": "The settings are not in a valid form.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsProblemInvalidPolicy": {
+    "message": "This draft cannot be used.",
+    "description": "Privacy settings page (options-page.js). Host validation result."
+  },
+  "optionsErrorPolicyInvalid": {
+    "message": "The draft has problems.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorPolicyUnsupported": {
+    "message": "The draft contains a regular expression this version cannot use.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorPolicyConflict": {
+    "message": "The privacy settings have been changed by another page or process.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorPolicyBusy": {
+    "message": "The privacy settings are in use.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorPolicyUnavailable": {
+    "message": "The privacy settings cannot be accessed.",
+    "description": "Privacy settings page (options-page.js). Host error, also the explanation of that state."
+  },
+  "optionsErrorPolicyNotInitialized": {
+    "message": "The privacy settings are not initialized.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorVersionMismatch": {
+    "message": "The versions of the draft and the current settings do not match.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorInvalidEtag": {
+    "message": "The information needed to apply (ETag) is not valid.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorDraftTooLarge": {
+    "message": "The draft is too large (limit 1 MiB).",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorInvalidDraft": {
+    "message": "The draft is not in a valid form.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorInvalidUrl": {
+    "message": "This URL cannot be judged (it is too long, for example).",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorTimeout": {
+    "message": "The Native Host does not respond.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorHostUnavailable": {
+    "message": "Cannot connect to the Native Host.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorInvalidResponse": {
+    "message": "An invalid response was received from the Native Host.",
+    "description": "Privacy settings page (options-page.js). Host error, also the explanation of that state."
+  },
+  "optionsErrorUnknownType": {
+    "message": "The Native Host does not support this operation. Update the host.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorDomainInUse": {
+    "message": "This domain's rules are used by the settings in effect, so the approval cannot be revoked. First delete or change those rules and apply.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorApprovalsUnavailable": {
+    "message": "The approved domains cannot be read or written.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorDomainMismatch": {
+    "message": "Not approved because it does not match the domain that was checked. Check again.",
+    "description": "Privacy settings page (options-page.js). Host error. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsErrorDomainNotRestricted": {
+    "message": "This domain can be used without approval.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsErrorInvalidDomain": {
+    "message": "The domain is not valid.",
+    "description": "Privacy settings page (options-page.js). Host error."
+  },
+  "optionsLoadReason": {
+    "message": "(state: $state$)",
+    "description": "Privacy settings page (options-page.js). Why the policy was not read; [state] is a policy state.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsLoadReasonError": {
+    "message": "(state: $state$; $error$)",
+    "description": "Privacy settings page (options-page.js). Why the policy was not read; [error] is a sentence.",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      },
+      "error": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsDecisionNeverSave": {
+    "message": "Not recorded automatically",
+    "description": "Privacy settings page (options-page.js). Whole-policy test result. PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history."
+  },
+  "optionsDecisionSaveButNoMcp": {
+    "message": "Eligible for recording in the Vault, but hidden from MCP",
+    "description": "Privacy settings page (options-page.js). Whole-policy test result. PRIVACY: the Hide from MCP group (Private Zone) keeps recording but never shows matching URLs to the MCP server. MCP visibility is not general publication."
+  },
+  "optionsDecisionAllow": {
+    "message": "Eligible for recording",
+    "description": "Privacy settings page (options-page.js). Whole-policy test result: the draft lets the URL be recorded."
+  },
+  "optionsDecision": {
+    "message": "Result: $decision$",
+    "description": "Privacy settings page (options-page.js). [decision] is a test result.",
+    "placeholders": {
+      "decision": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsRelaxCategory": {
+    "message": "Turn OFF the basic protection “$name$”",
+    "description": "Privacy settings page (options-page.js). PRIVACY: one change that may weaken protection.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsRelaxLayer": {
+    "message": "Turn off “$name$”",
+    "description": "Privacy settings page (options-page.js). PRIVACY: one change that may weaken protection; [name] is a group.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsRelaxRules": {
+    "message": "Delete existing rules of “$name$”, or change their text or type ($count$)",
+    "description": "Privacy settings page (options-page.js). PRIVACY: one change that may weaken protection; [count] is a number of rules.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      },
+      "count": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsCheckerDescription": {
+    "message": "Check with the Native Host whether a rule matches a URL; only a rule that matches can be added to a group. It is added to the draft and takes effect only when you choose “$button$”.",
+    "description": "Privacy settings page (options-page.js). [button] is the Apply or Start remembering button.",
+    "placeholders": {
+      "button": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsV1NotEditable": {
+    "message": "Cannot be edited because it is in the old format (v1).",
+    "description": "Privacy settings page (options-page.js). Note."
+  },
+  "optionsCategoryLayerOff": {
+    "message": "This item is not used now because “$name$” is off.",
+    "description": "Privacy settings page (options-page.js). PRIVACY: [name] is a group.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsKindPatternV1": {
+    "message": "Pattern (v1)",
+    "description": "Privacy settings page (options-page.js). Rule type of an old-format rule."
+  },
+  "optionsNotEditable": {
+    "message": "Not editable",
+    "description": "Privacy settings page (options-page.js). Table cell."
+  },
+  "optionsRowPlace": {
+    "message": "$layer$, row $row$",
+    "description": "Privacy settings page (options-page.js). Where a rule is; part of an accessible name.",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      },
+      "row": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsEditInChecker": {
+    "message": "Edit in checker",
+    "description": "Privacy settings page (options-page.js). Row button; quoted in a hint."
+  },
+  "optionsEditRuleLabel": {
+    "message": "Edit the rule of $place$ in the URL checker",
+    "description": "Privacy settings page (options-page.js). Accessible name; [place] is a group and row.",
+    "placeholders": {
+      "place": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsDelete": {
+    "message": "Delete",
+    "description": "Privacy settings page (options-page.js). Row button: removes the rule from the draft only."
+  },
+  "optionsDeleteRuleLabel": {
+    "message": "Delete the rule of $place$",
+    "description": "Privacy settings page (options-page.js). Accessible name; removes the rule from the draft only.",
+    "placeholders": {
+      "place": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsLayerOn": {
+    "message": "This group is on. Rules: $count$.",
+    "description": "Privacy settings page (options-page.js). Group state.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsLayerOff": {
+    "message": "This group is off (its rules and basic protections are not used). Rules: $count$.",
+    "description": "Privacy settings page (options-page.js). PRIVACY: group state.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsNoRules": {
+    "message": "There are no rules.",
+    "description": "Privacy settings page (options-page.js). Empty group."
+  },
+  "optionsErrorPrefix": {
+    "message": "Error: $message$",
+    "description": "Privacy settings page (options-page.js). Validation problems of a row or group.",
+    "placeholders": {
+      "message": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsValidating": {
+    "message": "Validating…",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsValidated": {
+    "message": "Validated. This draft can be applied.",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsValidationProblems": {
+    "message": "Validation found problems in the draft ($count$).",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsValidationProblemsPlaced": {
+    "message": "Validation found problems in the draft ($count$). They are shown at the rows and groups concerned.",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsValidationFailed": {
+    "message": "Could not validate. $error$",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsReasonOnboarding": {
+    "message": "This draft is not applied. Recording is turned on only when you choose “Start remembering” after reviewing it.",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonNoDraft": {
+    "message": "The settings could not be loaded, so nothing can be applied.",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonV1": {
+    "message": "Settings in the old format (v1) cannot be applied on this page.",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonApplying": {
+    "message": "Applying is in progress.",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonValidating": {
+    "message": "Validation is in progress.",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonImporting": {
+    "message": "CSV import is in progress. Edit or apply the draft after it finishes.",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonReload": {
+    "message": "You cannot apply until you reload the latest settings.",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonCheckResult": {
+    "message": "You cannot apply again until the result of the last apply has been checked.",
+    "description": "Privacy settings page (options-page.js). Why applying waits. SAFETY: nothing is retried automatically."
+  },
+  "optionsReasonClean": {
+    "message": "There are no unapplied changes.",
+    "description": "Privacy settings page (options-page.js). Why applying waits."
+  },
+  "optionsReasonReady": {
+    "message": "Before applying, the whole draft is validated by the Native Host.",
+    "description": "Privacy settings page (options-page.js). Note under Apply."
+  },
+  "optionsDirty": {
+    "message": "There are unapplied changes",
+    "description": "Privacy settings page (options-page.js). Footer status."
+  },
+  "optionsExportRequested": {
+    "message": "The download of the draft as of now was requested as CSV. Check in the browser that it was saved.",
+    "description": "Privacy settings page (options-page.js). CSV export: requested, not confirmed."
+  },
+  "optionsExportUnknownKind": {
+    "message": "Cannot export as CSV: the draft contains an unknown rule type. Nothing is exported partially and no type is converted. The draft was not changed.",
+    "description": "Privacy settings page (options-page.js). CSV export fails closed. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsExportInvalidData": {
+    "message": "Cannot export as CSV: the internal data of a rule is invalid. kind and pattern must be strings. Nothing is exported partially and no value is converted. The draft was not changed.",
+    "description": "Privacy settings page (options-page.js). CSV export fails closed. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsExportFailed": {
+    "message": "The CSV download could not be started. The draft was not changed. Check the browser settings and try again.",
+    "description": "Privacy settings page (options-page.js). CSV export. SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsCsvRead": {
+    "message": "The file cannot be read.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvSize": {
+    "message": "The file exceeds the 1 MiB limit.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvUtf8": {
+    "message": "It cannot be read as UTF-8.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvEmpty": {
+    "message": "The file is empty.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvHeader": {
+    "message": "The header must be exactly kind,pattern.",
+    "description": "Privacy settings page (options-page.js). CSV import error; kind,pattern is the fixed header."
+  },
+  "optionsCsvColumns": {
+    "message": "Each row must have exactly 2 columns.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvQuote": {
+    "message": "The quoting is invalid.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvNewline": {
+    "message": "Use either LF or CRLF line breaks throughout.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvControl": {
+    "message": "It contains control characters that cannot be used.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvKind": {
+    "message": "Unknown kind.",
+    "description": "Privacy settings page (options-page.js). CSV import error; kind is the CSV column name."
+  },
+  "optionsCsvField": {
+    "message": "A field exceeds the length limit (32,768 bytes; 4,096 bytes for Regex).",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvRecords": {
+    "message": "The number of CSV rows, or of rules in the zone after adding, exceeds the limit of 1,000.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvRegexCount": {
+    "message": "The total of Regex rules after adding exceeds the limit of 128.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvDraftSize": {
+    "message": "The draft JSON after adding exceeds the 1 MiB limit.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvReadonly": {
+    "message": "An initialized, editable v2 Policy is required.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsCsvReadFailed": {
+    "message": "Reading failed.",
+    "description": "Privacy settings page (options-page.js). CSV import error of an unknown code."
+  },
+  "optionsCsvImportIncomplete": {
+    "message": "The CSV import cannot be completed.",
+    "description": "Privacy settings page (options-page.js). CSV import error."
+  },
+  "optionsImportPickerFailed": {
+    "message": "The file picker could not be opened. The draft was not changed.",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsImportConflict": {
+    "message": "The draft or the page changed during the import. Your existing changes are kept. Check them and try again.",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsImportNothing": {
+    "message": "The CSV has no rules to add. The draft was not changed.",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsImportPolicyFailed": {
+    "message": "Validation of the Policy rules of the whole candidate failed.",
+    "description": "Privacy settings page (options-page.js). CSV import: reason."
+  },
+  "optionsImportHostFailed": {
+    "message": "Communication with the Native Host or the validation failed.",
+    "description": "Privacy settings page (options-page.js). CSV import: reason."
+  },
+  "optionsImportFailed": {
+    "message": "$reason$ Nothing was added; the draft was not changed. $detail$",
+    "description": "Privacy settings page (options-page.js). CSV import all or nothing: [reason] a sentence, [detail] empty or a host problem. SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      },
+      "detail": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsImportFailedAt": {
+    "message": "CSV row $line$: $reason$ Nothing was added; the draft was not changed. $detail$",
+    "description": "Privacy settings page (options-page.js). CSV import all or nothing: [line] the CSV line, [reason] a sentence, [detail] empty or a host problem. SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "line": {
+        "content": "$1"
+      },
+      "reason": {
+        "content": "$2"
+      },
+      "detail": {
+        "content": "$3"
+      }
+    }
+  },
+  "optionsImportNoActive": {
+    "message": "The import was stopped because the Active Policy could not be checked. Check the Native Host and the Policy state. The draft was not changed.",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsImportEtagConflict": {
+    "message": "The Active Policy's ETag conflicted. The draft is kept. Reload the latest Policy, then try again.",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsImportDone": {
+    "message": "Added $count$ rules to the draft at once. The Active Policy was not changed. Nothing takes effect until you choose “Apply”.",
+    "description": "Privacy settings page (options-page.js). CSV import done (draft only).",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsEnterUrl": {
+    "message": "Enter a URL to judge.",
+    "description": "Privacy settings page (options-page.js). Whole-policy test."
+  },
+  "optionsJudging": {
+    "message": "Judging…",
+    "description": "Privacy settings page (options-page.js). Whole-policy test."
+  },
+  "optionsJudgeDraftProblem": {
+    "message": "Could not judge because the draft has problems. Use “Validate” to find them.",
+    "description": "Privacy settings page (options-page.js). Whole-policy test."
+  },
+  "optionsJudgeFailed": {
+    "message": "Could not judge. $error$",
+    "description": "Privacy settings page (options-page.js). Test or check failed; [error] is a sentence.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsCheckerNoDraft": {
+    "message": "The settings could not be loaded, so no rule can be added.",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added."
+  },
+  "optionsCheckerV1": {
+    "message": "Rules cannot be added to settings in the old format (v1) from this page.",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added."
+  },
+  "optionsCheckerLocked": {
+    "message": "Rules cannot be added or changed while applying.",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added."
+  },
+  "optionsCheckerEditGone": {
+    "message": "The rule being edited was changed or deleted, so the change cannot be made. Choose “Stop editing”.",
+    "description": "Privacy settings page (options-page.js). Why no rule can be changed."
+  },
+  "optionsCheckerCheckToAdd": {
+    "message": "Check the match with “Check match” to be able to add it.",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added yet."
+  },
+  "optionsCheckerEnter": {
+    "message": "Enter a rule and a URL to check, then check the match with “Check match”.",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added yet."
+  },
+  "optionsCheckerChecking": {
+    "message": "Checking.",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added yet."
+  },
+  "optionsCheckerNoMatch": {
+    "message": "It did not match, so it cannot be added. Correct the rule or the URL and check again.",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added."
+  },
+  "optionsCheckerNotJudged": {
+    "message": "It could not be judged, so it cannot be added.",
+    "description": "Privacy settings page (options-page.js). Why no rule can be added."
+  },
+  "optionsCheckerUnchanged": {
+    "message": "The rule has not been changed.",
+    "description": "Privacy settings page (options-page.js). Why no rule can be changed."
+  },
+  "optionsCheckerDuplicate": {
+    "message": "The same rule is already in this group (already added).",
+    "description": "Privacy settings page (options-page.js). Why no rule can be changed."
+  },
+  "optionsResultChecking": {
+    "message": "Checking…",
+    "description": "Privacy settings page (options-page.js). Check result."
+  },
+  "optionsResultMatch": {
+    "message": "Matches",
+    "description": "Privacy settings page (options-page.js). Check result."
+  },
+  "optionsResultNoMatch": {
+    "message": "Does not match",
+    "description": "Privacy settings page (options-page.js). Check result."
+  },
+  "optionsResultRuleError": {
+    "message": "Check the rule. $problem$",
+    "description": "Privacy settings page (options-page.js). Check result; [problem] is a sentence.",
+    "placeholders": {
+      "problem": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsResultUrlError": {
+    "message": "Check the URL. $error$",
+    "description": "Privacy settings page (options-page.js). Check result; [error] is a sentence.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsResultApprovalNeeded": {
+    "message": "Approval needed (restricted by the Public Suffix List)",
+    "description": "Privacy settings page (options-page.js). Check result."
+  },
+  "optionsEditingBanner": {
+    "message": "Editing: rule $row$ of “$layer$”. After checking the match, choose “Replace the rule” to replace only this rule in the draft.",
+    "description": "Privacy settings page (options-page.js). [layer] a group, [row] a row number.",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      },
+      "row": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsCheckerAlreadyAdded": {
+    "message": "Already added: this group has the same rule.",
+    "description": "Privacy settings page (options-page.js). Note at an add button."
+  },
+  "optionsCheckerGroupOff": {
+    "message": "This group is off. The rule is added, but it is not used, even after applying, until the group is turned on.",
+    "description": "Privacy settings page (options-page.js). PRIVACY: note at an add button."
+  },
+  "optionsCheckerAlsoNeverSave": {
+    "message": "The same rule is also in the “Never Save group”. The Never Save group takes precedence, so matching URLs are not recorded automatically.",
+    "description": "Privacy settings page (options-page.js). PRIVACY: the Never Save group (Blind Zone) stops automatic recording of matching URLs; it is not about manual saves and does not delete history. The Never Save group takes precedence over the Hide from MCP group."
+  },
+  "optionsCheckerMatchReplace": {
+    "message": "It matches. Choose “Replace the rule” to replace the rule in the draft.",
+    "description": "Privacy settings page (options-page.js). Checker state."
+  },
+  "optionsCheckerMatchAdd": {
+    "message": "It matches. Choose the group to add it to.",
+    "description": "Privacy settings page (options-page.js). Checker state."
+  },
+  "optionsApprovalDomain": {
+    "message": "Domain to approve: $domain$",
+    "description": "Privacy settings page (options-page.js). [domain] is the domain as the host named it.",
+    "placeholders": {
+      "domain": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApproved": {
+    "message": "Approved “$domain$”. No rule has been added yet. Choose “Check match” again to check the match.",
+    "description": "Privacy settings page (options-page.js). PRIVACY: an approval adds no rule.",
+    "placeholders": {
+      "domain": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsNotApproved": {
+    "message": "Not approved. $error$",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsRevoked": {
+    "message": "Revoked the approval of “$domain$”. Domain Wildcard rules for this domain cannot be used until it is approved again.",
+    "description": "Privacy settings page (options-page.js). Result.",
+    "placeholders": {
+      "domain": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsNotRevoked": {
+    "message": "Not revoked. $error$",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApprovalsLoading": {
+    "message": "Loading…",
+    "description": "Privacy settings page (options-page.js). Approved domains."
+  },
+  "optionsApprovalsFailed": {
+    "message": "The approved domains could not be loaded. $error$",
+    "description": "Privacy settings page (options-page.js). Approved domains.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApprovalsEmpty": {
+    "message": "There are no approved domains.",
+    "description": "Privacy settings page (options-page.js). Approved domains."
+  },
+  "optionsApprovalsPsl": {
+    "message": "Public Suffix List used: as of $date$",
+    "description": "Privacy settings page (options-page.js). [date] is the date of the bundled list.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApprovedAt": {
+    "message": "Approved ($date$)",
+    "description": "Privacy settings page (options-page.js). [date] is the approval time as the host gives it.",
+    "placeholders": {
+      "date": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApprovalInUse": {
+    "message": "Used by the settings in effect. To revoke it, first delete or change this domain's rules and apply.",
+    "description": "Privacy settings page (options-page.js). Approved domains."
+  },
+  "optionsApprovalInUseUnknown": {
+    "message": "Whether it is used by the settings in effect cannot be checked.",
+    "description": "Privacy settings page (options-page.js). Approved domains."
+  },
+  "optionsRevoke": {
+    "message": "Revoke approval",
+    "description": "Privacy settings page (options-page.js). Button."
+  },
+  "optionsRevokeLabel": {
+    "message": "Revoke the approval of $domain$",
+    "description": "Privacy settings page (options-page.js). Accessible name.",
+    "placeholders": {
+      "domain": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsAdded": {
+    "message": "Added to the draft of “$layer$” (row $row$). Nothing takes effect until you choose “$button$”.",
+    "description": "Privacy settings page (options-page.js). Draft only.",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      },
+      "row": {
+        "content": "$2"
+      },
+      "button": {
+        "content": "$3"
+      }
+    }
+  },
+  "optionsReplaced": {
+    "message": "Changed rule $row$ of “$layer$” in the draft. Nothing takes effect until you choose “$button$”.",
+    "description": "Privacy settings page (options-page.js). Draft only.",
+    "placeholders": {
+      "layer": {
+        "content": "$1"
+      },
+      "row": {
+        "content": "$2"
+      },
+      "button": {
+        "content": "$3"
+      }
+    }
+  },
+  "optionsEditStopped": {
+    "message": "Stopped editing. The draft was not changed.",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsValidationStale": {
+    "message": "The draft changed during validation, so the result is not shown. Choose “Validate” again.",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsVaultReady": {
+    "message": "The usable Vault will be used.",
+    "description": "Privacy settings page (options-page.js). First use: Vault state."
+  },
+  "optionsVaultNotReady": {
+    "message": "$state$. Create or choose one in the Vault settings.",
+    "description": "Privacy settings page (options-page.js). First use: [state] is the Vault state (shared with the Side Panel).",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsVaultUnknown": {
+    "message": "The Vault's state cannot be retrieved. Check the connection to the Native Host.",
+    "description": "Privacy settings page (options-page.js). First use."
+  },
+  "optionsStartConfirmed": {
+    "message": "Confirmed that recording has started with this Policy. The current settings are shown. MCP access needs a separate approval in the Vault settings.",
+    "description": "Privacy settings page (options-page.js). PRIVACY/MCP."
+  },
+  "optionsStartNotStarted": {
+    "message": "Recording had not started when checked. $error$ The start request is not sent again automatically.",
+    "description": "Privacy settings page (options-page.js). SAFETY: nothing is retried automatically.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsStartUnknown": {
+    "message": "The start state cannot be checked. $reason$ The start request is not sent again. Use “Check the start state again” or “Reload”.",
+    "description": "Privacy settings page (options-page.js). SAFETY: nothing is retried automatically.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsStartInvalid": {
+    "message": "Recording was not started because the draft could not be validated. Check the validation result.",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsStartedElsewhere": {
+    "message": "Recording was already started from another page. The current settings are shown.",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsApplyValidating": {
+    "message": "Validating the draft…",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsApplyDraftProblem": {
+    "message": "Not applied because the draft has problems.",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsApplyValidateFailed": {
+    "message": "Not applied because the draft could not be validated. $error$",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplying": {
+    "message": "Applying…",
+    "description": "Privacy settings page (options-page.js). Status."
+  },
+  "optionsApplyConflict": {
+    "message": "Not applied because the privacy settings were changed by another page or process. They are not overwritten automatically. The draft is kept as it is. Review it, then load the latest settings with “Reload” (reloading discards this draft).",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsApplyRefused": {
+    "message": "Not applied. $error$ The draft is kept as it is.",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsAppliedLoading": {
+    "message": "Applied (Revision $revision$). Loading the latest state…",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplied": {
+    "message": "Applied (Revision $revision$).",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsAppliedNewer": {
+    "message": "Applied (Revision $revision$). There were other changes afterwards, so the latest settings (Revision $latest$) are shown.",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      },
+      "latest": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsAppliedUnread": {
+    "message": "The apply succeeded (Revision $revision$), but the latest state could not be retrieved. $reason$ The draft is kept. Choose “Check the apply result again”.",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      },
+      "reason": {
+        "content": "$2"
+      }
+    }
+  },
+  "optionsApplyUnknownChecking": {
+    "message": "The result of the apply is unknown. $error$ Reading the current settings to check…",
+    "description": "Privacy settings page (options-page.js). SAFETY: never reported as applied or as not applied before the check.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplyUnknown": {
+    "message": "The result of the apply is unknown: whether it was applied could not be checked. $reason$ It is not applied again automatically. The draft is kept. Check the Native Host, then choose “Check the apply result again”.",
+    "description": "Privacy settings page (options-page.js). SAFETY: the outcome is unknown, never stated either way. SAFETY: nothing is retried automatically.",
+    "placeholders": {
+      "reason": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplyConfirmed": {
+    "message": "Confirmed that it was applied (Revision $revision$).",
+    "description": "Privacy settings page (options-page.js). Status.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplyNotApplied": {
+    "message": "When checked, the settings were still as before the apply ($error$). It is not applied again automatically. The draft is kept. If needed, choose “Apply” again.",
+    "description": "Privacy settings page (options-page.js). SAFETY: nothing is retried automatically.",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsApplyChanged": {
+    "message": "While the result of the apply was unknown, the privacy settings changed to something other than this draft (Revision $revision$). They are not overwritten automatically. The draft is kept. Review it, then load the latest settings with “Reload”.",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done.",
+    "placeholders": {
+      "revision": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsPresetFailed": {
+    "message": "The initial proposal cannot be retrieved. Recording has not started. Check the Native Host and reload.",
+    "description": "Privacy settings page (options-page.js). SAFETY: says what was NOT changed or sent; must not read as done."
+  },
+  "optionsDiscarded": {
+    "message": "Changes discarded.",
+    "description": "Privacy settings page (options-page.js). Status."
   }
 }

@@ -868,7 +868,7 @@ a.visit-link:hover, button.visit-link:hover:not(:disabled) {
 
 /* Visual Navigation Flow Connectors */
 .detail-card-source::after {
-  content: "↓ 遷移（この訪問へ）";
+  content: attr(data-flow-label);
   display: block;
   text-align: center;
   font-size: 11px;
@@ -878,7 +878,7 @@ a.visit-link:hover, button.visit-link:hover:not(:disabled) {
   margin-bottom: -4px;
 }
 .detail-card-visit::after {
-  content: "↓ 後続遷移（この訪問から）";
+  content: attr(data-flow-label);
   display: block;
   text-align: center;
   font-size: 11px;

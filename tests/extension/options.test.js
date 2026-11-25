@@ -9,10 +9,12 @@ import { SearchError } from "../../extension/search-client.js";
 import { startOptionsPage } from "../../extension/options-page.js";
 import { CATEGORY_KEYS, createDraft, loadActivePolicy, readActive, sameValue } from "../../extension/options-state.js";
 import { chromeI18n } from "./i18n-mock.js";
+import { localizeHtml } from "./i18n-html.js";
 
 const read = (name) => readFileSync(path.join(extensionDir, name), "utf8");
 const manifest = JSON.parse(read("manifest.json"));
-const html = read("options.html");
+/** options.html as it reads in Japanese (Issue #77: the file holds message keys, i18n-dom.js fills them in). */
+const html = localizeHtml(read("options.html"), "ja");
 const SOURCES = ["options.js", "options-page.js", "options-state.js"];
 
 const allOn = () => Object.fromEntries(CATEGORY_KEYS.map((key) => [key, true]));
@@ -121,7 +123,8 @@ test("the options page is the manifest's, with no new permission", () => {
 
 test("the page loads only its own module and stylesheet, with no inline script, handler or style", () => {
   const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
-  assert.deepEqual(scripts.map(([, attributes, body]) => [attributes.trim(), body.trim()]), [['type="module" src="options.js"', ""]]);
+  // i18n-dom.js (Issue #77) runs first, as a classic script, so the module starts on a localized page.
+  assert.deepEqual(scripts.map(([, attributes, body]) => [attributes.trim(), body.trim()]), [['src="i18n-dom.js"', ""], ['type="module" src="options.js"', ""]]);
   assert.deepEqual([...html.matchAll(/<link\b[^>]*href="([^"]+)"/g)].map((match) => match[1]), ["options.css"]);
   assert.doesNotMatch(html, /\son[a-z]+\s*=/i);
   assert.doesNotMatch(html, /\sstyle\s*=/i);

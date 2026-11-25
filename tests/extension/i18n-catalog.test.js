@@ -18,6 +18,8 @@ const LOCALIZED_FILES = [
   "page-panel.js", "page-text.js", "page-client.js", "delete-client.js", "vault-items-client.js", "host-capabilities.js",
   // Slice 3: the Vault section of the Side Panel (sidepanel.html has no Japanese left; see i18n-sidepanel.test.js).
   "vault-client.js", "vault-panel.js",
+  // Slice 4: the Privacy settings page and the full-page History (HTML and CSS included: no Japanese at all).
+  "options.html", "options-page.js", "history.html", "history.css", "history-app.js", "history-view.js", "navigation-text.js",
 ];
 
 const entry = (message, placeholders) => ({ message, description: "test", ...(placeholders ? { placeholders } : {}) });
