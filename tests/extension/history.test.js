@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { extensionDir, loadSidePanel } from "./fake-dom.js";
+import { localizeHtml } from "./i18n-html.js";
 import { at, openHistory, settle, tokenOf, visit } from "./history-fixtures.js";
 import { DEFAULT_SIZE, MAX_DOMAIN_CHARS, buildSearch, defaultState, pageNumbers, parseDate, parseSearch } from "../../extension/history-state.js";
 import { localDayBounds, monthBounds } from "../../extension/visit-calendar.js";
@@ -762,7 +763,8 @@ test("a domain typed with markup is only ever sent as text and shown as text", a
 // ------------------------------------------------------------------------------------------- the page
 
 test("history.html declares every element the page uses, loads its script as a module and has no inline script or style", () => {
-  const html = readFileSync(path.join(extensionDir, "history.html"), "utf8");
+  // As it reads in Japanese (Issue #77: the file holds message keys, i18n-dom.js fills them in).
+  const html = localizeHtml(readFileSync(path.join(extensionDir, "history.html"), "utf8"), "ja");
   for (const id of ["history-status", "cal-prev", "cal-next", "cal-title", "cal-table", "cal-jump", "cal-status", "domain-input", "mode-exact", "mode-regex", "domain-hint", "domain-error", "selected-heading", "result-count", "size-select", "history-state", "history-state-text", "history-retry", "history-settings", "history-list", "history-pager"]) {
     assert.match(html, new RegExp(`id="${id}"`), id);
   }

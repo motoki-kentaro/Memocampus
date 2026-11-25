@@ -11,6 +11,7 @@
 import { describeErrorCode, createLatestGate } from "./search-client.js";
 import { loadPreset, startDraft } from "./onboarding-state.js";
 import { vaultRequest, describeStatus } from "./vault-client.js";
+import { messageTable, t } from "./i18n.js";
 import { CsvImportError, csvImportCandidate, downloadCsv, draftZoneCsv, readPolicyCsvFile } from "./policy-csv.js";
 import {
   CATEGORY_KEYS,
@@ -33,109 +34,131 @@ import {
 } from "./options-state.js";
 
 const LAYER_ID = { neverSave: "never-save", saveButNoMcp: "save-but-no-mcp" };
-const LAYER_NAME = { neverSave: "保存しないグループ", saveButNoMcp: "MCPサーバに見せないグループ" };
-const CATEGORY_NAME = { authentication: "認証関連", credentials: "認証情報", government: "行政サイト", webmail: "Webメール", aiChats: "AIチャット" };
+// Display text comes from the catalogs (Issue #77 Slice 4); the tables are looked up only with their own keys.
+const LAYER_NAME_KEYS = Object.freeze({ neverSave: "policyLayerNeverSave", saveButNoMcp: "policyLayerSaveButNoMcp" });
+const LAYER_NAME = messageTable(LAYER_NAME_KEYS);
+const CATEGORY_NAME_KEYS = Object.freeze({
+  authentication: "optionsCategoryAuthentication", credentials: "optionsCategoryCredentials", government: "optionsCategoryGovernment",
+  webmail: "optionsCategoryWebmail", aiChats: "optionsCategoryAiChats",
+});
+const CATEGORY_NAME = messageTable(CATEGORY_NAME_KEYS);
+/** The text of `table` for `code`, or undefined unless `code` is one of its own entries. */
+const lookup = (table, code) => (typeof code === "string" && Object.hasOwn(table, code) ? table[code] : undefined);
 const KIND_LABEL = { pattern: "Pattern", regex: "Regex", domainWildcard: "Domain Wildcard", exact: "Exact URL" };
 /** What the rule field shows for each kind. The domain wildcard is the only kind with an example in it. */
 const RULE_PLACEHOLDER = { pattern: "", regex: "", domainWildcard: "*.example.com", exact: "" };
 /** Why the host restricts a domain wildcard, by its reason; the date is that of the bundled list. */
-const REASON_TEXT = {
-  public_suffix: (domain, date) =>
-    `この指定は、複数の登録者が利用する可能性がある広いドメイン範囲に一致します。${date}時点のPublic Suffix Listでは、「${domain}」は公開サフィックス（誰でもその下にドメインを登録できる範囲）です。`,
-  delegated_boundary: (domain, date) =>
-    `この指定は、複数の登録者が利用する可能性がある広いドメイン範囲に一致します。${date}時点のPublic Suffix Listでは、「${domain}」の配下に公開サフィックスがあります。`,
-  unknown_suffix: (domain, date) => `${date}時点のPublic Suffix Listでは、このドメイン（${domain}）の登録境界を確認できません。末尾が一覧にないドメインです。`,
-  not_registrable: (domain, date) =>
-    `${date}時点のPublic Suffix Listでは、「${domain}」は登録可能なドメインそのものではなく、そのサブドメインです。この範囲だけを対象にするには承認が必要です。`,
-};
+const PSL_REASON_KEYS = Object.freeze({
+  public_suffix: "optionsPslPublicSuffix",
+  delegated_boundary: "optionsPslDelegatedBoundary",
+  unknown_suffix: "optionsPslUnknownSuffix",
+  not_registrable: "optionsPslNotRegistrable",
+});
 
 // The label names the state in words, so it never depends on colour alone.
-const STATE_LABEL = {
-  loading: "確認中…",
-  ready: "Ready（利用可能）",
-  uninitialized: "Not Initialized（未初期化）",
-  invalid: "Invalid（設定ファイルが無効です）",
-  unsupported: "Unsupported（現在のバージョンでは対応していません）",
-  busy: "Unavailable（使用中）",
-  unavailable: "Unavailable（アクセスできません）",
-  host_unavailable: "Unavailable（Native Hostに接続できません）",
-  invalid_response: "Unavailable（不正な応答）",
-};
+const STATE_LABEL_KEYS = Object.freeze({
+  loading: "optionsStateLoading",
+  ready: "optionsStateReady",
+  uninitialized: "optionsStateUninitialized",
+  invalid: "optionsStateInvalid",
+  unsupported: "optionsStateUnsupported",
+  busy: "optionsStateBusy",
+  unavailable: "optionsStateUnavailable",
+  host_unavailable: "optionsStateHostUnavailable",
+  invalid_response: "optionsStateInvalidResponse",
+});
+const STATE_LABEL = messageTable(STATE_LABEL_KEYS);
+const stateLabel = (state) => lookup(STATE_LABEL, state) ?? STATE_LABEL.unavailable;
 
-const NOT_SHOWN = "現在のプライバシー設定を取得できていないため、内容は表示していません。";
-const EXPLANATION = {
-  loading: "",
-  uninitialized:
-    "プライバシー設定はまだ初期化されていません。自動記録は行われません。初回案内と下書きを確認し、「記憶を開始する」を押すと記録を開始します。",
-  invalid: `プライバシー設定を読み取れない（欠落・破損）ため、自動記録を停止しています。設定ファイルは変更していません。復旧機能は今後この画面に追加します。\n${NOT_SHOWN}`,
-  unsupported: `プライバシー設定に、現在のバージョンでは対応していない内容が含まれているため、自動記録を停止しています。設定ファイルは変更していません。新しいバージョンで作られた設定であれば、Native Hostを更新してください。\n${NOT_SHOWN}`,
-  busy: `プライバシー設定が使用中です。しばらくしてから再読み込みしてください。\n${NOT_SHOWN}`,
-  unavailable: `プライバシー設定にアクセスできません。\n${NOT_SHOWN}`,
-  invalid_response: `Native Hostから不正な応答を受け取りました。\n${NOT_SHOWN}`,
-};
-const READY_V1 =
-  "この設定は旧形式（v1）のため、この画面では編集できません。編集するには明示的な移行（Migration）が必要です。移行機能は今後この画面に追加します。自動では移行しません。";
-const READY_V2 = "基本保護とルールを変更できます。変更は下書きとしてこの画面にだけ保持され、「適用」を押すまで反映されません。";
+const notShown = () => t("optionsNotShown");
+/** The explanation of a state without an active policy; all but the first add that nothing is shown. */
+const EXPLANATION_KEYS = Object.freeze({
+  uninitialized: "optionsExplainUninitialized",
+  invalid: "optionsExplainInvalid",
+  unsupported: "optionsExplainUnsupported",
+  busy: "optionsExplainBusy",
+  unavailable: "optionsErrorPolicyUnavailable",
+  invalid_response: "optionsErrorInvalidResponse",
+});
 
 // What the host says about a rule or a draft. Never the rule's text: the host does not send it back.
-const PROBLEM_TEXT = {
-  invalid_pattern: "パターンの書き方が正しくありません（空欄、空白や \\ ? # @ : を含む、ホスト名がない、など）。",
-  invalid_regex: "正規表現の書き方が正しくありません。",
-  unsupported_regex: "このバージョンでは使えない正規表現です（先読み・後読み・後方参照）。",
-  regex_limit: "正規表現が長すぎるか複雑すぎます。上限は正規表現ルールの数によって変わります。",
-  invalid_domain_wildcard:
-    "Domain Wildcardの書き方が正しくありません。ドメインのみを指定してください（例: *.example.com）。スキーム・パス・ポート・クエリ・空白・途中のワイルドカードは使えず、承認によっても使えるようにはなりません。",
-  domain_wildcard_not_approved:
-    "このDomain Wildcardのドメインは、Public Suffix Listによる制限があり、承認されていません。URLチェッカーで確認して承認するか、ルールを変更してください。",
-  psl_unavailable: "Public Suffix Listを読み込めないため、Domain Wildcardを判定できません。",
-  invalid_exact_url:
-    "Exact URLには、スキーム（httpまたはhttps）から始まるURL全体を1つ書いてください（空欄、空白や \\ を含むもの、不正なパーセントエンコードは使えません）。",
-  invalid_rule_form: "ルールの形式が正しくありません。",
-  invalid_rule: "ルールの形式が正しくありません。",
-  too_many_rules: "このグループのルールが多すぎます（上限1,000件）。",
-  too_many_regex_rules: "正規表現ルールが多すぎます（2つのグループの合計で上限128件）。",
-  policy_too_large: "設定が大きすぎて保存できません。",
-  invalid_version: "設定のバージョンが正しくありません。",
-  invalid_revision: "設定のRevisionが正しくありません。",
-  invalid_policy_document: "設定の形式が正しくありません。",
-  invalid_policy: "この下書きは使用できません。",
-};
-const ERROR_TEXT = {
-  policy_invalid: "下書きに問題があります。",
-  policy_unsupported: "下書きに、このバージョンでは使えない正規表現が含まれています。",
-  policy_conflict: "ほかの画面またはプロセスでプライバシー設定が変更されています。",
-  policy_busy: "プライバシー設定が使用中です。",
-  policy_unavailable: "プライバシー設定にアクセスできません。",
-  policy_not_initialized: "プライバシー設定が初期化されていません。",
-  policy_version_mismatch: "下書きと現在の設定のバージョンが一致しません。",
-  invalid_etag: "適用に必要な情報（ETag）が正しくありません。",
-  policy_draft_too_large: "下書きが大きすぎます（上限1 MiB）。",
-  invalid_policy_draft: "下書きの形式が正しくありません。",
-  invalid_url: "このURLは判定に使えません（長すぎるなど）。",
-  timeout: "Native Hostから応答がありません。",
-  host_unavailable: "Native Hostに接続できません。",
-  invalid_response: "Native Hostから不正な応答を受け取りました。",
-  unknown_type: "Native Hostがこの操作に対応していません。Hostを更新してください。",
-  domain_in_use: "適用中の設定でこのドメインのルールが使われているため、取り消せません。先に該当ルールを削除または変更して、適用してください。",
-  approvals_unavailable: "承認したドメインの情報を読み書きできません。",
-  domain_mismatch: "確認したドメインと一致しないため、承認しませんでした。もう一度確認してください。",
-  domain_not_restricted: "このドメインは承認しなくても使えます。",
-  invalid_domain: "ドメインの指定が正しくありません。",
-};
-const problemText = (code) => PROBLEM_TEXT[code] ?? ERROR_TEXT[code] ?? describeErrorCode(code);
-const errorText = (code) => ERROR_TEXT[code] ?? PROBLEM_TEXT[code] ?? describeErrorCode(code);
+const PROBLEM_TEXT_KEYS = Object.freeze({
+  invalid_pattern: "optionsProblemInvalidPattern",
+  invalid_regex: "optionsProblemInvalidRegex",
+  unsupported_regex: "optionsProblemUnsupportedRegex",
+  regex_limit: "optionsProblemRegexLimit",
+  invalid_domain_wildcard: "optionsProblemInvalidDomainWildcard",
+  domain_wildcard_not_approved: "optionsProblemDomainNotApproved",
+  psl_unavailable: "optionsProblemPslUnavailable",
+  invalid_exact_url: "optionsProblemInvalidExactUrl",
+  invalid_rule_form: "optionsProblemInvalidRule",
+  invalid_rule: "optionsProblemInvalidRule",
+  too_many_rules: "optionsProblemTooManyRules",
+  too_many_regex_rules: "optionsProblemTooManyRegexRules",
+  policy_too_large: "optionsProblemPolicyTooLarge",
+  invalid_version: "optionsProblemInvalidVersion",
+  invalid_revision: "optionsProblemInvalidRevision",
+  invalid_policy_document: "optionsProblemInvalidDocument",
+  invalid_policy: "optionsProblemInvalidPolicy",
+});
+const PROBLEM_TEXT = messageTable(PROBLEM_TEXT_KEYS);
+const ERROR_TEXT_KEYS = Object.freeze({
+  policy_invalid: "optionsErrorPolicyInvalid",
+  policy_unsupported: "optionsErrorPolicyUnsupported",
+  policy_conflict: "optionsErrorPolicyConflict",
+  policy_busy: "optionsErrorPolicyBusy",
+  policy_unavailable: "optionsErrorPolicyUnavailable",
+  policy_not_initialized: "optionsErrorPolicyNotInitialized",
+  policy_version_mismatch: "optionsErrorVersionMismatch",
+  invalid_etag: "optionsErrorInvalidEtag",
+  policy_draft_too_large: "optionsErrorDraftTooLarge",
+  invalid_policy_draft: "optionsErrorInvalidDraft",
+  invalid_url: "optionsErrorInvalidUrl",
+  timeout: "optionsErrorTimeout",
+  host_unavailable: "optionsErrorHostUnavailable",
+  invalid_response: "optionsErrorInvalidResponse",
+  unknown_type: "optionsErrorUnknownType",
+  domain_in_use: "optionsErrorDomainInUse",
+  approvals_unavailable: "optionsErrorApprovalsUnavailable",
+  domain_mismatch: "optionsErrorDomainMismatch",
+  domain_not_restricted: "optionsErrorDomainNotRestricted",
+  invalid_domain: "optionsErrorInvalidDomain",
+});
+const ERROR_TEXT = messageTable(ERROR_TEXT_KEYS);
+const problemText = (code) => lookup(PROBLEM_TEXT, code) ?? lookup(ERROR_TEXT, code) ?? describeErrorCode(code);
+const errorText = (code) => lookup(ERROR_TEXT, code) ?? lookup(PROBLEM_TEXT, code) ?? describeErrorCode(code);
 const DRAFT_CODES = new Set(["policy_invalid", "policy_unsupported"]);
 
 /** Why a reading of the policy gave no active policy, in words. */
-const loadReason = (loaded) => `（状態: ${STATE_LABEL[loaded.state] ?? STATE_LABEL.unavailable}${loaded.code && loaded.state === "host_unavailable" ? `、${errorText(loaded.code)}` : ""}）`;
+const loadReason = (loaded) =>
+  loaded.code && loaded.state === "host_unavailable" ? t("optionsLoadReasonError", stateLabel(loaded.state), errorText(loaded.code)) : t("optionsLoadReason", stateLabel(loaded.state));
 
-const DECISION_TEXT = { never_save: "保存しません", save_but_no_mcp: "Vaultに保存しますが、MCPには見せません", allow: "保存対象です" };
+const DECISION_TEXT_KEYS = Object.freeze({ never_save: "optionsDecisionNeverSave", save_but_no_mcp: "optionsDecisionSaveButNoMcp", allow: "optionsDecisionAllow" });
+const DECISION_TEXT = messageTable(DECISION_TEXT_KEYS);
 
 function relaxationText(item) {
-  if (item.type === "category") return `基本保護「${CATEGORY_NAME[item.key]}」をOFFにする`;
-  if (item.type === "layer") return `「${LAYER_NAME[item.key]}」を無効にする`;
-  return `「${LAYER_NAME[item.key]}」の既存のルール${item.count}件を削除するか、内容・種類を変更する`;
+  if (item.type === "category") return t("optionsRelaxCategory", CATEGORY_NAME[item.key]);
+  if (item.type === "layer") return t("optionsRelaxLayer", LAYER_NAME[item.key]);
+  return t("optionsRelaxRules", LAYER_NAME[item.key], String(item.count));
 }
+
+/**
+ * The message `note` gives (a text, or a function returning it), or "" when it cannot be read. A message that
+ * cannot be read is reported as an uncaught error (reportError: the page itself logs nothing; the error names
+ * only the message key) and is not replaced by another message: the step it ends must still end, and nothing
+ * may read as done that is not.
+ */
+function readMessage(note) {
+  try {
+    return typeof note === "function" ? note() : note;
+  } catch (error) {
+    globalThis.reportError?.(error);
+    return "";
+  }
+}
+
+/** The name of the button that makes a draft take effect: "記憶を開始する" on first use, "適用" otherwise. */
+const applyButtonName = (onboarding) => t(onboarding ? "optionsStartRecording" : "optionsApply");
 
 export function startOptionsPage({ document, window, send, download = downloadCsv }) {
   const $ = (id) => document.querySelector(`#${id}`);
@@ -178,9 +201,12 @@ export function startOptionsPage({ document, window, send, download = downloadCs
   const currentValidation = () => (validation && validation.draft === draft && validation.version === draft.version ? validation : null);
 
   function explanation() {
-    if (view.state === "ready") return view.editable ? READY_V2 : READY_V1;
-    if (view.state === "host_unavailable") return `${describeErrorCode(view.code)}\n${NOT_SHOWN}`;
-    return EXPLANATION[view.state] ?? NOT_SHOWN;
+    if (view.state === "ready") return t(view.editable ? "optionsReadyV2" : "optionsReadyV1");
+    if (view.state === "loading") return "";
+    if (view.state === "host_unavailable") return `${describeErrorCode(view.code)}\n${notShown()}`;
+    const key = lookup(EXPLANATION_KEYS, view.state);
+    if (key === undefined) return notShown();
+    return view.state === "uninitialized" ? t(key) : `${t(key)}\n${notShown()}`;
   }
 
   // --- Rendering ----------------------------------------------------------------------------------
@@ -188,7 +214,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
   function renderStatus() {
     const ready = view.state === "ready";
     const state = $("policy-state");
-    state.textContent = STATE_LABEL[view.state] ?? STATE_LABEL.unavailable;
+    state.textContent = stateLabel(view.state);
     state.dataset.state = view.state;
     $("policy-version").textContent = ready ? `Schema ${view.active.schemaVersion} / Engine ${view.active.engineVersion}` : "—";
     $("policy-revision").textContent = ready ? String(view.active.revision) : "—";
@@ -201,13 +227,13 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     $("start-recheck").hidden = !onboarding || !startPending;
     $("start-recheck").disabled = busy !== null;
     $("vault-recheck").disabled = busy !== null;
-    $("checker-description").textContent = `ルールがURLに一致するかをNative Hostで確認し、一致したルールだけをグループに追加できます。追加は下書きへの追加で、「${onboarding ? "記憶を開始する" : "適用"}」を押すまで反映されません。`;
+    $("checker-description").textContent = t("optionsCheckerDescription", applyButtonName(onboarding));
   }
 
   function renderCategories() {
     $("categories").hidden = !draft;
     const note = $("categories-note");
-    note.textContent = !draft && !loading ? NOT_SHOWN : draft && !draft.editable ? "旧形式（v1）のため編集できません。" : "";
+    note.textContent = !draft && !loading ? notShown() : draft && !draft.editable ? t("optionsV1NotEditable") : "";
     note.hidden = note.textContent === "";
     const weakened = new Set(draft?.weakened() ?? []);
     for (const key of CATEGORY_KEYS) {
@@ -216,7 +242,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
       input.disabled = !canEdit();
       const layerNote = $(`category-${key}-note`);
       const layer = LAYER_OF_CATEGORY[key];
-      layerNote.textContent = draft && !draft.layerEnabled(layer) ? `「${LAYER_NAME[layer]}」が無効のため、現在この項目は判定に使われていません。` : "";
+      layerNote.textContent = draft && !draft.layerEnabled(layer) ? t("optionsCategoryLayerOff", LAYER_NAME[layer]) : "";
       layerNote.hidden = layerNote.textContent === "";
       // A warning only: the person's choice stands.
       $(`category-${key}-warning`).hidden = !weakened.has(key);
@@ -245,8 +271,8 @@ export function startOptionsPage({ document, window, send, download = downloadCs
   /** A rule of a draft that cannot be edited (version 1). */
   function readOnlyRow(rule) {
     const row = document.createElement("tr");
-    const kind = typeof rule === "string" ? "Pattern（v1）" : KIND_LABEL[rule.kind];
-    row.append(textCell(kind), cell(ruleCode(rule)), textCell("編集不可", "muted"));
+    const kind = typeof rule === "string" ? t("optionsKindPatternV1") : KIND_LABEL[rule.kind];
+    row.append(textCell(kind), cell(ruleCode(rule)), textCell(t("optionsNotEditable"), "muted"));
     return { row };
   }
 
@@ -265,7 +291,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
    */
   function editableRow(layerKey, rule, index) {
     const id = `${LAYER_ID[layerKey]}-rule-${index}`;
-    const place = `${LAYER_NAME[layerKey]} ${index + 1}行目`;
+    const place = t("optionsRowPlace", LAYER_NAME[layerKey], index + 1);
     const row = document.createElement("tr");
     const code = ruleCode(rule);
     code.id = `${id}-text`;
@@ -273,10 +299,10 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     error.id = `${id}-error`;
     error.className = "rule-error";
     error.hidden = true;
-    const edit = button("チェッカーで編集", "rule-edit", `${place}のルールをURLチェッカーで編集`);
+    const edit = button(t("optionsEditInChecker"), "rule-edit", t("optionsEditRuleLabel", place));
     edit.setAttribute("aria-describedby", `${id}-error`);
     edit.addEventListener("click", () => startEdit(layerKey, index));
-    const remove = button("削除", "rule-delete", `${place}のルールを削除`);
+    const remove = button(t("optionsDelete"), "rule-delete", t("optionsDeleteRuleLabel", place));
     remove.addEventListener("click", () => deleteRule(layerKey, index));
     const actions = document.createElement("div");
     actions.className = "row-actions";
@@ -302,13 +328,11 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     toggle.checked = layer?.enabled ?? false;
     toggle.disabled = !canEdit();
     $(`${id}-warning`).hidden = !(layer && view.active.policy.layers[key].enabled && !layer.enabled);
-    $(`${id}-state`).textContent = !layer
-      ? ""
-      : `${layer.enabled ? "このグループは有効です" : "このグループは無効です（ルールと基本保護は判定に使われません）"}。ルール ${count}件。`;
+    $(`${id}-state`).textContent = !layer ? "" : t(layer.enabled ? "optionsLayerOn" : "optionsLayerOff", String(count));
     $(`${id}-state`).hidden = !layer;
     $(`${id}-table`).hidden = count === 0;
     const empty = $(`${id}-empty`);
-    empty.textContent = layer ? "ルールはありません。" : loading ? "" : NOT_SHOWN;
+    empty.textContent = layer ? t("optionsNoRules") : loading ? "" : notShown();
     empty.hidden = count > 0 || empty.textContent === "";
     $(`${id}-hint`).hidden = !draft?.editable;
     $(`${id}-export`).disabled = !draft || loading;
@@ -340,7 +364,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
       rows[key].forEach((controls, index) => {
         if (!controls.error) return;
         const own = problems.filter((problem) => problem.layer === key && problem.ruleIndex === index);
-        controls.error.textContent = own.length ? `エラー: ${own.map((problem) => problemText(problem.code)).join(" ")}` : "";
+        controls.error.textContent = own.length ? t("optionsErrorPrefix", own.map((problem) => problemText(problem.code)).join(" ")) : "";
         controls.error.hidden = own.length === 0;
         controls.code.dataset.invalid = own.length ? "true" : "";
       });
@@ -350,40 +374,40 @@ export function startOptionsPage({ document, window, send, download = downloadCs
         else if (!rows[key][problem.ruleIndex]?.error) general.push(problemText(problem.code));
       }
       const layerError = $(`${LAYER_ID[key]}-error`);
-      layerError.textContent = layerMessages.length ? `エラー: ${layerMessages.join(" ")}` : "";
+      layerError.textContent = layerMessages.length ? t("optionsErrorPrefix", layerMessages.join(" ")) : "";
       layerError.hidden = layerMessages.length === 0;
     }
     for (const problem of problems) if (problem.layer === null) general.push(problemText(problem.code));
 
     const status = $("validation-status");
     let text = validationNote;
-    if (busy === "validating") text = "検証しています…";
-    else if (current?.ok) text = "検証しました。この下書きは適用できます。";
+    if (busy === "validating") text = t("optionsValidating");
+    else if (current?.ok) text = t("optionsValidated");
     else if (current && DRAFT_CODES.has(current.code)) {
       const placed = problems.length - general.length;
-      text = `検証の結果、下書きに問題があります（${problems.length}件）。${placed > 0 ? "該当する行とグループに表示しています。" : ""}${general.length ? ` ${general.join(" ")}` : ""}`;
-    } else if (current) text = `検証できませんでした。${errorText(current.code)}`;
+      text = t(placed > 0 ? "optionsValidationProblemsPlaced" : "optionsValidationProblems", String(problems.length)) + (general.length ? ` ${general.join(" ")}` : "");
+    } else if (current) text = t("optionsValidationFailed", errorText(current.code));
     status.textContent = text;
     status.hidden = text === "";
     status.dataset.result = current ? (current.ok ? "ok" : "error") : "";
   }
 
   function applyReason() {
-    if (onboarding) return "この下書きは未適用です。確認後「記憶を開始する」で初めて記録を有効にします。";
-    if (!draft) return "設定を読み込めていないため、適用できません。";
-    if (!draft.editable) return "旧形式（v1）の設定は、この画面では適用できません。";
-    if (busy === "applying" || busy === "checking") return "適用の処理中です。";
-    if (busy === "validating") return "検証中です。";
-    if (busy === "importing") return "CSV Import中です。下書きの編集・適用は完了後に行ってください。";
-    if (blocked === "conflict" || blocked === "changed") return "最新の設定を再読み込みするまで適用できません。";
-    if (blocked) return "適用の結果を確認するまで、もう一度適用することはできません。";
-    if (!draft.dirty()) return "未適用の変更はありません。";
-    return "適用の前に、Native Hostで下書き全体を検証します。";
+    if (onboarding) return t("optionsReasonOnboarding");
+    if (!draft) return t("optionsReasonNoDraft");
+    if (!draft.editable) return t("optionsReasonV1");
+    if (busy === "applying" || busy === "checking") return t("optionsReasonApplying");
+    if (busy === "validating") return t("optionsReasonValidating");
+    if (busy === "importing") return t("optionsReasonImporting");
+    if (blocked === "conflict" || blocked === "changed") return t("optionsReasonReload");
+    if (blocked) return t("optionsReasonCheckResult");
+    if (!draft.dirty()) return t("optionsReasonClean");
+    return t("optionsReasonReady");
   }
 
   function renderFooter() {
     const dirty = draft?.dirty() ?? false;
-    $("dirty-status").textContent = dirty ? "未適用の変更があります" : notice;
+    $("dirty-status").textContent = dirty ? t("optionsDirty") : notice;
     $("discard").disabled = !dirty || locked();
     $("validate").disabled = !draft?.editable || busy !== null;
     $("apply").disabled = !canApply();
@@ -417,37 +441,39 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     try {
       const snapshot = draftZoneCsv(draft, key, { schemaVersion: view.active.schemaVersion });
       download({ document, window, ...snapshot });
-      exports[key] = { text: "操作時点の下書きのCSVダウンロードを要求しました。保存完了はブラウザで確認してください。" };
+      exports[key] = { text: t("optionsExportRequested") };
     } catch (error) {
       // Never show exception messages: they could contain rule text or browser/private details.
-      exports[key] = { failed: true, text: error?.code === "csv_unsupported_kind"
-        ? "CSV出力できません。未知のルール型が含まれています。一部だけの出力や型の変換は行いません。下書きは変更していません。"
-        : error?.code === "csv_invalid_data"
-          ? "CSV出力できません。ルールの内部データ形式が不正です。kindとpatternは文字列である必要があります。一部だけの出力や値の変換は行いません。下書きは変更していません。"
-          : "CSVのダウンロードを開始できませんでした。下書きは変更していません。ブラウザの設定を確認して再度お試しください。" };
+      exports[key] = { failed: true, text: t(error?.code === "csv_unsupported_kind" ? "optionsExportUnknownKind" : error?.code === "csv_invalid_data" ? "optionsExportInvalidData" : "optionsExportFailed") };
     }
     renderLayer(key);
   }
 
-  const IMPORT_ERRORS = {
-    csv_read: "ファイルを読み取れません。", csv_size: "ファイルが上限1 MiBを超えています。",
-    csv_utf8: "UTF-8として読み取れません。", csv_empty: "空ファイルです。",
-    csv_header: "ヘッダーは正確にkind,patternとしてください。", csv_columns: "列数は2列である必要があります。",
-    csv_quote: "引用符の構文が不正です。", csv_newline: "行区切りはLFまたはCRLFのいずれかに統一してください。",
-    csv_control: "使用できない制御文字があります。", csv_kind: "未知のkindです。",
-    csv_field: "フィールド長の上限（32,768バイト、Regexは4,096バイト）を超えています。",
-    csv_records: "CSV件数または追加後のゾーン件数が上限1,000件を超えています。",
-    csv_regex_count: "追加後のRegex合計が上限128件を超えています。",
-    csv_draft_size: "追加後のDraft JSONが上限1 MiBを超えています。",
-    csv_readonly: "初期化済みの編集可能なv2 Policyが必要です。",
-  };
+  const IMPORT_ERROR_KEYS = Object.freeze({
+    csv_read: "optionsCsvRead", csv_size: "optionsCsvSize",
+    csv_utf8: "optionsCsvUtf8", csv_empty: "optionsCsvEmpty",
+    csv_header: "optionsCsvHeader", csv_columns: "optionsCsvColumns",
+    csv_quote: "optionsCsvQuote", csv_newline: "optionsCsvNewline",
+    csv_control: "optionsCsvControl", csv_kind: "optionsCsvKind",
+    csv_field: "optionsCsvField",
+    csv_records: "optionsCsvRecords",
+    csv_regex_count: "optionsCsvRegexCount",
+    csv_draft_size: "optionsCsvDraftSize",
+    csv_readonly: "optionsCsvReadonly",
+  });
+  const IMPORT_ERRORS = messageTable(IMPORT_ERROR_KEYS);
+  /** An import that added nothing: [line], a reason and an optional host problem (the English reads with spaces). */
+  const importFailed = (reason, { line = null, detail = "" } = {}) =>
+    (line === null ? t("optionsImportFailed", reason, detail) : t("optionsImportFailedAt", String(line), reason, detail)).trimEnd();
 
+  /** Ends the import (busy, the file input) and draws the page; `text` is the message or a function giving it. */
   function finishImport(operation, text = "", failed = false) {
     if (importing !== operation) return;
     importing = null;
     busy = null;
-    imports[operation.key] = text ? { text, failed } : null;
     $(`${LAYER_ID[operation.key]}-import-file`).value = "";
+    const shown = readMessage(text);
+    imports[operation.key] = shown ? { text: shown, failed } : null;
     render();
   }
 
@@ -467,16 +493,16 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     const input = $(`${LAYER_ID[key]}-import-file`);
     input.value = "";
     try { input.click(); }
-    catch { finishImport(operation, "ファイル選択を開始できません。下書きは変更していません。", true); }
+    catch { finishImport(operation, () => t("optionsImportPickerFailed"), true); }
   }
 
   async function importSelected(operation, file) {
     if (!file) return finishImport(operation); // Cancel: no error, no Draft change, no Host call.
-    const conflict = () => finishImport(operation, "Import中に下書きまたは画面の状態が変わりました。既存の変更は保持しています。内容を確認して再試行してください。", true);
+    const conflict = () => finishImport(operation, () => t("optionsImportConflict"), true);
     try {
       const parsed = await readPolicyCsvFile(file);
       if (!importStillCurrent(operation)) return conflict();
-      if (parsed.rules.length === 0) return finishImport(operation, "CSVに追加するルールはありません。下書きは変更していません。");
+      if (parsed.rules.length === 0) return finishImport(operation, () => t("optionsImportNothing"));
       const snapshot = operation.draft.policy;
       const count = snapshot.layers[operation.key].rules.length;
       const candidate = csvImportCandidate(snapshot, operation.key, parsed);
@@ -484,30 +510,32 @@ export function startOptionsPage({ document, window, send, download = downloadCs
       if (!importStillCurrent(operation)) return conflict();
       if (!checked.ok) {
         const row = checked.problems.find((p) => p.layer === operation.key && Number.isSafeInteger(p.ruleIndex) && p.ruleIndex >= count && p.ruleIndex < count + parsed.rules.length);
-        const at = row ? `CSV ${parsed.lines[row.ruleIndex - count]}行目：` : "";
         const policyError = DRAFT_CODES.has(checked.code) || checked.problems.length > 0;
         // Only static codes/messages; never echo Host exceptions or rule text.
-        const reason = policyError ? "候補全体のPolicyルール検証に失敗しました。" : "Native Hostとの通信または検証処理に失敗しました。";
-        return finishImport(operation, `${at}${reason}全件取り消し、下書きは変更していません。${row && Object.hasOwn(PROBLEM_TEXT, row.code) ? PROBLEM_TEXT[row.code] : ""}`, true);
+        return finishImport(operation, () => importFailed(t(policyError ? "optionsImportPolicyFailed" : "optionsImportHostFailed"), {
+          line: row ? parsed.lines[row.ruleIndex - count] : null,
+          detail: (row && lookup(PROBLEM_TEXT, row.code)) ?? "",
+        }), true);
       }
       // A second screen/process may have changed Active during file IO/validation. Read, don't adopt.
       const current = await loadActivePolicy({ send });
       if (!importStillCurrent(operation)) return conflict();
-      if (current.state !== "ready") return finishImport(operation, "Active Policyを確認できないためImportを中止しました。Native HostとPolicyの状態を確認してください。下書きは変更していません。", true);
+      if (current.state !== "ready") return finishImport(operation, () => t("optionsImportNoActive"), true);
       if (current.active.etag !== operation.etag) {
-        finishImport(operation, "Active PolicyのETagが競合しました。下書きは保持しています。最新のPolicyを再読み込みしてから再試行してください。", true);
-        blocked = "conflict"; render();
+        // Blocked first: the page must not offer applying over the other policy even if the message cannot be read.
+        blocked = "conflict";
+        finishImport(operation, () => t("optionsImportEtagConflict"), true);
         return;
       }
       const appended = candidate.layers[operation.key].rules.slice(count);
       if (!operation.draft.appendRulesAtomically(operation.key, appended, { expectedVersion: operation.version })) return conflict();
       resetChecker();
-      finishImport(operation, `${parsed.rules.length}件を下書きに一括追加しました。Active Policyは変更していません。「適用」を押すまで反映されません。`);
+      finishImport(operation, () => t("optionsImportDone", String(parsed.rules.length)));
       edited(true, [operation.key]);
     } catch (error) {
-      const message = error instanceof CsvImportError
-        ? `CSV ${error.line}行目：${IMPORT_ERRORS[error.code] ?? "読み込みに失敗しました。"}` : "CSV Importを完了できません。";
-      finishImport(operation, `${message}全件取り消し、下書きは変更していません。`, true);
+      finishImport(operation, () => (error instanceof CsvImportError
+        ? importFailed(lookup(IMPORT_ERRORS, error.code) ?? t("optionsCsvReadFailed"), { line: error.line })
+        : importFailed(t("optionsCsvImportIncomplete"))), true);
     }
   }
 
@@ -533,18 +561,18 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     if (!draft || locked()) return;
     const url = testUrlValue();
     if (url === "") {
-      showUrlResult("判定するURLを入力してください。", null);
+      showUrlResult(t("optionsEnterUrl"), null);
       $("test-url").focus();
       return;
     }
     const epoch = testEpoch;
     const token = urlGate.next();
-    showUrlResult("判定しています…", null);
+    showUrlResult(t("optionsJudging"), null);
     const answer = await testUrl({ send, policy: draft.policy, url });
     if (epoch !== testEpoch || !urlGate.isCurrent(token)) return;
-    if (answer.ok) showUrlResult(`判定: ${DECISION_TEXT[answer.decision]}`, answer.decision);
-    else if (DRAFT_CODES.has(answer.code)) showUrlResult("下書きに問題があるため判定できませんでした。「検証」で問題の箇所を確認してください。", null);
-    else showUrlResult(`判定できませんでした。${errorText(answer.code)}`, null);
+    if (answer.ok) showUrlResult(t("optionsDecision", lookup(DECISION_TEXT, answer.decision) ?? String(answer.decision)), answer.decision);
+    else if (DRAFT_CODES.has(answer.code)) showUrlResult(t("optionsJudgeDraftProblem"), null);
+    else showUrlResult(t("optionsJudgeFailed", errorText(answer.code)), null);
   }
 
   // --- Editing ------------------------------------------------------------------------------------
@@ -616,23 +644,19 @@ export function startOptionsPage({ document, window, send, download = downloadCs
 
   /** Why no rule can be added or changed now, or "" if the match allows it. */
   function checkerReason() {
-    if (!draft) return "設定を読み込めていないため、ルールを追加できません。";
-    if (!draft.editable) return "旧形式（v1）の設定には、この画面からルールを追加できません。";
-    if (locked()) return "適用の処理中は、ルールを追加・変更できません。";
-    if (editing && !editTargetHolds()) return "編集対象のルールが変更または削除されたため、反映できません。「編集をやめる」を押してください。";
+    if (!draft) return t("optionsCheckerNoDraft");
+    if (!draft.editable) return t("optionsCheckerV1");
+    if (locked()) return t("optionsCheckerLocked");
+    if (editing && !editTargetHolds()) return t("optionsCheckerEditGone");
     const current = currentCheck();
-    if (!current) {
-      return complete(checkerInput())
-        ? "「マッチングを確認」で一致を確認すると、追加できます。"
-        : "ルールとチェック対象URLを入力し、「マッチングを確認」で一致を確認してください。";
-    }
-    if (current.state === "checking") return "確認中です。";
-    if (current.state === "no_match") return "一致しなかったため、追加できません。ルールかURLを修正して、もう一度確認してください。";
-    if (current.state !== "match") return "判定できなかったため、追加できません。";
+    if (!current) return t(complete(checkerInput()) ? "optionsCheckerCheckToAdd" : "optionsCheckerEnter");
+    if (current.state === "checking") return t("optionsCheckerChecking");
+    if (current.state === "no_match") return t("optionsCheckerNoMatch");
+    if (current.state !== "match") return t("optionsCheckerNotJudged");
     if (!editing) return "";
-    if (sameRule(current, editing.rule)) return "ルールが変更されていません。";
+    if (sameRule(current, editing.rule)) return t("optionsCheckerUnchanged");
     const others = draft.layer(editing.layer).rules.filter((_, index) => index !== editing.index);
-    if (others.some((other) => sameRule(other, current))) return "同じルールがこのグループにすでにあります（登録済み）。";
+    if (others.some((other) => sameRule(other, current))) return t("optionsCheckerDuplicate");
     return "";
   }
 
@@ -640,13 +664,13 @@ export function startOptionsPage({ document, window, send, download = downloadCs
   const canReflect = () => editing !== null && checkerReason() === "";
 
   const RESULT_TEXT = {
-    checking: () => "確認中…",
-    match: () => "一致しました",
-    no_match: () => "一致しませんでした",
-    rule_error: (code) => `ルールを確認してください。${problemText(code)}`,
-    url_error: (code) => `URLを確認してください。${errorText(code)}`,
-    approval_needed: () => "承認が必要です（Public Suffix Listによる制限）",
-    failed: (code) => `判定できませんでした。${errorText(code ?? "invalid_response")}`,
+    checking: () => t("optionsResultChecking"),
+    match: () => t("optionsResultMatch"),
+    no_match: () => t("optionsResultNoMatch"),
+    rule_error: (code) => t("optionsResultRuleError", problemText(code)),
+    url_error: (code) => t("optionsResultUrlError", errorText(code)),
+    approval_needed: () => t("optionsResultApprovalNeeded"),
+    failed: (code) => t("optionsJudgeFailed", errorText(code ?? "invalid_response")),
   };
 
   function renderChecker() {
@@ -661,14 +685,12 @@ export function startOptionsPage({ document, window, send, download = downloadCs
 
     const current = currentCheck();
     const result = $("checker-result");
-    result.textContent = current ? RESULT_TEXT[current.state](current.code) : "未チェック";
+    result.textContent = current ? RESULT_TEXT[current.state](current.code) : t("optionsCheckerNotChecked");
     result.dataset.result = current ? current.state : "none";
 
     const banner = $("checker-edit");
     banner.hidden = editing === null;
-    banner.textContent = editing
-      ? `編集中: 「${LAYER_NAME[editing.layer]}」の${editing.index + 1}行目のルール。一致を確認してから「変更を反映」を押すと、下書きのこのルールだけが置き換わります。`
-      : "";
+    banner.textContent = editing ? t("optionsEditingBanner", LAYER_NAME[editing.layer], editing.index + 1) : "";
     $("checker-add").hidden = editing !== null;
     $("checker-edit-actions").hidden = editing === null;
     $("checker-apply-edit").disabled = !canReflect();
@@ -679,19 +701,14 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     for (const key of LAYER_KEYS) {
       $(`checker-add-${LAYER_ID[key]}`).disabled = !draft || !canAddTo(key);
       const notes = [];
-      if (draft && match && draft.hasRule(key, match)) notes.push("登録済み: このグループに同じルールがあります。");
-      if (draft?.editable && !draft.layerEnabled(key)) {
-        notes.push("このグループは無効です。ルールは追加されますが、適用後もグループを有効にするまで判定に使われません。");
-      }
-      if (key === "saveButNoMcp" && draft && match && draft.hasRule("neverSave", match)) {
-        notes.push("同じルールが「保存しないグループ」にもあります。保存しないグループの判定が優先されるため、一致したURLは保存されません。");
-      }
+      if (draft && match && draft.hasRule(key, match)) notes.push(t("optionsCheckerAlreadyAdded"));
+      if (draft?.editable && !draft.layerEnabled(key)) notes.push(t("optionsCheckerGroupOff"));
+      if (key === "saveButNoMcp" && draft && match && draft.hasRule("neverSave", match)) notes.push(t("optionsCheckerAlsoNeverSave"));
       const note = $(`checker-${LAYER_ID[key]}-note`);
       note.textContent = notes.join(" ");
       note.hidden = notes.length === 0;
     }
-    $("checker-gate").textContent =
-      reason || (editing ? "一致しました。「変更を反映」で下書きのルールを置き換えられます。" : "一致しました。追加先のグループを選んでください。");
+    $("checker-gate").textContent = reason || t(editing ? "optionsCheckerMatchReplace" : "optionsCheckerMatchAdd");
     const status = $("checker-status");
     status.textContent = checkerNote;
     status.hidden = checkerNote === "";
@@ -704,8 +721,9 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     $("checker-approval").hidden = offer === null;
     $("checker-approve").disabled = offer === null || approving || !canCheck();
     if (!offer) return;
-    $("checker-approval-reason").textContent = REASON_TEXT[offer.reason](offer.domain, offer.psl.snapshotDate);
-    $("checker-approval-domain").textContent = `承認するドメイン: ${offer.domain}`;
+    const reasonKey = lookup(PSL_REASON_KEYS, offer.reason);
+    $("checker-approval-reason").textContent = reasonKey ? t(reasonKey, String(offer.psl.snapshotDate), String(offer.domain)) : errorText("invalid_response");
+    $("checker-approval-domain").textContent = t("optionsApprovalDomain", String(offer.domain));
   }
 
   /** A change of the kind, rule or URL: the answer about what was there before no longer counts. */
@@ -774,10 +792,10 @@ export function startOptionsPage({ document, window, send, download = downloadCs
         check = null;
         checkGate.next();
       }
-      checkerNote = `「${domain}」を承認しました。ルールはまだ追加されていません。もう一度「マッチングを確認」を押して、一致を確認してください。`;
+      checkerNote = t("optionsApproved", String(domain));
       void refreshApprovals();
     } else {
-      checkerNote = `承認しませんでした。${errorText(result.code)}`;
+      checkerNote = t("optionsNotApproved", errorText(result.code));
     }
     renderChecker();
   }
@@ -803,20 +821,17 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     renderApprovals();
     const result = await revokeDomain({ send, domain });
     revoking = null;
-    approvalsNote = result.ok
-      ? `「${domain}」の承認を取り消しました。このドメインのDomain Wildcardは、再び承認するまで使えません。`
-      : `取り消しませんでした。${errorText(result.code)}`;
+    approvalsNote = result.ok ? t("optionsRevoked", String(domain)) : t("optionsNotRevoked", errorText(result.code));
     await refreshApprovals();
   }
 
   function renderApprovals() {
-    const stateText = {
-      loading: "読み込んでいます…",
-      failed: `承認したドメインを読み込めませんでした。${errorText(approvals.code ?? "invalid_response")}`,
-      ready: approvals.items.length ? "" : "承認したドメインはありません。",
-    }[approvals.state];
+    const stateText =
+      approvals.state === "loading" ? t("optionsApprovalsLoading")
+        : approvals.state === "failed" ? t("optionsApprovalsFailed", errorText(approvals.code ?? "invalid_response"))
+          : approvals.items.length ? "" : t("optionsApprovalsEmpty");
     $("approvals-state").textContent = stateText;
-    $("approvals-psl").textContent = approvals.psl ? `判定に使うPublic Suffix List: ${approvals.psl.snapshotDate}時点` : "";
+    $("approvals-psl").textContent = approvals.psl ? t("optionsApprovalsPsl", String(approvals.psl.snapshotDate)) : "";
     const list = $("approvals-list");
     list.replaceChildren(
       ...approvals.items.map((item, index) => {
@@ -825,21 +840,17 @@ export function startOptionsPage({ document, window, send, download = downloadCs
         name.textContent = item.domain;
         const state = document.createElement("span");
         state.className = "approval-state";
-        state.textContent = `承認済み（${item.approvedAt}）`;
+        state.textContent = t("optionsApprovedAt", String(item.approvedAt));
         const note = document.createElement("p");
         note.id = `approval-${index}-note`;
         note.className = "note";
         note.textContent =
-          item.inUse === true
-            ? "適用中の設定で使われています。取り消すには、先にこのドメインのルールを削除または変更して適用してください。"
-            : item.inUse === null
-              ? "適用中の設定で使われているかを確認できません。"
-              : "";
+          item.inUse === true ? t("optionsApprovalInUse") : item.inUse === null ? t("optionsApprovalInUseUnknown") : "";
         note.hidden = note.textContent === "";
         const button = document.createElement("button");
         button.type = "button";
-        button.textContent = "承認を取り消す";
-        button.setAttribute("aria-label", `${item.domain} の承認を取り消す`);
+        button.textContent = t("optionsRevoke");
+        button.setAttribute("aria-label", t("optionsRevokeLabel", String(item.domain)));
         button.setAttribute("aria-describedby", note.id);
         button.disabled = item.inUse === true || revoking !== null || locked();
         button.addEventListener("click", () => void revoke(item.domain));
@@ -876,7 +887,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     const index = draft.appendRule(layerKey, match);
     if (index < 0) return renderChecker();
     edited(true, [layerKey]);
-    checkerNote = `「${LAYER_NAME[layerKey]}」の下書きに追加しました（${index + 1}行目）。「${onboarding ? "記憶を開始する" : "適用"}」を押すまで反映されません。`;
+    checkerNote = t("optionsAdded", LAYER_NAME[layerKey], index + 1, applyButtonName(onboarding));
     renderChecker();
     showRow(layerKey, index);
   }
@@ -905,7 +916,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     if (outcome !== "replaced") return renderChecker();
     editing = null;
     edited(true, [layer]);
-    checkerNote = `「${LAYER_NAME[layer]}」の${index + 1}行目のルールを下書きで変更しました。「${onboarding ? "記憶を開始する" : "適用"}」を押すまで反映されません。`;
+    checkerNote = t("optionsReplaced", LAYER_NAME[layer], index + 1, applyButtonName(onboarding));
     renderChecker();
     showRow(layer, index);
   }
@@ -913,7 +924,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
   function cancelEdit() {
     if (!editing || locked()) return;
     editing = null;
-    checkerNote = "編集をやめました。下書きは変更していません。";
+    checkerNote = t("optionsEditStopped");
     render();
     $("checker-rule").focus();
   }
@@ -937,16 +948,17 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     if (!validateGate.isCurrent(token)) return;
     busy = null;
     if (draft !== target || draft.version !== version) {
-      validationNote = "検証中に下書きが変更されたため、結果は表示していません。もう一度「検証」を押してください。";
+      validationNote = t("optionsValidationStale");
     } else {
       validation = { draft: target, version, ...result };
     }
     render();
   }
 
+  /** Ends a start or an apply step (busy) and draws the page; `note` is the message or a function giving it. */
   function finish(note) {
     busy = null;
-    applyNote = note;
+    applyNote = readMessage(note);
     render();
     $("apply-status").focus();
   }
@@ -973,9 +985,9 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     try {
       const reply = await vaultRequest("vault_status", {}, { send });
       vaultReady = reply.status?.state === "ready";
-      $("onboarding-vault").textContent = vaultReady ? "使用可能なVaultを再利用します。" : `${describeStatus(reply.status)}。Vault設定で作成または選択してください。`;
+      $("onboarding-vault").textContent = vaultReady ? t("optionsVaultReady") : t("optionsVaultNotReady", describeStatus(reply.status));
     } catch {
-      $("onboarding-vault").textContent = "Vaultの状態を取得できません。Native Hostの接続を確認してください。";
+      $("onboarding-vault").textContent = t("optionsVaultUnknown");
     }
     render();
   }
@@ -985,12 +997,12 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     render();
     const loaded = await loadActivePolicy({ send });
     if (loaded.state === "ready") {
-      adopt(loaded, "記録開始済みのPolicyを確認しました。現在の設定を表示しています。MCP公開にはVault設定で別途承認が必要です。");
+      adopt(loaded, () => t("optionsStartConfirmed"));
       return;
     }
     if (loaded.state === "uninitialized") {
       startPending = false;
-      finish(`確認した時点では未開始です。${result && !result.ok ? errorText(result.code) : ""} 自動では開始を再送しません。`);
+      finish(() => t("optionsStartNotStarted", result && !result.ok ? errorText(result.code) : ""));
       await refreshVault();
       return;
     }
@@ -1002,7 +1014,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
       for (const key of LAYER_KEYS) buildRules(key);
     }
     startPending = true;
-    finish(`開始状態を確認できません。${loadReason(loaded)} 開始リクエストは再送しません。「開始状態を再確認」または「再読み込み」を使ってください。`);
+    finish(() => t("optionsStartUnknown", loadReason(loaded)));
   }
 
   async function startRecording() {
@@ -1016,10 +1028,10 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     render();
     const checked = await validateDraft({ send, policy: submitted });
     validation = { draft: target, version, ...checked };
-    if (!checked.ok) return finish("下書きを検証できないため、開始していません。検証結果を確認してください。");
+    if (!checked.ok) return finish(() => t("optionsStartInvalid"));
     // Another page may have started while this one was open. Never apply over that policy.
     const current = await loadActivePolicy({ send });
-    if (current.state === "ready") return adopt(current, "別の画面で記録開始済みです。現在の設定を表示しています。");
+    if (current.state === "ready") return adopt(current, () => t("optionsStartedElsewhere"));
     if (current.state !== "uninitialized") return checkStart();
     startPending = true;
     const result = await startDraft({ send, policy: submitted });
@@ -1036,28 +1048,26 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     resetChecker();
     validateGate.next();
     validationNote = "";
-    applyNote = "下書きを検証しています…";
+    applyNote = t("optionsApplyValidating");
     render();
     const checked = await validateDraft({ send, policy: submitted });
     if (!checked.ok) {
       validation = { draft: target, version, ...checked };
-      finish(DRAFT_CODES.has(checked.code) ? "下書きに問題があるため、適用していません。" : `下書きを検証できなかったため、適用していません。${errorText(checked.code)}`);
+      finish(() => (DRAFT_CODES.has(checked.code) ? t("optionsApplyDraftProblem") : t("optionsApplyValidateFailed", errorText(checked.code))));
       return;
     }
-    applyNote = "適用しています…";
+    applyNote = t("optionsApplying");
     render();
     const result = await applyDraft({ send, expectedEtag, policy: submitted });
     if (result.outcome === "applied") return confirmApplied({ etag: result.etag, revision: result.revision });
     if (result.outcome === "refused") {
       if (result.code === "policy_conflict") {
         blocked = "conflict";
-        finish(
-          "ほかの画面またはプロセスでプライバシー設定が変更されていたため、適用しませんでした。自動では上書きしません。下書きはそのまま残しています。内容を確認してから「再読み込み」で最新の設定を読み込んでください（再読み込みすると、この下書きは破棄されます）。",
-        );
+        finish(() => t("optionsApplyConflict"));
         return;
       }
       if (result.problems.length) validation = { draft: target, version, ok: false, code: "policy_invalid", problems: result.problems };
-      finish(`適用しませんでした。${errorText(result.code)} 下書きはそのまま残しています。`);
+      finish(() => t("optionsApplyRefused", errorText(result.code)));
       return;
     }
     pending = { expectedEtag, submitted, code: result.code };
@@ -1070,23 +1080,20 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     applied = outcome;
     blocked = null;
     busy = "checking";
-    applyNote = `適用しました（Revision ${outcome.revision}）。最新の状態を読み込んでいます…`;
+    applyNote = t("optionsAppliedLoading", String(outcome.revision));
     render();
     const loaded = await loadActivePolicy({ send });
     if (loaded.state === "ready") {
       applied = null;
-      adopt(
-        loaded,
+      adopt(loaded, () =>
         loaded.active.etag === outcome.etag
-          ? `適用しました（Revision ${outcome.revision}）。`
-          : `適用しました（Revision ${outcome.revision}）。その後ほかの変更もあったため、最新の設定（Revision ${loaded.active.revision}）を表示しています。`,
+          ? t("optionsApplied", String(outcome.revision))
+          : t("optionsAppliedNewer", String(outcome.revision), String(loaded.active.revision)),
       );
       return;
     }
     blocked = "applied";
-    finish(
-      `適用は成功しましたが（Revision ${outcome.revision}）、最新状態を取得できませんでした。${loadReason(loaded)} 下書きは残しています。「適用結果を再確認」を押してください。`,
-    );
+    finish(() => t("optionsAppliedUnread", String(outcome.revision), loadReason(loaded)));
   }
 
   /** An apply whose outcome is unknown, compared with the policy read afterwards. */
@@ -1094,28 +1101,24 @@ export function startOptionsPage({ document, window, send, download = downloadCs
   async function checkUnknown() {
     blocked = null;
     busy = "checking";
-    applyNote = `適用の結果が不明です。${errorText(pending.code)} 現在の設定を読み込んで確認しています…`;
+    applyNote = t("optionsApplyUnknownChecking", errorText(pending.code));
     render();
     const loaded = await loadActivePolicy({ send });
     if (loaded.state !== "ready") {
       blocked = "unknown";
-      finish(
-        `適用の結果が不明です。適用されたかどうかを確認できませんでした。${loadReason(loaded)} 自動ではもう一度適用しません。下書きは残しています。Native Hostの状態を確かめてから「適用結果を再確認」を押してください。`,
-      );
+      finish(() => t("optionsApplyUnknown", loadReason(loaded)));
       return;
     }
     const verdict = compareAfterApply({ expectedEtag: pending.expectedEtag, submitted: pending.submitted, loaded: loaded.active });
     const answered = pending.code;
     pending = null;
     if (verdict === "applied") {
-      adopt(loaded, `適用されたことを確認しました（Revision ${loaded.active.revision}）。`);
+      adopt(loaded, () => t("optionsApplyConfirmed", String(loaded.active.revision)));
     } else if (verdict === "not_applied") {
-      finish(`確認した時点では、設定は適用前のままでした（${errorText(answered)}）。自動ではもう一度適用しません。下書きは残しています。必要であれば、もう一度「適用」を押してください。`);
+      finish(() => t("optionsApplyNotApplied", errorText(answered)));
     } else {
       blocked = "changed";
-      finish(
-        `適用の結果が不明なうちに、プライバシー設定がこの下書きとは異なる内容に変わっていました（Revision ${loaded.active.revision}）。自動では上書きしません。下書きは残しています。内容を確認してから「再読み込み」で最新の設定を読み込んでください。`,
-      );
+      finish(() => t("optionsApplyChanged", String(loaded.active.revision)));
     }
   }
 
@@ -1192,7 +1195,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
         draft = createDraft(preset, { editable: true });
         startPending = false;
       } catch {
-        applyNote = "初期候補を取得できません。開始していません。Native Hostを確認して再読み込みしてください。";
+        applyNote = t("optionsPresetFailed");
       }
       await refreshVault();
     }
@@ -1270,7 +1273,7 @@ export function startOptionsPage({ document, window, send, download = downloadCs
     draft.discard();
     resetChecker();
     edited(true, LAYER_KEYS);
-    notice = "変更を破棄しました。";
+    notice = t("optionsDiscarded");
     render();
   });
   $("apply").addEventListener("click", requestApply);

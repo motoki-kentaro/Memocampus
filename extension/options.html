@@ -3,234 +3,234 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Memocampus — Privacy設定</title>
+    <title data-i18n="optionsTitle"></title>
     <link rel="stylesheet" href="options.css">
   </head>
   <body>
     <main id="options" class="options" aria-labelledby="options-title">
-      <h1 id="options-title">Memocampus — Privacy設定</h1>
+      <h1 id="options-title" data-i18n="optionsTitle"></h1>
 
       <section id="onboarding" class="card" aria-labelledby="onboarding-heading" hidden>
-        <h2 id="onboarding-heading">はじめに — 自動記録はまだOFFです</h2>
-        <p>「記憶を開始する」を押すと、通常ウィンドウのhttp/httpsページについて、閲覧URL・タイトル・訪問日時とページメタデータ（説明・OGP・faviconなど）を自動記録します。シークレットブラウジングの自動履歴は対象外です。</p>
-        <p>保存先は利用者が作成・選択したローカルVaultです。Memocampus自体は閲覧データを外部サービスへ送信しません。後日MCPでAIに公開する場合は別途承認が必要で、接続先AIのデータの扱いも関係します。記録を開始しても、MCPへの公開は承認待ちのままです。</p>
-        <p>Blind Zone（保存しないグループ）は一致するページを記録しません。Private Zone（MCPサーバに見せないグループ）はローカルに記録しますが、MCP/AIへ公開しません。Blind Zoneを設定しても、保存済みの履歴は自動削除されません。</p>
-        <p>以下はNative Hostから取得した初期候補（Draft）です。基本保護は認証関連・認証情報をBlind Zone、行政サイト・Webメール・AIチャットをPrivate Zoneにします。対象例とON/OFFは下の「基本保護」で確認できます。すべての機密サイト・URLを網羅するものではありません。ルール表示・URLチェッカーでの編集・検証を行い、必要な保護を追加してください。</p>
-        <p>画面を開く・候補を表示する・検証するだけでは開始しません。開始前の閲覧イベントは保存せず、開始後にも遡って収集しません。下書きはこの画面のメモリにだけ保持されます。</p>
+        <h2 id="onboarding-heading" data-i18n="optionsOnboardingHeading"></h2>
+        <p data-i18n="optionsOnboardingRecords"></p>
+        <p data-i18n="optionsOnboardingLocal"></p>
+        <p data-i18n="optionsOnboardingZones"></p>
+        <p data-i18n="optionsOnboardingPreset"></p>
+        <p data-i18n="optionsOnboardingNotYet"></p>
         <p id="onboarding-vault" class="status" role="status"></p>
         <div class="actions">
-          <a href="sidepanel.html#settings" target="_blank" rel="noopener">Vault設定を開く（作成・選択）</a>
-          <button id="vault-recheck" type="button">Vaultを再確認</button>
+          <a href="sidepanel.html#settings" target="_blank" rel="noopener" data-i18n="optionsOpenVaultSettings"></a>
+          <button id="vault-recheck" type="button" data-i18n="optionsVaultRecheck"></button>
         </div>
       </section>
 
       <section class="card" aria-labelledby="active-heading">
-        <h2 id="active-heading" tabindex="-1">適用中のプライバシー設定</h2>
+        <h2 id="active-heading" tabindex="-1" data-i18n="optionsActiveHeading"></h2>
         <dl class="facts">
-          <div><dt>状態</dt><dd><span id="policy-state" class="state" data-state="loading" role="status" aria-live="polite"></span></dd></div>
+          <div><dt data-i18n="optionsStateLabel"></dt><dd><span id="policy-state" class="state" data-state="loading" role="status" aria-live="polite"></span></dd></div>
           <div><dt>Schema / Engine Version</dt><dd id="policy-version"></dd></div>
           <div><dt>Revision</dt><dd id="policy-revision"></dd></div>
         </dl>
         <p id="policy-explanation" class="explanation" aria-live="polite"></p>
         <div class="actions">
-          <button id="reload" type="button">再読み込み</button>
+          <button id="reload" type="button" data-i18n="optionsReload"></button>
         </div>
         <div id="reload-confirm" class="confirm" role="alertdialog" aria-labelledby="reload-confirm-text" hidden>
-          <p id="reload-confirm-text">未適用の変更があります。再読み込みすると、この変更は失われます。</p>
-          <button id="reload-confirm-yes" type="button">変更を破棄して再読み込み</button>
-          <button id="reload-confirm-no" type="button">やめる</button>
+          <p id="reload-confirm-text" data-i18n="optionsReloadConfirm"></p>
+          <button id="reload-confirm-yes" type="button" data-i18n="optionsReloadDiscard"></button>
+          <button id="reload-confirm-no" type="button" data-i18n="optionsCancel"></button>
         </div>
       </section>
 
       <section class="card" aria-labelledby="categories-heading" aria-describedby="categories-description">
-        <h2 id="categories-heading">基本保護</h2>
-        <p id="categories-description" class="explanation">Memocampusに組み込まれた保護です。ONの項目に一致したURLは、それぞれのグループと同じ扱いになります。</p>
+        <h2 id="categories-heading" data-i18n="optionsBasicProtections"></h2>
+        <p id="categories-description" class="explanation" data-i18n="optionsBasicProtectionsNote"></p>
         <p id="categories-note" class="note" hidden></p>
         <ul id="categories" class="categories">
           <li>
             <input id="category-authentication" type="checkbox" aria-describedby="category-authentication-detail category-authentication-note category-authentication-warning">
             <div>
-              <label for="category-authentication">認証関連</label>
-              <span class="group-tag">保存しないグループ</span>
-              <p id="category-authentication-detail" class="detail">Google・Microsoft・OpenAI・Appleのログイン画面と、ログインやパスワード再設定のページ（/login、/signin、/reset-password など）。</p>
+              <label for="category-authentication" data-i18n="optionsCategoryAuthentication"></label>
+              <span class="group-tag" data-i18n="policyLayerNeverSave"></span>
+              <p id="category-authentication-detail" class="detail" data-i18n="optionsCategoryAuthenticationDetail"></p>
               <p id="category-authentication-note" class="note" hidden></p>
-              <p id="category-authentication-warning" class="warning" hidden>OFFにすると、これらのページもMemocampusに保存されるようになります。</p>
+              <p id="category-authentication-warning" class="warning" hidden data-i18n="optionsCategoryAuthenticationWarning"></p>
             </div>
           </li>
           <li>
             <input id="category-credentials" type="checkbox" aria-describedby="category-credentials-detail category-credentials-note category-credentials-warning">
             <div>
-              <label for="category-credentials">認証情報</label>
-              <span class="group-tag">保存しないグループ</span>
-              <p id="category-credentials-detail" class="detail">トークン・パスワード・APIキー・署名などをURLに含むページ、ユーザー名やパスワード付きのURL、OAuthの認可コードを含むURL。</p>
+              <label for="category-credentials" data-i18n="optionsCategoryCredentials"></label>
+              <span class="group-tag" data-i18n="policyLayerNeverSave"></span>
+              <p id="category-credentials-detail" class="detail" data-i18n="optionsCategoryCredentialsDetail"></p>
               <p id="category-credentials-note" class="note" hidden></p>
-              <p id="category-credentials-warning" class="warning" hidden>OFFにすると、認証情報を含むURLもMemocampusに保存されるようになります。</p>
+              <p id="category-credentials-warning" class="warning" hidden data-i18n="optionsCategoryCredentialsWarning"></p>
             </div>
           </li>
           <li>
             <input id="category-government" type="checkbox" aria-describedby="category-government-detail category-government-note category-government-warning">
             <div>
-              <label for="category-government">行政サイト</label>
-              <span class="group-tag">MCPサーバに見せないグループ</span>
-              <p id="category-government-detail" class="detail">マイナポータル（*.myna.go.jp）と国税庁（*.nta.go.jp）。</p>
+              <label for="category-government" data-i18n="optionsCategoryGovernment"></label>
+              <span class="group-tag" data-i18n="policyLayerSaveButNoMcp"></span>
+              <p id="category-government-detail" class="detail" data-i18n="optionsCategoryGovernmentDetail"></p>
               <p id="category-government-note" class="note" hidden></p>
-              <p id="category-government-warning" class="warning" hidden>OFFにすると、これらのページがMCPサーバ向けの公開対象になります。</p>
+              <p id="category-government-warning" class="warning" hidden data-i18n="optionsCategoryGovernmentWarning"></p>
             </div>
           </li>
           <li>
             <input id="category-webmail" type="checkbox" aria-describedby="category-webmail-detail category-webmail-note category-webmail-warning">
             <div>
-              <label for="category-webmail">Webメール</label>
-              <span class="group-tag">MCPサーバに見せないグループ</span>
-              <p id="category-webmail-detail" class="detail">Gmail（mail.google.com）とOutlook（outlook.live.com、outlook.office.com）。</p>
+              <label for="category-webmail" data-i18n="optionsCategoryWebmail"></label>
+              <span class="group-tag" data-i18n="policyLayerSaveButNoMcp"></span>
+              <p id="category-webmail-detail" class="detail" data-i18n="optionsCategoryWebmailDetail"></p>
               <p id="category-webmail-note" class="note" hidden></p>
-              <p id="category-webmail-warning" class="warning" hidden>OFFにすると、メールのページがMCPサーバ向けの公開対象になります。</p>
+              <p id="category-webmail-warning" class="warning" hidden data-i18n="optionsCategoryWebmailWarning"></p>
             </div>
           </li>
           <li>
             <input id="category-aiChats" type="checkbox" aria-describedby="category-aiChats-detail category-aiChats-note category-aiChats-warning">
             <div>
-              <label for="category-aiChats">AIチャット</label>
-              <span class="group-tag">MCPサーバに見せないグループ</span>
-              <p id="category-aiChats-detail" class="detail">ChatGPT（chatgpt.com）・Claude（claude.ai）・Gemini（gemini.google.com）。</p>
+              <label for="category-aiChats" data-i18n="optionsCategoryAiChats"></label>
+              <span class="group-tag" data-i18n="policyLayerSaveButNoMcp"></span>
+              <p id="category-aiChats-detail" class="detail" data-i18n="optionsCategoryAiChatsDetail"></p>
               <p id="category-aiChats-note" class="note" hidden></p>
-              <p id="category-aiChats-warning" class="warning" hidden>OFFにすると、AIチャットのページがMCPサーバ向けの公開対象になります。</p>
+              <p id="category-aiChats-warning" class="warning" hidden data-i18n="optionsCategoryAiChatsWarning"></p>
             </div>
           </li>
         </ul>
       </section>
 
       <section id="checker" class="card" aria-labelledby="checker-heading" aria-describedby="checker-description">
-        <h2 id="checker-heading" tabindex="-1">URLチェッカー</h2>
-        <p id="checker-description" class="explanation">ルールがURLに一致するかをNative Hostで確認し、一致したルールだけをグループに追加できます。追加は下書きへの追加で、「適用」を押すまで反映されません。</p>
+        <h2 id="checker-heading" tabindex="-1" data-i18n="optionsCheckerHeading"></h2>
+        <p id="checker-description" class="explanation"></p>
         <p id="checker-edit" class="checker-edit" hidden></p>
         <fieldset class="checker-kind">
-          <legend>ルールの種類</legend>
+          <legend data-i18n="optionsRuleKindLegend"></legend>
           <span class="radio"><input id="checker-kind-pattern" type="radio" name="checker-kind" value="pattern" checked disabled><label for="checker-kind-pattern">Pattern</label></span>
           <span class="radio"><input id="checker-kind-regex" type="radio" name="checker-kind" value="regex" disabled><label for="checker-kind-regex">Regex</label></span>
           <span class="radio"><input id="checker-kind-domainWildcard" type="radio" name="checker-kind" value="domainWildcard" disabled><label for="checker-kind-domainWildcard">Domain Wildcard</label></span>
           <span class="radio"><input id="checker-kind-exact" type="radio" name="checker-kind" value="exact" disabled><label for="checker-kind-exact">Exact URL</label></span>
         </fieldset>
         <div class="field-head">
-          <label for="checker-rule" class="field-label">ルール</label>
-          <button id="checker-help-toggle" type="button" class="help-toggle" aria-label="ルールの書き方について" aria-expanded="false" aria-controls="checker-help">?</button>
+          <label for="checker-rule" class="field-label" data-i18n="optionsRuleLabel"></label>
+          <button id="checker-help-toggle" type="button" class="help-toggle" data-i18n-aria-label="optionsRuleHelpLabel" aria-expanded="false" aria-controls="checker-help">?</button>
         </div>
-        <p id="checker-help" class="help-text" role="note" hidden>PatternはMemocampusのパターン照合です。RegexはRust Regex構文で判定します。先読み・後読みには対応していません。Domain Wildcardは「*.example.com」の形で、example.com 自身とそのすべてのサブドメインに一致します（ホスト名だけで判定し、パス・クエリ・ポートは見ません）。*.com や *.co.jp のような公開サフィックスは指定できません。Exact URLは、スキーム（httpsなど）から始まるURL全体1つだけに一致します（スキーム・ホスト・ポート・パス・クエリ・フラグメントがすべて同じURL。ホスト名の大文字小文字と既定のポートは区別しません。末尾の / やクエリが違えば別のURLです）。</p>
-        <p id="checker-kind-note" class="note" hidden>スキーム（httpsなど）やパスは含めず、「*.example.com」の形で書きます。example.com 自身にも一致します。</p>
+        <p id="checker-help" class="help-text" role="note" hidden data-i18n="optionsRuleHelp"></p>
+        <p id="checker-kind-note" class="note" hidden data-i18n="optionsDomainWildcardNote"></p>
         <input id="checker-rule" type="text" class="checker-input" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="checker-gate" disabled>
-        <label for="checker-url" class="field-label">チェック対象URL</label>
+        <label for="checker-url" class="field-label" data-i18n="optionsCheckerUrlLabel"></label>
         <input id="checker-url" type="text" class="checker-input" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="checker-url-note" disabled>
-        <p id="checker-url-note" class="note">入力したルールとURLは確認のためにNative Hostへ送られますが、保存されません。この画面を閉じると消えます。</p>
+        <p id="checker-url-note" class="note" data-i18n="optionsCheckerUrlNote"></p>
         <div class="actions">
-          <button id="checker-run" type="button" disabled>マッチングを確認</button>
+          <button id="checker-run" type="button" disabled data-i18n="optionsCheckMatch"></button>
         </div>
         <div class="checker-result-box">
-          <p class="field-label" id="checker-result-label">判定結果</p>
-          <p id="checker-result" class="checker-result" data-result="none" role="status" aria-live="polite" aria-labelledby="checker-result-label">未チェック</p>
-          <p id="checker-caveat" class="note">この結果はルール単体の一致確認です。実際の保存判定は、適用中のPolicy全体で決まります。</p>
+          <p class="field-label" id="checker-result-label" data-i18n="optionsCheckerResultLabel"></p>
+          <p id="checker-result" class="checker-result" data-result="none" role="status" aria-live="polite" aria-labelledby="checker-result-label" data-i18n="optionsCheckerNotChecked"></p>
+          <p id="checker-caveat" class="note" data-i18n="optionsCheckerCaveat"></p>
         </div>
         <div id="checker-approval" class="checker-approval" role="group" aria-labelledby="checker-approval-title" hidden>
-          <p id="checker-approval-title" class="confirm-title">Public Suffix Listによる制限</p>
+          <p id="checker-approval-title" class="confirm-title" data-i18n="optionsPslTitle"></p>
           <p id="checker-approval-reason" class="note"></p>
           <p id="checker-approval-domain" class="approval-domain"></p>
-          <p id="checker-approval-effect" class="note">制限を理解したうえで、このドメインを承認できます。承認はこのドメインだけに有効で、このドメインを指定する今後のDomain Wildcardルールにも使われます。承認だけではルールは追加されず、URLを保存するかどうかも変わりません。承認したあと、もう一度一致を確認してから追加します。</p>
-          <button id="checker-approve" type="button" disabled aria-describedby="checker-approval-reason checker-approval-domain checker-approval-effect">このドメインを承認する</button>
+          <p id="checker-approval-effect" class="note" data-i18n="optionsPslEffect"></p>
+          <button id="checker-approve" type="button" disabled aria-describedby="checker-approval-reason checker-approval-domain checker-approval-effect" data-i18n="optionsApproveDomain"></button>
         </div>
         <p id="checker-gate" class="note"></p>
         <div id="checker-add" class="checker-targets">
           <div class="checker-target">
-            <button id="checker-add-never-save" type="button" disabled aria-describedby="checker-gate checker-never-save-note">保存しないグループに追加</button>
+            <button id="checker-add-never-save" type="button" disabled aria-describedby="checker-gate checker-never-save-note" data-i18n="optionsAddNeverSave"></button>
             <p id="checker-never-save-note" class="note" hidden></p>
           </div>
           <div class="checker-target">
-            <button id="checker-add-save-but-no-mcp" type="button" disabled aria-describedby="checker-gate checker-save-but-no-mcp-note">MCPサーバに見せないグループに追加</button>
+            <button id="checker-add-save-but-no-mcp" type="button" disabled aria-describedby="checker-gate checker-save-but-no-mcp-note" data-i18n="optionsAddSaveButNoMcp"></button>
             <p id="checker-save-but-no-mcp-note" class="note" hidden></p>
           </div>
         </div>
         <div id="checker-edit-actions" class="actions" hidden>
-          <button id="checker-apply-edit" type="button" class="primary" disabled aria-describedby="checker-gate">変更を反映</button>
-          <button id="checker-cancel-edit" type="button">編集をやめる</button>
+          <button id="checker-apply-edit" type="button" class="primary" disabled aria-describedby="checker-gate" data-i18n="optionsReplaceRule"></button>
+          <button id="checker-cancel-edit" type="button" data-i18n="optionsStopEditing"></button>
         </div>
         <p id="checker-status" class="status" role="status" aria-live="polite" hidden></p>
       </section>
 
       <section class="card" aria-labelledby="never-save-heading" aria-describedby="never-save-description">
-        <h2 id="never-save-heading" tabindex="-1">保存しないグループ</h2>
-        <p id="never-save-description" class="explanation">一致したURLはMemocampusに保存されません。</p>
+        <h2 id="never-save-heading" tabindex="-1" data-i18n="policyLayerNeverSave"></h2>
+        <p id="never-save-description" class="explanation" data-i18n="optionsNeverSaveNote"></p>
         <div class="layer-toggle">
           <input id="never-save-enabled" type="checkbox" aria-describedby="never-save-warning">
-          <label for="never-save-enabled">このグループを有効にする</label>
+          <label for="never-save-enabled" data-i18n="optionsGroupEnable"></label>
         </div>
-        <p id="never-save-warning" class="warning" hidden>無効にすると、このグループのルールと基本保護（認証関連・認証情報）が判定に使われなくなり、これらに一致するURLもMemocampusに保存されるようになります。ルールは削除されません。</p>
+        <p id="never-save-warning" class="warning" hidden data-i18n="optionsNeverSaveOffWarning"></p>
         <p id="never-save-state" class="note"></p>
         <p id="never-save-error" class="error-text" hidden></p>
         <div id="never-save-table" class="table-wrap">
           <table>
-            <caption class="visually-hidden">保存しないグループのルール</caption>
-            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th></tr></thead>
+            <caption class="visually-hidden" data-i18n="optionsNeverSaveCaption"></caption>
+            <thead><tr><th scope="col" data-i18n="optionsColumnType"></th><th scope="col" data-i18n="optionsRuleLabel"></th><th scope="col" data-i18n="optionsColumnActions"></th></tr></thead>
             <tbody id="never-save-rules"></tbody>
           </table>
         </div>
         <p id="never-save-empty" class="empty" hidden></p>
-        <p id="never-save-hint" class="note" hidden>新しいルールは、URLチェッカーで一致を確認してから追加します。内容の変更は「チェッカーで編集」から行います。</p>
-        <p id="never-save-export-note" class="note">Blind Zoneの編集中のルール（下書き）だけをkind,pattern形式で出力します。Pattern / Regex / Domain Wildcard / Exact URLの型と、未適用の変更・不正な文字列もそのまま保持します。URLチェッカーの未反映入力・基本保護・有効/無効設定は含みません。Exportは検証・適用ではありません。</p>
-        <p id="csv-safety-note" class="warning">CSVはルール文字列を変更せず出力します。=、+、-、@などで始まる値は、Excel等で開くと数式として実行される危険があります。信頼できないCSVは表計算ソフトで開かず、テキストエディタで確認してください。CSV自体にもプライベートなルールが含まれるため、保存先と共有先に注意してください。</p>
-        <button id="never-save-export" type="button" disabled aria-describedby="never-save-export-note csv-safety-note">Blind ZoneをCSV Export</button>
+        <p id="never-save-hint" class="note" hidden data-i18n="optionsGroupHint"></p>
+        <p id="never-save-export-note" class="note" data-i18n="optionsNeverSaveExportNote"></p>
+        <p id="csv-safety-note" class="warning" data-i18n="optionsCsvSafetyNote"></p>
+        <button id="never-save-export" type="button" disabled aria-describedby="never-save-export-note csv-safety-note" data-i18n="optionsNeverSaveExport"></button>
         <p id="never-save-export-status" role="status" aria-live="polite" hidden></p>
-        <p id="never-save-import-note" class="note">CSV ImportはBlind Zoneの現在の下書きの末尾へ追加します。全件をNative Hostで検証し、不正行があれば全件取り消します。重複は自動除去せず、Hostが許容するものは順序どおり保持します。Active Policyは「適用」まで変わらず、既存のローカル履歴も自動削除しません。初期化済みのv2 Policyで利用できます。</p>
-        <button id="never-save-import" type="button" disabled aria-describedby="never-save-import-note csv-import-limits">Blind ZoneにCSV Import</button>
-        <input id="never-save-import-file" type="file" accept=".csv,text/csv" aria-label="Blind Zoneへ追加するCSV" hidden>
+        <p id="never-save-import-note" class="note" data-i18n="optionsNeverSaveImportNote"></p>
+        <button id="never-save-import" type="button" disabled aria-describedby="never-save-import-note csv-import-limits" data-i18n="optionsNeverSaveImport"></button>
+        <input id="never-save-import-file" type="file" accept=".csv,text/csv" data-i18n-aria-label="optionsNeverSaveImportFile" hidden>
         <p id="never-save-import-status" role="status" aria-live="polite" hidden></p>
-        <p id="csv-import-limits" class="note">kind,pattern形式のUTF-8 CSVを選択してください（BOM可）。上限はファイル1 MiB、CSV1,000件、追加後も各ゾーン1,000件、Regex合計128件、フィールド32,768バイト（Regexは4,096バイト）、Draft JSON 1 MiBです。検証中は編集・適用・再読み込みを停止します。</p>
+        <p id="csv-import-limits" class="note" data-i18n="optionsCsvImportLimits"></p>
       </section>
 
       <section class="card" aria-labelledby="save-but-no-mcp-heading" aria-describedby="save-but-no-mcp-description">
-        <h2 id="save-but-no-mcp-heading" tabindex="-1">MCPサーバに見せないグループ</h2>
-        <p id="save-but-no-mcp-description" class="explanation">一致したURLはVaultに保存されますが、MCPサーバ向けの公開対象から除外されます。</p>
+        <h2 id="save-but-no-mcp-heading" tabindex="-1" data-i18n="policyLayerSaveButNoMcp"></h2>
+        <p id="save-but-no-mcp-description" class="explanation" data-i18n="optionsSaveButNoMcpNote"></p>
         <div class="layer-toggle">
           <input id="save-but-no-mcp-enabled" type="checkbox" aria-describedby="save-but-no-mcp-warning">
-          <label for="save-but-no-mcp-enabled">このグループを有効にする</label>
+          <label for="save-but-no-mcp-enabled" data-i18n="optionsGroupEnable"></label>
         </div>
-        <p id="save-but-no-mcp-warning" class="warning" hidden>無効にすると、このグループのルールと基本保護（行政サイト・Webメール・AIチャット）が判定に使われなくなり、これらに一致するURLもMCPサーバ向けの公開対象になります。ルールは削除されません。</p>
+        <p id="save-but-no-mcp-warning" class="warning" hidden data-i18n="optionsSaveButNoMcpOffWarning"></p>
         <p id="save-but-no-mcp-state" class="note"></p>
         <p id="save-but-no-mcp-error" class="error-text" hidden></p>
         <div id="save-but-no-mcp-table" class="table-wrap">
           <table>
-            <caption class="visually-hidden">MCPサーバに見せないグループのルール</caption>
-            <thead><tr><th scope="col">種類</th><th scope="col">ルール</th><th scope="col">操作</th></tr></thead>
+            <caption class="visually-hidden" data-i18n="optionsSaveButNoMcpCaption"></caption>
+            <thead><tr><th scope="col" data-i18n="optionsColumnType"></th><th scope="col" data-i18n="optionsRuleLabel"></th><th scope="col" data-i18n="optionsColumnActions"></th></tr></thead>
             <tbody id="save-but-no-mcp-rules"></tbody>
           </table>
         </div>
         <p id="save-but-no-mcp-empty" class="empty" hidden></p>
-        <p id="save-but-no-mcp-hint" class="note" hidden>新しいルールは、URLチェッカーで一致を確認してから追加します。内容の変更は「チェッカーで編集」から行います。</p>
-        <p id="save-but-no-mcp-export-note" class="note">Private Zoneの編集中のルール（下書き）だけをkind,pattern形式で出力します。Pattern / Regex / Domain Wildcard / Exact URLの型と、未適用の変更・不正な文字列もそのまま保持します。URLチェッカーの未反映入力・基本保護・有効/無効設定は含みません。Exportは検証・適用ではありません。</p>
-        <p id="private-csv-safety-note" class="warning">CSVをExcel等で開くと、=、+、-、@などで始まる値が数式として実行される危険があります。信頼できないCSVはテキストエディタで確認してください。プライベートなルールの保存先と共有先にも注意してください。</p>
-        <button id="save-but-no-mcp-export" type="button" disabled aria-describedby="save-but-no-mcp-export-note private-csv-safety-note">Private ZoneをCSV Export</button>
+        <p id="save-but-no-mcp-hint" class="note" hidden data-i18n="optionsGroupHint"></p>
+        <p id="save-but-no-mcp-export-note" class="note" data-i18n="optionsSaveButNoMcpExportNote"></p>
+        <p id="private-csv-safety-note" class="warning" data-i18n="optionsPrivateCsvSafetyNote"></p>
+        <button id="save-but-no-mcp-export" type="button" disabled aria-describedby="save-but-no-mcp-export-note private-csv-safety-note" data-i18n="optionsSaveButNoMcpExport"></button>
         <p id="save-but-no-mcp-export-status" role="status" aria-live="polite" hidden></p>
-        <p id="save-but-no-mcp-import-note" class="note">CSV ImportはPrivate Zoneの現在の下書きの末尾へ追加します。全件をNative Hostで検証し、不正行があれば全件取り消します。重複は自動除去せず、Hostが許容するものは順序どおり保持します。Active Policyは「適用」まで変わらず、既存のローカル履歴も自動削除しません。初期化済みのv2 Policyで利用できます。</p>
-        <button id="save-but-no-mcp-import" type="button" disabled aria-describedby="save-but-no-mcp-import-note csv-import-limits">Private ZoneにCSV Import</button>
-        <input id="save-but-no-mcp-import-file" type="file" accept=".csv,text/csv" aria-label="Private Zoneへ追加するCSV" hidden>
+        <p id="save-but-no-mcp-import-note" class="note" data-i18n="optionsSaveButNoMcpImportNote"></p>
+        <button id="save-but-no-mcp-import" type="button" disabled aria-describedby="save-but-no-mcp-import-note csv-import-limits" data-i18n="optionsSaveButNoMcpImport"></button>
+        <input id="save-but-no-mcp-import-file" type="file" accept=".csv,text/csv" data-i18n-aria-label="optionsSaveButNoMcpImportFile" hidden>
         <p id="save-but-no-mcp-import-status" role="status" aria-live="polite" hidden></p>
       </section>
 
       <section class="card" aria-labelledby="url-test-heading" aria-describedby="url-test-description">
-        <h2 id="url-test-heading">Policy全体テスト</h2>
-        <p id="url-test-description" class="explanation">URLが、編集中の下書き全体（基本保護と両グループ）でどう判定されるかをNative Hostで確認します。ルール1つの一致を確かめるURLチェッカーとは別の機能です。</p>
-        <label for="test-url" class="field-label">テストするURL（http または https のURL）</label>
+        <h2 id="url-test-heading" data-i18n="optionsUrlTestHeading"></h2>
+        <p id="url-test-description" class="explanation" data-i18n="optionsUrlTestNote"></p>
+        <label for="test-url" class="field-label" data-i18n="optionsUrlTestLabel"></label>
         <div class="test-url-controls">
           <input id="test-url" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-describedby="test-url-note" disabled>
-          <button id="test-url-run" type="button" disabled>このURLを判定</button>
+          <button id="test-url-run" type="button" disabled data-i18n="optionsUrlTestRun"></button>
         </div>
-        <p id="test-url-note" class="note">入力したURLは判定のためにNative Hostへ送られますが、Memocampusには保存されません。この画面を閉じると消えます。判定結果は記録を許可するものではありません。</p>
+        <p id="test-url-note" class="note" data-i18n="optionsUrlTestPrivacy"></p>
         <div id="test-url-result" class="test-result" hidden>
           <p id="test-url-decision" class="decision" role="status" aria-live="polite"></p>
-          <p id="test-url-caveat" class="note" hidden>これは編集中の設定によるテスト結果です。現在適用されている設定とは異なる場合があります。</p>
+          <p id="test-url-caveat" class="note" hidden data-i18n="optionsUrlTestCaveat"></p>
         </div>
       </section>
 
       <section id="approvals" class="card" aria-labelledby="approvals-heading" aria-describedby="approvals-description">
-        <h2 id="approvals-heading">承認したドメイン</h2>
-        <p id="approvals-description" class="explanation">Public Suffix Listで登録境界を確認できない、または広い範囲に及ぶドメインのうち、Domain Wildcardで使うことを承認したドメインです。承認はルールではなく、ルールの一覧とは別に管理します。取り消すと、そのドメインのDomain Wildcardは再び承認するまで使えません。</p>
+        <h2 id="approvals-heading" data-i18n="optionsApprovalsHeading"></h2>
+        <p id="approvals-description" class="explanation" data-i18n="optionsApprovalsNote"></p>
         <p id="approvals-psl" class="note"></p>
         <p id="approvals-state" class="note" role="status" aria-live="polite"></p>
         <ul id="approvals-list" class="approvals-list"></ul>
@@ -238,38 +238,39 @@
       </section>
 
       <section class="card planned" aria-labelledby="manage-heading">
-        <h2 id="manage-heading">管理</h2>
+        <h2 id="manage-heading" data-i18n="optionsManageHeading"></h2>
         <ul class="planned-list">
-          <li>旧形式（v1）からの明示的な移行（Migration）— 今後実装予定</li>
-          <li>読み取れなくなったプライバシー設定の復旧 — 今後実装予定</li>
+          <li data-i18n="optionsPlannedMigration"></li>
+          <li data-i18n="optionsPlannedRecovery"></li>
         </ul>
       </section>
     </main>
 
-    <footer class="apply-bar" aria-label="変更の適用">
+    <footer class="apply-bar" data-i18n-aria-label="optionsApplyBarLabel">
       <p id="dirty-status" class="dirty-status" role="status" aria-live="polite"></p>
       <div class="actions">
-        <button id="validate" type="button" disabled>検証</button>
-        <button id="discard" type="button" disabled>変更を破棄</button>
-        <button id="apply" type="button" class="primary" disabled aria-describedby="apply-reason">適用</button>
-        <button id="start-recording" type="button" class="primary" disabled hidden aria-describedby="onboarding-heading apply-reason">記憶を開始する</button>
-        <button id="start-recheck" type="button" hidden>開始状態を再確認</button>
+        <button id="validate" type="button" disabled data-i18n="optionsValidate"></button>
+        <button id="discard" type="button" disabled data-i18n="optionsDiscard"></button>
+        <button id="apply" type="button" class="primary" disabled aria-describedby="apply-reason" data-i18n="optionsApply"></button>
+        <button id="start-recording" type="button" class="primary" disabled hidden aria-describedby="onboarding-heading apply-reason" data-i18n="optionsStartRecording"></button>
+        <button id="start-recheck" type="button" hidden data-i18n="optionsStartRecheck"></button>
       </div>
       <p id="apply-reason" class="note"></p>
       <p id="validation-status" class="status" role="status" aria-live="polite" hidden></p>
       <p id="apply-status" class="status" role="status" aria-live="polite" tabindex="-1" hidden></p>
       <div class="actions">
-        <button id="apply-recheck" type="button" hidden>適用結果を再確認</button>
+        <button id="apply-recheck" type="button" hidden data-i18n="optionsApplyRecheck"></button>
       </div>
       <div id="relax-confirm" class="confirm" role="alertdialog" aria-labelledby="relax-confirm-title" aria-describedby="relax-confirm-text" hidden>
-        <p id="relax-confirm-title" class="confirm-title">保護が弱くなる可能性がある変更が含まれています</p>
-        <p id="relax-confirm-text">この変更により、これまで保存されなかったURLが保存されるようになる可能性があります。また、MCPサーバ向けに非公開だったURLが公開対象になる可能性があります。変更を適用しますか？</p>
+        <p id="relax-confirm-title" class="confirm-title" data-i18n="optionsRelaxTitle"></p>
+        <p id="relax-confirm-text" data-i18n="optionsRelaxText"></p>
         <ul id="relax-confirm-list" class="relax-list"></ul>
-        <p class="note">変更内容を単純に比べた注意です。実際に保護が弱くなるかどうかを判定したものではありません。</p>
-        <button id="relax-confirm-no" type="button">キャンセル</button>
-        <button id="relax-confirm-yes" type="button">適用する</button>
+        <p class="note" data-i18n="optionsRelaxNote"></p>
+        <button id="relax-confirm-no" type="button" data-i18n="optionsRelaxCancel"></button>
+        <button id="relax-confirm-yes" type="button" data-i18n="optionsRelaxApply"></button>
       </div>
     </footer>
+    <script src="i18n-dom.js"></script>
     <script type="module" src="options.js"></script>
   </body>
 </html>

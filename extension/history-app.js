@@ -11,25 +11,28 @@
 import { SearchError, VAULT_UNAVAILABLE_CODES, createLatestGate, describeErrorCode, isWebUrl } from "./search-client.js";
 import { historyDays, historyList, historyVisit, hostSupportsHistory } from "./history-client.js";
 import { buildSearch, parseSearch, sameState } from "./history-state.js";
-import { MIN_YEAR, YEARS_AHEAD, addMonths, localDayBounds, localToday, monthBounds } from "./visit-calendar.js";
+import { MIN_YEAR, YEARS_AHEAD, addMonths, localDayBounds, localToday, monthBounds, monthName, yearMonthName } from "./visit-calendar.js";
+import { formatNumber, messageTable, pluralKey, t } from "./i18n.js";
 import { createCalendarView, longDate, renderPager, renderRows, setOpen, showDetail, showDetailError, showDetailLoading } from "./history-view.js";
 
 /** Errors of the domain input itself: shown at the input, and no list is shown for a condition that cannot be applied. */
 export const INPUT_CODES = new Set(["invalid_regex", "unsupported_regex", "regex_limit", "regex_too_long", "invalid_domain"]);
 
-const MESSAGES = Object.freeze({
-  invalid_regex: "正規表現が正しくありません。構文を確認してください。",
-  unsupported_regex: "この正規表現は使えません（先読み・後方参照は未対応です）。",
-  regex_limit: "正規表現が複雑すぎます。簡単な式にしてください。",
-  regex_too_long: "正規表現が長すぎます（512バイトまで）。",
-  invalid_domain: "ドメインの形式が正しくありません。ホスト名だけを入力してください（例: github.com）。",
-  response_too_large: "この日の表示データが大きすぎて取得できません。ページサイズを小さくするか、条件を絞ってください。",
-  visit_not_found: "この訪問は見つかりません（削除された可能性があります）。",
-  vault_unstable: "Vaultが何度も切り替わっているため、表示を止めました。「再読み込み」を押してください。",
+const MESSAGE_KEYS = Object.freeze({
+  invalid_regex: "historyErrorInvalidRegex",
+  unsupported_regex: "historyErrorUnsupportedRegex",
+  regex_limit: "historyErrorRegexLimit",
+  regex_too_long: "historyErrorRegexTooLong",
+  invalid_domain: "historyErrorInvalidDomain",
+  response_too_large: "historyErrorResponseTooLarge",
+  visit_not_found: "historyErrorVisitNotFound",
+  vault_unstable: "historyErrorVaultUnstable",
 });
-export const errorText = (code) => (Object.hasOwn(MESSAGES, code) ? MESSAGES[code] : describeErrorCode(code));
+const MESSAGES = messageTable(MESSAGE_KEYS);
+export const errorText = (code) => (typeof code === "string" && Object.hasOwn(MESSAGES, code) ? MESSAGES[code] : describeErrorCode(code));
 
-const HINTS = Object.freeze({ exact: "完全一致の例: github.com（サブドメインは含みません）", regex: "正規表現の例: (^|\\.)github\\.com$（ホスト名の一部に一致）" });
+const HINT_KEYS = Object.freeze({ exact: "historyHintExact", regex: "historyHintRegex" });
+const HINTS = messageTable(HINT_KEYS);
 const MAX_VAULT_RESETS = 3;
 const MAX_RANGE_CORRECTIONS = 3;
 const REFRESH_MIN_MS = 1000;
@@ -89,7 +92,7 @@ export function createHistoryApp({
     const choice = document.createElement("button");
     choice.type = "button";
     choice.className = "calendar-month";
-    choice.textContent = `${monthIndex + 1}月`;
+    choice.textContent = monthName(monthIndex);
     choice.dataset.month = String(monthIndex);
     choice.addEventListener("click", () => {
       if (choice.disabled || !isPickerSelectionValid(view, pickerYear, monthIndex, maxYear())) return;
@@ -119,24 +122,24 @@ export function createHistoryApp({
       el["cal-next"].disabled = !inRange(after.year);
       el["cal-prev"].textContent = "◀";
       el["cal-next"].textContent = "▶";
-      el["cal-prev"].setAttribute("aria-label", "前の月");
-      el["cal-next"].setAttribute("aria-label", "次の月");
-      el["cal-prev"].title = "前の月";
-      el["cal-next"].title = "次の月";
-      el["cal-title"].textContent = `${shown.year} ▼ ${shown.monthIndex + 1}月`;
-      el["cal-title"].setAttribute("aria-label", `${shown.year}年${shown.monthIndex + 1}月、年と月を選ぶ`);
+      el["cal-prev"].setAttribute("aria-label", t("calendarPrevMonth"));
+      el["cal-next"].setAttribute("aria-label", t("calendarNextMonth"));
+      el["cal-prev"].title = t("calendarPrevMonth");
+      el["cal-next"].title = t("calendarNextMonth");
+      el["cal-title"].textContent = `${shown.year} ▼ ${monthName(shown.monthIndex)}`;
+      el["cal-title"].setAttribute("aria-label", t("calendarChooseMonth", yearMonthName(shown.year, shown.monthIndex)));
       el["cal-title"].setAttribute("aria-expanded", "false");
     } else {
       el["cal-prev"].disabled = !inRange(pickerYear - 1);
       el["cal-next"].disabled = !inRange(pickerYear + 1);
       el["cal-prev"].textContent = "◀";
       el["cal-next"].textContent = "▶";
-      el["cal-prev"].setAttribute("aria-label", "前の年");
-      el["cal-next"].setAttribute("aria-label", "次の年");
-      el["cal-prev"].title = "前の年";
-      el["cal-next"].title = "次の年";
+      el["cal-prev"].setAttribute("aria-label", t("historyPrevYear"));
+      el["cal-next"].setAttribute("aria-label", t("historyNextYear"));
+      el["cal-prev"].title = t("historyPrevYear");
+      el["cal-next"].title = t("historyNextYear");
       el["cal-title"].textContent = `${pickerYear} ▲`;
-      el["cal-title"].setAttribute("aria-label", `${pickerYear}年、月の一覧を閉じる`);
+      el["cal-title"].setAttribute("aria-label", t("calendarCloseMonths", pickerYear));
       el["cal-title"].setAttribute("aria-expanded", "true");
     }
   }
@@ -144,7 +147,7 @@ export function createHistoryApp({
   function renderMonths() {
     const shownHere = pickerYear === shown.year;
     for (const [monthIndex, choice] of monthButtons.entries()) {
-      choice.setAttribute("aria-label", `${pickerYear}年${monthIndex + 1}月`);
+      choice.setAttribute("aria-label", yearMonthName(pickerYear, monthIndex));
       if (shownHere && monthIndex === shown.monthIndex) {
         choice.setAttribute("aria-current", "true");
       } else {
@@ -179,7 +182,7 @@ export function createHistoryApp({
     el["mode-regex"].checked = state.mode === "regex";
     el["domain-hint"].textContent = HINTS[state.mode];
     el["size-select"].value = String(state.size);
-    el["selected-heading"].textContent = `${longDate(state.date)}の訪問履歴`;
+    el["selected-heading"].textContent = t("historyDayHeading", longDate(state.date));
   }
 
   function domainError(text) {
@@ -208,8 +211,8 @@ export function createHistoryApp({
     el["history-state"].hidden = true;
     const filtered = state.domain.trim() !== "";
     if (result.total === 0) {
-      panel(filtered ? "条件に一致する訪問はありません。" : "この日の訪問履歴はありません。");
-      el["result-count"].textContent = "0件";
+      panel(t(filtered ? "historyNoMatches" : "historyNoVisits"));
+      el["result-count"].textContent = t("historyCountZero");
       return;
     }
     el["history-list"].hidden = false;
@@ -217,7 +220,8 @@ export function createHistoryApp({
     const rows = renderRows({ list: el["history-list"], document, items: result.items, onOpenCut: openCut, onToggle: toggleDetail });
     uiById = new Map(rows.map((row) => [row.ui.id, row.ui]));
     shownIds = new Set(result.items.map((item) => item.id));
-    el["result-count"].textContent = `${filtered ? "条件に一致する訪問 " : ""}${result.total.toLocaleString("ja-JP")}件（${result.page} / ${result.pages}ページ）`;
+    const countKey = filtered ? pluralKey(result.total, { one: "historyCountMatchingOne", other: "historyCountMatching" }) : pluralKey(result.total, { one: "historyCountOne", other: "historyCount" });
+    el["result-count"].textContent = t(countKey, formatNumber(result.total), result.page, result.pages);
     const current = renderPager({ nav: el["history-pager"], document, page: result.page, pages: result.pages, onPage: (page) => { pendingFocus = "pager"; commit({ ...withDraft(), page }, { push: true }); } });
     if (pendingFocus === "pager") current?.focus();
     pendingFocus = null;
@@ -276,8 +280,8 @@ export function createHistoryApp({
       drawCalendar();
       return false;
     }
-    say("Vaultが切り替わったため、表示を読み込み直しています。");
-    panel("読み込み中…");
+    say(t("historyVaultSwitched"));
+    panel(t("historyLoading"));
     drawCalendar();
     void loadList({ reset: true });
     void loadDays();
@@ -293,7 +297,7 @@ export function createHistoryApp({
     const code = codeOf(error);
     if (INPUT_CODES.has(code)) {
       domainError(errorText(code));
-      panel("検索条件を修正してください。");
+      panel(t("historyFixConditions"));
       return;
     }
     panel(errorText(code), { retry: true, settings: VAULT_UNAVAILABLE_CODES.has(code) });
@@ -304,7 +308,7 @@ export function createHistoryApp({
     invalidateList();
     const asked = { ...state };
     if (reset) {
-      panel("読み込み中…");
+      panel(t("historyLoading"));
       el["history-status"].hidden = el["history-status"].textContent === "";
     }
     let result;
@@ -327,7 +331,7 @@ export function createHistoryApp({
       return;
     }
     if (asked.page > result.pages && result.pages > 0) {
-      panel("ページ番号が範囲外です。", { retry: true });
+      panel(t("historyPageOutOfRange"), { retry: true });
       return;
     }
     say("");
@@ -351,7 +355,7 @@ export function createHistoryApp({
       counts = null;
       drawCalendar();
       const code = error instanceof SearchError ? error.code : "host_unavailable";
-      el["cal-status"].textContent = INPUT_CODES.has(code) ? "" : "記録のある日を取得できませんでした。";
+      el["cal-status"].textContent = INPUT_CODES.has(code) ? "" : t("historyDaysFailed");
       el["cal-status"].hidden = el["cal-status"].textContent === "";
       return;
     }
@@ -391,7 +395,7 @@ export function createHistoryApp({
     invalidateList();
     listGate.next();
     dayGate.next();
-    panel("読み込み中…");
+    panel(t("historyLoading"));
     domainError("");
     try {
       const available = await hostSupportsHistory(options);
@@ -405,7 +409,7 @@ export function createHistoryApp({
     }
     if (run !== started) return;
     if (!supported) {
-      panel("このNative HostはHistory画面に対応していません。Memocampusを更新してください。", { retry: true });
+      panel(t("historyUnsupported"), { retry: true });
       return;
     }
     vaultToken = null;
@@ -503,12 +507,12 @@ export function createHistoryApp({
         say("");
         await tabs.create({ url: visit.url });
       } else {
-        say("完全なURLを取得できなかったため、開きません。");
+        say(t("historyFullUrlFailed"));
       }
     } catch (error) {
       if (!stillHere() || vaultFailed(error)) return;
       if (COMMUNICATION_CODES.has(codeOf(error))) cancelPendingDetails(error);
-      say("完全なURLを取得できなかったため、開きません。");
+      say(t("historyFullUrlFailed"));
     } finally {
       if (opening === context) opening = null;
     }

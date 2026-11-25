@@ -8,9 +8,11 @@ import { createDocument, extensionDir, settle } from "./fake-dom.js";
 import { startOptionsPage } from "../../extension/options-page.js";
 import { CATEGORY_KEYS } from "../../extension/options-state.js";
 import { chromeI18n } from "./i18n-mock.js";
+import { localizeHtml } from "./i18n-html.js";
 
-export const html = readFileSync(path.join(extensionDir, "options.html"), "utf8");
-/** The text of an element as options.html writes it (the fake DOM does not read the page). */
+/** options.html as it reads in Japanese (its data-i18n* resolved from the catalog, as i18n-dom.js does). */
+export const html = localizeHtml(readFileSync(path.join(extensionDir, "options.html"), "utf8"), "ja");
+/** The text of an element as options.html shows it in Japanese (the fake DOM does not read the page). */
 export const htmlText = (id) => new RegExp(`id="${id}"[^>]*>([^<]*)<`).exec(html)?.[1] ?? "";
 
 export const allOn = () => Object.fromEntries(CATEGORY_KEYS.map((key) => [key, true]));
