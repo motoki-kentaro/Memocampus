@@ -1,321 +1,286 @@
 # Memocampus
 
-Local-first web memory for Chrome on Windows.
+**日本語** | [English](README.en.md)
 
-## Slice 1
+Windows版Google Chromeで見たWebページ・画像・ページの原本を、あなたのPC上の「Vault」に記録して、あとから探せるようにするツールです。
 
-Record completed top-level page navigations as URL, title, and timestamp. The MV3 service worker queues events in `chrome.storage.local`, sends them to the Rust native host, and removes a queue item only after a successful acknowledgement. The native host stores events in SQLite with an idempotency key.
-
-## Side panel search
+> [!IMPORTANT]
+> Memocampusは現在、Chrome Web Storeの審査中です。まだ一般公開していません。正式版はv0.8.0として公開する予定で、公開後にこのREADMEへ入手方法を追記します。
 
-Clicking the Memocampus toolbar action opens a side panel with three tabs: **URL** (search), **Image** (saved images, see below) and **⚙** (vault settings). The URL tab searches the local SQLite vault (`visits` and `tab_snapshots`, aggregated per URL) by URL or title. The panel also has the “全タブを記録” button (the former toolbar popup has been removed). See `docs/issue-002-side-panel-search.md` for the `search_pages` protocol.
+## 1. Memocampusとは
 
-## Vault
+- **自動の記録**：Chromeで開いたページのURL・タイトル・日時をVaultに記録します。記録は、初回セットアップで「記憶を開始する」を押すまで始まりません。
+- **手動の保存**：右クリックメニューから、画像やページ全体（MHTML形式）をVaultに保存できます。
+- **検索と振り返り**：サイドパネルとHistoryページで、記録をURL・タイトル・日付から探せます。
+- **ローカルに保存**：記録はあなたのPC上のVault（SQLiteファイル）に保存されます。Vaultは既定で暗号化します。
+- **AIとの連携（任意）**：あなたが承認した場合に限り、MCPクライアント（Claude DesktopなどのAIアプリ）がVaultの一部を読み取れます。承認しなければ、MCPクライアントに記録を渡すことはありません。
 
-The vault (SQLite file) is independent of the host executable. Its path is stored in `%LOCALAPPDATA%\Memocampus\config.json`; the default vault is `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`. On first use, open the side panel's **Vault** section and create a vault explicitly (or open an existing one). Automatic recording also needs the privacy policy to be initialized (see [Privacy policy](#privacy-policy)). Only vaults created by this version (schema 7, which added image tags in #44) can be used; a schema 6 vault is refused like any older one, so create a new vault after updating. An older vault is refused with an explanation and left unchanged: there is no conversion, and it cannot be backed up from the app, so copy the file if you want to keep it. Manual backups use the SQLite Backup API and copy the whole vault, including saved images, their save history and thumbnails. Switching or opening another vault switches the images too; nothing is copied between vaults. See `docs/issue-003-vault-location.md`.
+> [!NOTE]
+> 通常の記録はローカルのVaultに保存されます。ただし、MCP連携を承認すると、MCPクライアントに渡ったデータはそのクライアントの管理下に移ります。クライアントによっては、データがAIの提供元へ送信される場合があります。
 
-**Encrypted vaults** (Issue #51, [docs/secure-vault/slice-e.md](docs/secure-vault/slice-e.md)). A new vault is encrypted by default
-(SQLCipher); choose **暗号化しない** for a plain one. Existing vaults are never converted automatically. When you create it, the panel
-shows the **ふっかつのじゅもん (Recovery Spell) once**: 43 characters (`A–Z a–z 0–9 - _`, case-sensitive) encoding 256 random bits. Keep
-it somewhere safe; the vault is created only after you enter all 43 characters again. The vault's key is derived from the spell and a
-random salt stored at the start of the vault file, so **the vault file and the spell are all a recovery needs**: on another PC, after
-reinstalling Windows or as another Windows user, open the file and enter the spell (**ふっかつのじゅもんで復旧**); no other file is
-needed, and without the spell nobody can read it. For daily use the key is also kept protected with Windows DPAPI for your Windows
-user, so the vault opens without the spell. If the spell is lost while the vault still opens, **ふっかつのじゅもんを再発行する** copies
-the vault into a **new** vault under a new spell (the old spell still opens the old vault and its old backups). Encrypted vaults and
-B/D backups of earlier versions (with a `.mckey` file, or the 12-word recovery phrase) are not supported by this version and are left
-unchanged; convert such a vault to plain with the earlier version first.
+プライバシーポリシー：<https://memocampus.github.io/privacy/>
 
-**Backups and restore** (Issue #51, [docs/secure-vault/slice-c.md](docs/secure-vault/slice-c.md)). **バックアップを作成…** writes one
-file: a plain vault's normal backup is a plain SQLite file (format A, as before); an encrypted vault's normal backup stays encrypted
-(format B, `.mcbackup`, restored with the Recovery Spell only, no key or file of the original PC needed; the panel asks for the spell
-when the backup is made and refuses one that does not recover the vault); **パスワードで保護する** encrypts
-the whole backup with a password you choose (Argon2id; format C for a plain vault, format D for an encrypted one, which then needs
-the password **and** the spell). The password is stored nowhere. B, C and D carry a copy of the privacy policy, which a restore
-shows but never applies. **バックアップから復元…** always creates a **new** vault (it never overwrites a file or the active vault),
-verifies it, and makes it active only when you choose **このVaultを使い始める**; MCP access starts unconfirmed. A restored encrypted
-vault gets a new identity and is re-encrypted under it; the same spell opens it.
-
-**Converting a vault** (Issue #51, [docs/secure-vault/slice-d.md](docs/secure-vault/slice-d.md)). **このVaultを暗号化する** copies
-the active plain vault into a **new** encrypted vault and shows its new Recovery Spell once (enter it again in full to finish);
-**このVaultの暗号化を解除する** copies an encrypted vault into a **new** plain vault after you confirm that its history and images
-will be stored unencrypted. The original vault is never changed or deleted. The new vault becomes active only when you choose
-**変換したVaultを使い始める** (anything recorded in the original meanwhile is copied over first); you can also keep it without
-switching, or discard it. MCP access to the new vault starts unconfirmed.
-
-The database previously stored next to the executable (`native-host/target/release/memocampus.sqlite3`) is no longer used and is left untouched.
-
-This project never closes tabs automatically.
-
-## Incognito windows
-
-Memocampus never records browsing automatically from incognito windows, even if you allow the extension to run in
-incognito in `chrome://extensions`. An image you explicitly save from an incognito window is the one exception:
-
-- **Visits**: the tab's state is checked before anything is queued. If the tab is incognito, already closed, or its state
-  cannot be determined, the visit is not recorded (no queue entry, no dead letter). A page closed the moment it
-  finishes loading can therefore be missing from the history.
-- **全タブを記録**: only tabs known to be normal are saved and counted; incognito tabs are left out without a trace.
-- **Images**: right-clicking an image in an incognito window and choosing **Memocampusへ保存** works. The image is
-  stored permanently in the normal SQLite vault and is part of every backup: incognito does not make it temporary. Each
-  save-history row records whether it came from an incognito window (shown as “シークレット” in 保存履歴). The same image
-  saved from both kinds of window is stored once and has a row of each kind. A save whose window type cannot be
-  determined is refused. The image is fetched inside the page, or else without cookies or HTTP cache, so the normal
-  profile's cookies are not sent; an image that the page may not read and that requires a login can therefore fail.
-- **MCP access**: saving and publishing are separate operations. Nothing is published initially. The MCP server
-  describes a save only if its row is marked public in 保存履歴, it is not incognito, and every source URL passes the
-  privacy policy; an incognito row is never public.
-- **Native host**: as a second layer it accepts a visit or tab snapshot only if it is declared `"incognito": false`;
-  anything else is refused without being stored, and the extension discards it without keeping its URL or title. The host
-  cannot see the browser: it enforces the extension's declaration, and telling incognito tabs apart is the extension's job.
-
-Queued events without that declaration (from an earlier version) are discarded, not sent. Rows already in a vault are
-not changed or deleted.
+## 2. 動作環境
 
-## Privacy policy
-
-Automatic recording (visits and **全タブを記録**) is judged against `%LOCALAPPDATA%\Memocampus\policy.json`, which is global and does not change with the vault.
-
-- **Layer A (`neverSave`)**: not recorded at all. Initially authentication hosts and paths, and URLs carrying credentials (`access_token` and the like). A malformed URL is treated the same way.
-- **Layer B (`saveButNoMcp`)**: recorded locally as usual, and never given to AI: the MCP server (below) leaves these pages out of every result and count.
-
-**First use**: open **初回案内を開く** from the side panel's URL tab (or open Privacy settings). Review the Japanese explanation and the Native Host's preset as an editable draft, explicitly create/select a local Vault if needed, then press **記憶を開始する**. Merely opening or validating the draft starts nothing. Events from before start never enter the durable queue and are never backfilled. Existing valid policies are kept; damaged/lost policies fail closed. Recording and MCP publication require separate approvals. See [Issue #24 implementation and verification](docs/issue-024-first-run-onboarding.md).
+- Windows 10 / 11（x64）。実際の動作を確認したのはWindows 11のVMだけで、Windows 10では確認していません（3章）。
+- Google Chrome 116以降（Windows版）
+- 次の2つの部品が両方必要です。
+  - **Chrome拡張機能「Memocampus」**：画面と記録の受け付けを担います。
+  - **Windowsアプリ「Memocampus」**：Vaultへの保存（Native Host）、MCPサーバー、タスクトレイの常駐プログラムです。インストーラー `Memocampus-Setup-x64.exe` で入れます。
 
-The check happens three times, with the same rules:
-
-1. **Before the queue**: the extension asks the host for the current policy for every visit and every 全タブを記録. A refused URL or tab is not written anywhere (queue, dead letters, logs) and is not counted.
-2. **Before sending**: every flush re-reads the policy. Refused events are removed from the queue and from the dead letters, without a copy, whenever the policy has changed; then each event is checked before it is sent.
-3. **In the host**: `record_event` judges each visit and snapshot against the policy on disk before any `INSERT`. A refused one is answered `{"ok": true, "eventId": ..., "dropped": "policy"}`, so that an older client stops resending it.
-
-**When the policy cannot be read** (never initialized, missing, damaged, unsupported version, locked, or the host is unreachable), that is not a refusal: new visits are not recorded and not kept, 全タブを記録 stops, queued events stay unsent and are not removed, and the host answers an error (`policy_not_initialized`, `policy_invalid`, `policy_busy`, `policy_unavailable`), never success. Visits made during that time are not recorded later.
-
-To find the cause, look at the toolbar badge and the message at the top of the URL tab; **再確認** reads the state again, and delivery resumes by itself once the policy is readable. A policy that was initialized and then lost or damaged is never reset for you, and the button is not offered: restore the file, or, if you accept losing your rules, close Chrome and move `policy.json`, `policy.initialized` and `policy.lock` out of `%LOCALAPPDATA%\Memocampus` yourself, which makes it first use again.
-
-**Manual image saves** are explicit, are not automatic recording, and do not depend on the policy. Rows already in a vault are not changed when rules change. See `docs/issue-011-privacy-ingress.md`.
-
-## MCP server (local, read-only)
-
-`memocampus-mcp.exe` lets an MCP client such as Claude Desktop or Claude Code search the active vault over stdio: visits
-(URL, title, page metadata), one day's visits, visit counts per domain, and the metadata of images marked public. It follows
-the vault chosen in the side panel, and reads it only after you approved it for MCP there (**MCPへの公開**); a newly created,
-opened or replaced vault stays closed to MCP until then. `--vault "<path>"` is optional and only accepted while that file is
-the approved active vault (Issue #51, [docs/secure-vault/slice-b0.md](docs/secure-vault/slice-b0.md)). It never writes and never returns image data, and by default it opens no network port.
-With `--transport streamable-http` it serves the same tools on `http://127.0.0.1:8765/mcp` instead: loopback only, a bearer
-token required on every request, browser origins refused ([docs/mcp-streamable-http.md](docs/mcp-streamable-http.md)). Every call goes
-through VisibleStore, which applies the current privacy policy: never-save and save-but-no-MCP pages, and anything that
-cannot be judged, are absent from every result and count. A policy change applies from the next call. Build, client
-setup, tools, limits and the dogfood checklist: [docs/issue-008-mcp-server.md](docs/issue-008-mcp-server.md).
-
-Data given to an MCP client leaves Memocampus's control: the client may send it to its AI provider.
-
-For troubleshooting a client that cannot connect, the server appends start-up and connection events (no URLs, titles, queries
-or vault paths) to `%LOCALAPPDATA%\Memocampus\logs\mcp-startup.log`, three files of about 5 MiB at most.
-
-## Images (Image Vault)
+拡張機能だけでは記録できません。Windowsアプリが入っていないと、拡張機能に「Native Hostに接続できません。インストールと登録を確認してください。」と表示されます。
 
-**Saving.** Right-click an image on a web page and choose **Memocampusへ保存**. The extension fetches the original file
-(with the browser's cookies, falling back to the page itself for hotlink-protected images), checks it and sends it to
-the native host in chunks; it is stored in the active vault in one transaction, so an interrupted transfer leaves
-nothing behind. A notification (and, if notifications are off, a “!” badge on the toolbar button) reports the result.
-
-- Formats: PNG, JPEG, GIF, WebP, AVIF, BMP, identified from the bytes (not the file name or server header).
-  Up to **32 MiB** per image.
-- Not saved: SVG (may contain scripts), `file:`/`chrome:` and other non-web URLs.
-  CSS background images, canvas drawings and video frames have no image context menu.
-- Each distinct file (by SHA-256) is stored once; saving it again only adds a save-history row (time, image URL,
-  page URL, frame URL) and increases its save count. Cookies, tokens and response headers are never stored.
+拡張機能とトレイの表示言語は日本語と英語です。拡張機能はChromeの表示言語に、トレイはWindowsの表示言語に従い、どちらもそれ以外の言語では英語になります。
 
-**Image tab.** Saved images, newest first, one tile per distinct file. The refresh icon (top right) reloads the list
-and shows a dot when new images were saved while you were scrolled down.
+## 3. 入手とインストール（現在は審査中）
 
-- Click a tile (or press Enter) for its **保存履歴**: every save with date, image URL and page URL.
-- Right-click a tile (or press the context-menu key / Shift+F10) for:
-  - **画像をコピー** — puts the picture on the clipboard as PNG (other formats are converted for the copy only;
-    animated images copy their first frame). The side panel must keep the focus until “コピーしました” appears.
-  - **ファイルとして書き出す** — the native host opens the Windows Save dialog in **Documents**, suggesting
-    `<last save time in Unix seconds>.<ext>`; you can change folder and name, Windows asks before replacing a file,
-    and the stored bytes are written unchanged (through a temporary file, so a failed write leaves an existing file
-    intact). The vault itself is never modified by copying or exporting.
-- Images saved without a thumbnail show their type label; the thumbnail is rebuilt from the original when the tile
-  comes into view and added to the vault (the original and its history are not changed).
+### 現在の状況
 
-**Image tags (#44).** Saved images can be tagged afterwards, in the Image tab:
+- Chrome拡張機能は、Chrome Web Storeで審査を受けています。審査に通っても、公開の操作をするまでは入手できません。
+- Windowsアプリのインストーラーは、正式版の公開に合わせて提供します。入手先は公開時にこのREADMEへ追記します。
+- ソースコードから自分でビルドして試す方法は、[開発者向けガイド](docs/development.md)にあります（開発者向けです）。
 
-- Click a tile: its details show **タグ** above the save history. Type a tag and press Enter (or **追加**), or
-  **既存のタグから選ぶ**; × removes one. Tags are trimmed, lowercased and limited to 64 characters by the host; what
-  it stored is what is shown.
-- **タグで絞り込み** (toolbar): pick or type one tag to show only the images that have it; copy and export work as
-  usual from there. × on the "タグ: …" chip shows all images again.
-- One tag at a time (no AND/OR), no tag input when saving, and **the MCP server does not read tags.** A tag no image
-  has is removed automatically. See `docs/issue-044-image-tags.md`.
+### インストーラーが行うこと
 
-**Managing one item (#43).** Each URL result, and the details of an image, have a drop-down 「操作を選択…」:
-**保存しないグループへ追加**, **MCPサーバに見せないグループへ追加**, **Vaultから削除**, **公開**.
+インストーラーは、ログオン中のWindowsユーザーにだけインストールします。管理者権限は不要です。
 
-- Choosing does nothing by itself: a dialog shows what the host previews, and only its confirm button acts.
-- Rules are for exactly that URL (an `exact` rule, also on the settings page as 「Exact URL」); the whole host only
-  when chosen and acknowledged. For an image, the person picks which of its URLs (image, page, frame) the rule is for.
-- 「公開」 removes only the URL's exact rules, and is refused while a broader rule or a builtin keeps it private.
-- Deleting is permanent (backups keep the data): the dialog shows the host's counts first.
+| 行うこと | 内容 |
+|---|---|
+| プログラムの配置 | `%LOCALAPPDATA%\Programs\Memocampus` に3つのプログラム（Native Host・MCPサーバー・トレイ）を置きます |
+| Chromeとの接続の登録 | ChromeがNative Hostを起動できるように、このユーザーのレジストリ（HKCU）に登録します。登録する接続先は、Chrome Web Store版のMemocampus拡張機能だけです |
+| スタートメニュー | 「Memocampus」（トレイ）を追加します |
 
-See `docs/issue-043-vault-item-management.md`.
+インストーラーが**行わないこと**：拡張機能のインストール、Vaultの作成、記録の開始、MCP連携の承認、`%LOCALAPPDATA%\Memocampus`（Vaultや設定の保存場所）の変更。これらはすべて、インストール後にあなたが操作します。
 
-Design and protocol: `docs/image-vault-design.md`. Manual test checklist: `docs/image-vault-dogfood-slice2.md`.
+最後の画面には選択肢が2つあり、どちらも初期状態ではオフです。トレイを初めて起動すると、Windowsログオン時にトレイを起動する設定と、MCPサーバーを自動で起動する設定がオンになります。どちらもトレイのメニュー（「Windowsログオン時に起動」「MCPサーバを自動起動」）で変更できます。MCPサーバーが起動していても、Vaultの「MCPへの公開」を承認するまで、Vaultの内容はMCPクライアントに返しません。
 
-### Permissions
+> [!WARNING]
+> 現在のインストーラーにはコード署名がありません。そのため、Windows SmartScreenの警告（発行元が不明）が表示される場合があります。入手先とファイルのSHA-256が公式に案内されたものと一致する場合にだけ実行してください。
 
-`contextMenus` (the save menu item), `scripting` (fetching an image inside its page when a direct fetch is refused, and
-reading the light metadata of an allowed page once it has loaded, see `docs/issue-022-page-metadata.md`),
-`notifications` (save results), `nativeMessaging`, `storage`, `tabs`, `webNavigation`, `sidePanel`, and host access to
-all sites (to fetch the right-clicked image with its site's cookies, and to record visits).
+### 確認済みの範囲
 
-## Installation (Windows, developer mode)
+- 確認済み：プロジェクトオーナーが隔離したWindows 11のVMで、次を確認しました。
+  - GitHub Actionsでビルドした製品版インストーラーでインストールできること
+  - Native Messaging Hostが登録されること
+  - 正式な拡張機能IDを再現したテスト用の拡張機能から接続できること
+  - Vaultに保存できること
+  - MCPサーバーが起動すること
+- 未確認：Chrome Web Storeからの実際のインストール、更新、アンインストール、Windows 10での動作、そのほかの受入項目（`installer/E2E-ACCEPTANCE.md`）。
 
-Requirements: Windows 10/11, Google Chrome 116 or later, [Rust](https://rustup.rs/) (stable, MSVC toolchain),
-and a **native Windows Perl** (Strawberry Perl, or MSYS2 `mingw-w64-x86_64-perl`; not the Perl of Git for Windows): the
-host and the MCP server embed SQLCipher, whose OpenSSL is built from source (Issue #51; the first build takes about 12
-minutes more). If `perl` on `PATH` is not a native one, set `PERL` to it, e.g. `$env:PERL = "C:\Strawberry\perl\bin\perl.exe"`.
-Node.js 18+ is only needed to run the extension tests. No administrator rights are required.
+## 4. 初回セットアップ
 
-1. **Build the native host** (from the repository root):
+1. Chromeのツールバーにある Memocampus のボタンを押して、サイドパネルを開きます。
+2. 「設定」タブ（⚙）でVaultを用意します。
+   - 「暗号化する（推奨）」か「暗号化しない」を選びます（違いは[7章](#7-vault暗号化バックアップと復元)）。
+   - 「既定の場所に新規作成」（`%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`）、「場所を選んで新規作成…」、または「既存のVaultを開く…」を選びます。
+3. 暗号化Vaultの場合は、**ふっかつのじゅもん（Recovery Spell）**が一度だけ表示されます。43文字（`A–Z a–z 0–9 - _`、大文字と小文字を区別）です。記録してから「記録しました。確認に進む」を押し、43文字すべてを入力し直すと、Vaultの作成が完了します。
+4. 「URL」タブの「初回案内を開く」を押します。Privacy設定のページが開き、記録しないルールなどの初期設定を下書きとして確認・編集できます。
+5. 内容を確認したら「記憶を開始する」を押します。ここで初めて自動記録が始まります。開始前に見たページは、さかのぼって記録しません。
+6. MCP連携を使う場合だけ、別途「MCPへの公開を確認して承認…」で承認します（[8章](#8-mcp連携)）。
 
-   ```powershell
-   cd native-host
-   cargo build --release
-   cd ..
-   ```
+> [!WARNING]
+> ふっかつのじゅもんは、作成時に一度しか表示されません。再表示はできません。
+> - Vaultファイルとふっかつのじゅもんがあれば、別のPCや、Windowsの再インストール後でもVaultを開けます。じゅもんを失うと、別のPCでの復旧や、暗号化Vaultのバックアップからの復元ができなくなります。
+> - 暗号化Vaultのバックアップは、作成するときにもじゅもんの入力が必要です。じゅもんを失うと、再発行するまでバックアップを作成できません（7章）。
+> - じゅもんを知っている人は、Vaultファイルを手に入れれば中身を読めます。PCとは別の安全な場所に、他人に見られないように保管してください。
+> - 入力し直す確認は、じゅもんを安全に保管したことの証明にはなりません。
 
-2. **Load the extension**: open `chrome://extensions`, turn on *Developer mode*, choose *Load unpacked*, and select the `extension` folder.
-3. **Copy the extension ID** shown on the Memocampus card (32 letters `a`–`p`).
-4. **Generate the host manifest and register it for your user** (works in Windows PowerShell 5.1 and PowerShell 7):
+## 5. 基本操作
 
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\native-host\install-native-host.ps1 -ExtensionId <extension-id>
-   ```
+サイドパネルには「URL」「Image」「Page」「設定」（⚙）の4つのタブがあります。
 
-   The script fills `native-host/com.memocampus.vault.template.json` with the absolute path of *your* built `memocampus-native-host.exe` and your extension ID, writes `native-host/com.memocampus.vault.json` (git-ignored), and sets `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.memocampus.vault` to that file. It does not touch HKLM or your vault, can be run again safely, and refuses to re-point an existing registration that uses a different manifest unless you pass `-Replace`. Add `-WhatIf` to see what it would do.
-5. **Reload the extension** in `chrome://extensions`.
-6. **Check the connection**: click the Memocampus toolbar button to open the side panel, then open **Vault**. A status such as “Vaultが未設定です” means Chrome reached the native host. “Native Hostに接続できません” means the registration or manifest is wrong; check it with `reg query "HKCU\Software\Google\Chrome\NativeMessagingHosts\com.memocampus.vault"` and re-run step 4.
-7. **Create your vault** in the **Vault** section (default location `%LOCALAPPDATA%\Memocampus\memocampus.sqlite3`, or choose another folder), or open an existing one. Open **初回案内を開く**, review/edit the draft in Privacy settings, and press **記憶を開始する**. Before this explicit start, visits are neither queued nor saved. If recording was already started and its Vault later becomes unavailable, the existing delivery/retry behavior is retained.
+### URL：記録の検索
 
-### About the extension ID
+- URLやタイトルの一部で、記録した閲覧履歴を検索します。カレンダーのボタン（「閲覧日で絞り込み」）で、日付を指定して絞り込めます。
+- 「全タブを記録」を押すと、開いている通常のタブのURLとタイトルをまとめて記録します。
+- 「History」ボタン（「Historyを新しいタブで開く」）で、全画面のHistoryページを開きます。
 
-- With *Load unpacked*, Chrome derives the ID from the folder's absolute path, so it differs per machine and changes if you move the folder. Re-run step 4 with the new ID (the old registration is updated in place).
-- **Host names.** This registration is the *development* one. The extension's host name is chosen in one place (`extension/host-config.js`, default `com.memocampus.vault`, the name used here), and the Windows installer registers the separate product name `io.github.memocampus.vault`. To use the new development name `io.github.memocampus.vault.dev`, run `node scripts/set-host-profile.mjs dev`, reload the extension and pass `-HostName io.github.memocampus.vault.dev` to both scripts. See `installer/README.md`.
-- A future Chrome Web Store release has one fixed ID; the install script would then be run with that ID (or ship with it as a default). Nothing in this repository hard-codes an ID.
+### History：日付から振り返る
 
-### Updating and uninstalling
+- 「カレンダー」に、記録のある日が表示されます。日を選ぶと、その日の記録を一覧にします。
+- 「ドメイン絞り込み」で、ドメインを指定して絞り込めます（照合方法は「完全一致」または「正規表現」）。
 
-- After updating the source, rebuild the host with `cargo build --release` and reload the extension in `chrome://extensions` (accept new permissions if Chrome asks). An extension newer than the host reports “Native Hostが古い…” / “この操作に対応していません”; rebuilding fixes it. The host registration does not need to be repeated unless the extension ID or the folder changed.
-- The host is not copied anywhere: the registered manifest points at `native-host\target\release\memocampus-native-host.exe`, so `cargo clean` removes the host until you rebuild; your vault lives outside `target/` and is not affected.
-- To unregister: `powershell -NoProfile -ExecutionPolicy Bypass -File .\native-host\uninstall-native-host.ps1`, then remove the extension in `chrome://extensions`. Your vault and settings in `%LOCALAPPDATA%\Memocampus` are kept; delete that folder yourself if you no longer need the data.
-
-## Tests
-
-- Native host: `cargo test` in `native-host/` (unit tests plus a stdio protocol test against the built binary).
-- VisibleStore: `cargo test` in `visible-store/`.
-- MCP server: `cargo test` in `mcp-server/` (unit tests plus MCP sessions against the built binary, synthetic vaults only).
-- Extension modules: `npm test` at the repository root (Node's built-in test runner, no dependencies).
-
-## Continuous Integration
-
-GitHub Actions (`.github/workflows/ci.yml`) runs on pull requests targeting `main`, on pushes to `main`, and on manual runs. It only has read access to the repository contents, uses no secrets, and uploads no artifacts.
-
-- **JavaScript** (`ubuntu-latest`, Node.js 24): `npm ci`, `npm test`. The extension tests use fake Chrome APIs and need no Windows.
-- **Rust** (`windows-latest`, stable MSVC toolchain): format check, tests, Clippy and a release build, for `native-host`, `visible-store`, `mcp-server` and `tray` in turn. The host calls Windows APIs (DPAPI among them), embeds its icon through the MSVC linker, and has tests that only run on Windows/MSVC, so a Linux run would not verify it. SQLCipher's OpenSSL is built with the runner's Strawberry Perl (`PERL`), and the three crates share one target directory so it is built once per profile.
-
-Run the same checks locally:
-
-```powershell
-npm ci
-npm test
-
-cd native-host
-cargo fmt --all -- --check
-cargo test --locked
-cargo clippy --locked --all-targets -- -D warnings
-cargo build --release --locked
-```
-
-The release build replaces the executable Chrome uses; close Chrome first, or add `--target-dir` with another folder to leave it in place.
-
-CI does not cover Chrome itself: loading the extension, the host registration and the file dialogs are still checked by hand in Chrome (dogfooding).
-
-### Action dependencies (`actions.lock`)
-
-`.github/workflows/actions.lock` records the exact commit of every action the workflows use, so a moved tag cannot silently change the code CI runs. It is generated by the official [`gh-actions-lock`](https://github.com/github/gh-actions-lock) extension (`gh extension install github/gh-actions-lock`). Never edit it by hand. It says which code runs, not that the code is safe.
-
-After adding a workflow or changing any `uses:`:
-
-```powershell
-gh actions-lock            # regenerates the lockfile; may also rewrite uses: to a full version such as v7.0.1
-gh actions-lock --verify   # read-only check of coverage and provenance; exits non-zero if invalid
-```
-
-Commit the lockfile and the workflow change in the same pull request. To move to a newer version, change `uses:` and regenerate. `gh actions-lock --relock` advances refs that moved upstream, and `--accept-moved` accepts rewritten upstream history; check upstream first, and never use the latter in automation.
-
-Review the whole diff as a dependency update: a changed `commit` means different code will run, so check it against the action's tag and release notes. A changed `owner_id` or `repo_id` means the repository's identity changed; investigate it before merging. A move back to an older commit is not detected by the tool, so only a reviewer can catch it.
-
-The **Require lockfile** policy is not enabled, and enabling it is a separate decision. Before that, confirm that CI passes with the lockfile on GitHub, that `gh actions-lock --verify` passes for every workflow, that a verification check runs on pull requests, and that any action allowlist matches locked commits rather than tags.
-
-## Layout
-
-- `extension/` — Chrome Manifest V3 service worker (visits, image saving) and side panel (search, images, vault)
-- `native-host/` — Rust Native Messaging host and SQLite persistence
-- `visible-store/` — the only read path from a vault to MCP, with the privacy gate
-- `mcp-server/` — `memocampus-mcp`, the read-only stdio MCP server over VisibleStore
-- `tray/` — `memocampus-tray`, the Windows tray that runs and manages the MCP server over Streamable HTTP (Issue #67, in progress: [Slice 1](docs/issue-067-tray-slice1.md), [Slice 2](docs/issue-067-tray-slice2.md))
-- `docs/` — issue and slice acceptance criteria
-- `assets/icon.png` — master of the app icon; `scripts/generate-icons.py` — regenerates the icons from it
-
-## Icons
-
-`assets/icon.png` (1254×1254, opaque, dark navy background) is the only source of the app icon. Every other icon file is
-generated from it and committed, so builds need neither Python nor network access:
-
-| Generated file | Sizes | Used by |
+### Image：画像の保存
+
+- Webページの画像を右クリックして「Memocampusへ保存」を選ぶと、元の画像ファイルをVaultに保存します。
+  - 形式はPNG・JPEG・GIF・WebP・AVIF・BMPで、1枚32 MiBまで保存できます。SVGは保存しません。
+  - 同じ画像（内容が同一のファイル）は一度だけ保存し、保存した日時やURLの記録（保存履歴）を追加します。
+- 「Image」タブで、保存した画像を一覧できます。
+  - タイルをクリックすると、「保存履歴」と「タグ」を表示します。
+  - タイルを右クリックすると、「画像をコピー」「ファイルとして書き出す」を選べます。
+  - 「タグで絞り込み」で、タグを1つ指定して絞り込めます。
+
+### Page：ページの保存（MHTML）
+
+- ページを右クリックして「Memocampusにページを保存」を選ぶと、右クリックしたタブのページを、ChromeのMHTML形式の原本としてVaultに保存します。リンク先のページは保存しません。
+  - 保存できるのは `http` / `https` のページで、1件128 MiBまでです。
+  - シークレットウィンドウのページは保存しません。
+- 「Page」タブで、保存したページを一覧できます。
+  - 同じURLの保存をまとめて表示します。URLやタイトルの一部で検索できます。
+  - 保存履歴ごとの「MHTMLを書き出す」で、原本をそのままファイルに書き出せます。
+  - 本文の全文検索と、MHTMLの表示には対応していません。
+- 保存したページは、MCPクライアントには提供しません。
+
+> [!CAUTION]
+> MHTMLには、保存した時点で表示されていたページの内容がそのまま入ります。ログイン後のページを保存すると、氏名やメッセージなどの個人情報も含まれます。保存するページは慎重に選んでください。
+
+### 削除と、1件ごとの操作
+
+- URL・画像・ページの各行には、削除のボタンがあります。「この閲覧履歴を削除」「URL全件削除」「この画像を削除」「この保存履歴を削除」などです。
+- 削除のボタンを押すと、まず「削除の確認」画面で、削除されるものと件数を表示します。「削除する」を押すまでは何も削除しません。
+- 「操作を選択…」からは、次のルールをそのURLに追加できます（6章）。
+  - 「保存しないグループへ追加」
+  - 「MCPサーバに見せないグループへ追加」
+  - 「公開」
+
+> [!WARNING]
+> 削除は元に戻せません。ゴミ箱はありません。
+> - 削除はアプリケーション上の削除です。ディスク（Vaultファイル・SQLiteの一時ファイル・記録媒体）から物理的に復元できなくなることは保証しません。Vaultファイルのサイズも小さくなりません。
+> - 削除する前に作ったバックアップには、削除したデータが残ります。
+
+## 6. Privacy Gateとシークレットウィンドウ
+
+### Privacy設定（Privacy Gate）
+
+自動の記録（ページの閲覧と「全タブを記録」）は、記録する前に毎回「Privacy設定」のルールで判定します。設定の画面は、初回案内、または設定タブの「Privacy設定」から開けます。
+
+| グループ | 効果 | 効果がないこと |
 |---|---|---|
-| `extension/icons/icon-16.png`, `-32`, `-48`, `-128` | 16, 32, 48, 128 px | `manifest.json` `icons` (extensions page, Web Store size) and `action.default_icon` (toolbar, 16/32) |
-| `native-host/resources/memocampus.ico` | 16, 24, 32, 48, 64, 128, 256 px (PNG entries, 32-bit) | `native-host/build.rs`, which embeds it as the executable's icon (MSVC builds) |
+| 「保存しないグループ」 | 一致するページを、今後は自動で記録しません | **すでにVaultにある記録は削除しません。** 消したい場合は5章の方法で削除してください |
+| 「MCPサーバに見せないグループ」 | Vaultには記録しますが、MCPクライアントには結果にも件数にも出しません | **記録そのものは止めません** |
+| 基本保護 | ログイン・認証のページや、URLに認証情報を含むページなどを、初期状態から保護します | — |
 
-After replacing the master, regenerate and rebuild:
+- ルールは、Vaultを切り替えても共通です（`%LOCALAPPDATA%\Memocampus\policy.json`）。
+- 設定を読み取れないとき（未初期化・破損・使用中など）は、安全側に倒して自動の記録を止めます。その間に見たページは、あとから記録しません。サイドパネルの「再確認」で、状態を読み直せます。
+- 画像とページの手動保存は、あなたが明示的に操作したときだけ行います。Privacy設定による自動記録の判定は受けません。
 
-```powershell
-python -m pip install Pillow          # once
-python scripts/generate-icons.py      # writes the files above; assets/icon.png is only read
-python scripts/generate-icons.py --check   # fails if a generated file is out of date
-cd native-host; cargo build --release
-```
+### シークレットウィンドウ
 
-Each size is resized directly from the master with Lanczos resampling; the aspect ratio, colours and the opaque dark
-background are kept (the ICO entries get a fully opaque alpha channel). The generated files carry no metadata. The
-master was generated with ChatGPT (OpenAI image generation) and adopted by the project owner; it keeps its C2PA
-content credentials, which record that origin.
+- シークレットウィンドウの閲覧は、自動では記録しません。`chrome://extensions` でシークレットモードでの実行を許可しても同じです。
+- シークレットウィンドウのページは、「Memocampusにページを保存」でも保存しません。
+- シークレットウィンドウの画像は、「Memocampusへ保存」で保存できます。保存した画像は通常のVaultに残り、バックアップにも含まれます。保存履歴には、シークレットウィンドウからの保存であることを記録します。シークレットウィンドウからの保存は、MCPクライアントに公開しません。
 
-## Privacy policy foundation (#10)
+## 7. Vault、暗号化、バックアップと復元
 
-The independent Rust/JavaScript policy engine and Native Host policy store are implemented as
-library APIs. They are not yet connected to recording or MCP, and do not initialize user settings
-on application startup. See [the policy contract](docs/issue-010-privacy-policy.md) for initial
-presets, editable rules, URL normalization, fail-closed recovery, concurrency, and test coverage.
+### 暗号化Vaultと平文Vault
 
-## Known limitations
+| | 暗号化Vault（推奨） | 平文Vault（「暗号化しない」） |
+|---|---|---|
+| ディスク上のデータ | 暗号化されます（SQLCipher） | 暗号化されません。ファイルを読める人は内容を読めます |
+| ふだんの開き方 | 鍵をWindowsのDPAPIで保護して、このWindowsユーザーに保存します。じゅもんを入力しなくても開けます | そのまま開けます |
+| 別のPC・再インストール後 | Vaultファイルとふっかつのじゅもんで、「ふっかつのじゅもんで復旧…」から開けます | ファイルをコピーすれば開けます |
+| ふっかつのじゅもん | あります（43文字） | ありません |
 
-- Windows only (native host, dialogs and paths); Chrome 116 or later.
-- Images: hotlink-protected images on another domain, `blob:` URLs whose page is closed, and images that need a
-  login the browser's cookies do not cover can fail to save. Images above 50 megapixels are not copied or
-  thumbnailed in the panel (export still works). Copying a 32 MiB original takes a few seconds (64 host requests).
-- The Image tab keeps one element per loaded tile (thumbnails far off screen are released); very large libraries
-  have not been optimised with a virtual list yet.
-- Saved images cannot be deleted from the panel yet.
+- 平文Vaultは「このVaultを暗号化する」で、暗号化Vaultは「このVaultの暗号化を解除する」で変換できます。どちらも**新しいVault**を作ります。元のVaultは変更も削除もしません。
+- じゅもんを失っても、まだVaultを開けるうちなら、「ふっかつのじゅもんを再発行する」で新しいじゅもんの新しいVaultを作れます。古いじゅもんは、古いVaultとそのバックアップにだけ使えます（下の「バックアップと復元」）。
+- 対応するVaultは、このバージョンで作成したもの（スキーマ10）だけです。古いバージョンで作成したVaultは、変更せずに拒否します。変換はできません。
 
-## License
+### バックアップと復元
 
-The Memocampus source code is released under the MIT License (see `LICENSE`). Third-party material is not covered by it:
+- 「バックアップを作成…」で、Vault全体（閲覧履歴・画像・ページを含む）を1つのファイルに書き出します。形式は、Vaultの種類とパスワード保護の有無で次の4つに分かれます。
 
-- `assets/settings.svg`, `assets/cached.svg` and `assets/delete.svg` (and their copies in `extension/assets/`) are Google Material Symbols “settings”, “cached” and “delete” icons, licensed under the Apache License 2.0. The full license text is in `LICENSES/Apache-2.0.txt`; source and provenance are recorded in `THIRD_PARTY_NOTICES.md`.
-- The `extension/` folder carries its own `LICENSE`, `LICENSES/Apache-2.0.txt` and `THIRD_PARTY_NOTICES.md` (identical copies), so it can be distributed on its own.
+| 形式 | 元のVault | パスワード保護 | 作成するときに必要なもの | 復元するときに必要なもの |
+|---|---|---|---|---|
+| A | 平文Vault | なし | — | —（バックアップは暗号化されません） |
+| B | 暗号化Vault | なし | ふっかつのじゅもん | ふっかつのじゅもん |
+| C | 平文Vault | あり | パスワード | パスワード |
+| D | 暗号化Vault | あり | パスワード、ふっかつのじゅもん | パスワード、ふっかつのじゅもん |
 
-- Third-party Rust crates keep their own licenses (MIT, Apache-2.0, Unicode-3.0 and similar permissive licenses; SQLite, bundled through `libsqlite3-sys`, is in the public domain). Only `Cargo.lock` is committed here; anyone distributing built binaries must include the corresponding notices.
+- 暗号化Vault（形式B・D）では、作成するときに、入力したじゅもんでそのVaultを復旧できるかを確かめます。復旧できないじゅもんでは、バックアップを作成しません。
+- パスワードはどこにも保存しないため、忘れると復元できません。
+- 平文Vaultのパスワード付きバックアップ（形式C）は、VaultファイルがSQLiteのWALモードになっている場合は作成できません。Memocampus自身はVaultをWALモードにしません（ほかのツールでVaultファイルを変更した場合などに起こります）。
+- じゅもんを失っても、Vaultをまだ開ける状態なら、「ふっかつのじゅもんを再発行する」を使えます。再発行すると、新しいじゅもんの**新しいVault**ができ、そのVaultのバックアップを作成できるようになります。古いじゅもんが置き換わるわけではありません。それまでに作った形式B・Dのバックアップを復元するには、引き続き古いじゅもんが必要です。
+- 「バックアップから復元…」は、常に**新しいVault**として復元します。既存のファイルや使用中のVaultは上書きしません。「このVaultを使い始める（MCPへの公開は未承認）」を押すまで、使用中のVaultは切り替わりません。
+- 復元・変換・新規作成したVaultの「MCPへの公開」は、未承認の状態から始まります。
 
-- The Memocampus icon was generated using OpenAI's image generation service. The icon assets are distributed under the project's MIT License.
+> [!WARNING]
+> バックアップには、作成した時点のデータがすべて残ります。あとからVaultで削除したデータも、それ以前のバックアップには残ります。バックアップファイルの保管場所と、不要になったバックアップの扱いに注意してください。平文Vaultの通常のバックアップ（形式A）は暗号化されません。
+
+詳細：[暗号化Vault](docs/secure-vault/slice-e.md)、[バックアップと復元](docs/secure-vault/slice-c.md)、[変換](docs/secure-vault/slice-d.md)
+
+## 8. MCP連携
+
+MCP（Model Context Protocol）に対応したAIクライアントから、Vaultの記録を検索できます。読み取り専用です。
+
+### 公開には承認が必要
+
+- 設定タブの「MCPへの公開を確認して承認…」を押し、内容を確認して「確認した上で承認し、MCPに公開する」を押した場合だけ、そのVaultをMCPに公開します。
+- 「MCPへの公開を停止」で、いつでも公開を止められます。
+- Vaultを新しく作成・復元・変換・切り替えたときは、承認し直すまで公開しません。
+
+### MCPクライアントに提供するもの
+
+| 提供するもの | 提供しないもの |
+|---|---|
+| 閲覧履歴の検索（URL・タイトル・ページの情報）、1日分の閲覧、ドメインごとの閲覧数 | 「MCPサーバに見せないグループ」と「保存しないグループ」に当たるもの、判定できないもの |
+| 公開を許可した画像の情報と**サムネイル画像**（元の画像ファイルは渡しません） | 画像の元ファイル、画像のタグ |
+| — | 保存したページ（MHTML） |
+
+画像を提供するのは、画像の詳細の保存履歴で「MCPへの公開を許可」がオンになっていて（保存した直後はオフです）、その保存の画像URL・ページURL・フレームURLがすべて公開の対象になっている場合だけです。シークレットウィンドウからの保存は提供しません。
+
+### トレイとMCPサーバー
+
+- スタートメニューの「Memocampus」でトレイを起動すると、トレイがMCPサーバーを起動・管理します。トレイのメニューで「サーバ起動」「サーバ停止」「設定ファイルを開く」「ログフォルダを開く」「終了」などを操作できます。
+- トレイが起動するMCPサーバーは、Streamable HTTP方式で、このPCの中だけで待ち受けます。既定のアドレスは `http://127.0.0.1:8765/mcp` で、ポート番号はトレイの設定ファイル（「設定ファイルを開く」）で変更できます。接続のたびに、`%LOCALAPPDATA%\Memocampus\mcp-http-token` に保存した認証トークンが必要です。ブラウザのWebページからは接続できません。
+- `memocampus-mcp.exe` をトレイを使わずに直接起動した場合は、既定でstdio方式になります。stdio方式ではHTTPの待ち受けポートを開かず、そのプログラムを起動したMCPクライアントとだけ、標準入出力でやり取りします。
+- MCPクライアントごとの設定手順は、このREADMEではまだ扱っていません。技術的な詳細は [Streamable HTTP](docs/mcp-streamable-http.md) と [MCPサーバー](docs/issue-008-mcp-server.md) を見てください。
+
+> [!CAUTION]
+> MCPクライアントに渡したデータは、Memocampusの管理を離れます。クライアントによっては、AIの提供元へ送信されます。公開するVaultとルールを確認してから承認してください。また、このPCで同じWindowsユーザーとして動くプログラムは、トークンファイルを読み取れます。
+
+## 9. 更新とアンインストール
+
+> [!NOTE]
+> この章は現在の設計に基づく説明です。実際の更新とアンインストールは、まだ確認していません（3章）。
+
+### 更新
+
+- 拡張機能：Chrome Web Storeで公開した後は、Chromeが自動で更新します。
+- Windowsアプリ：自動では更新しません。新しいインストーラーを実行すると、上書きで更新します。実行中のトレイは更新の前に終了させ、更新後に自動で再起動はしません。Vault・設定・ルールは変更しません。
+- ChromeやAIクライアントがWindowsアプリのプログラム（Native HostやMCPサーバー）を使用中の場合、インストーラーは何も変更せずに止まり、それらを閉じてから実行し直すよう求めます。インストーラーがそれらを強制終了することはありません。
+- 拡張機能だけが先に新しくなった場合は、一部の機能が使えなかったり、「Native Hostが古い…」と表示されたりします。Windowsアプリを更新してください。
+
+### アンインストール
+
+- Windowsアプリ：Windowsの設定の「アプリ」から「Memocampus」をアンインストールします。プログラム、スタートメニュー、Chromeとの接続の登録、トレイの自動起動の登録を削除します。
+- 拡張機能：`chrome://extensions` で削除します。Windowsアプリのアンインストールでは削除されません。拡張機能を削除すると、まだVaultに届いていない記録（拡張機能の中の送信待ちの記録）は失われます。
+- **Vault・バックアップ・ルール・設定・ログ（`%LOCALAPPDATA%\Memocampus`）は、どちらをアンインストールしても残ります。** 不要になったら、ご自身で削除してください。場所を選んで作成したVaultや、バックアップを保存した場所も同じです。
+
+## 10. 既知の制限
+
+- 対応しているのは、Windows 10 / 11（x64）版のGoogle Chrome 116以降だけです。ほかのブラウザやOSでは動作しません。Windows 10では、まだ実際に確認していません。
+- Chrome Web Storeでは、まだ公開していません（3章）。
+- インストーラーにコード署名がありません。
+- 古いバージョンで作成したVault（スキーマ9以前）は使えません。変換もできません。
+- 画像：ほかのサイトからの直リンクを禁止している画像、ログインが必要な画像、閉じたページの `blob:` URLは、保存できない場合があります。5000万画素を超える画像は、パネルでのコピーとサムネイル表示ができません（書き出しはできます）。
+- ページ：本文の全文検索とMHTMLの表示には対応していません。ページによっては、Chromeが取得できずに保存に失敗します。
+- タグは一度に1つしか絞り込めず、MCPクライアントには提供しません。
+- 削除してもVaultファイルは小さくならず、物理的な消去は保証しません（5章）。
+- 画面の表示言語は日本語と英語だけです。
+
+## 11. トラブルシューティング
+
+| 表示・症状 | 確認すること |
+|---|---|
+| 「Native Hostに接続できません。インストールと登録を確認してください。」 | Windowsアプリがインストールされているか確認してください。インストーラーを実行し直すと、Chromeとの接続の登録も作り直します |
+| 「Vaultが未設定です」 | 設定タブで、Vaultを新規作成するか、既存のVaultを開いてください |
+| 記録されない／URLタブに設定を読み取れないという表示が出る | 「記憶を開始する」を押したか確認してください。Privacy設定を読み取れない間は記録を止めています。「再確認」で読み直せます |
+| 「Native Hostが古いため…」 | Windowsアプリを新しいバージョンに更新してください |
+| 別のPCで暗号化Vaultが開けない | 「ふっかつのじゅもんで復旧…」から、作成時に記録したじゅもんを入力してください |
+| MCPクライアントに何も返らない | 「MCPへの公開」を承認しているか、トレイの状態表示（「Vault公開」など）を確認してください。トレイの「ログフォルダを開く」でログ（`mcp-startup.log`）を確認できます |
+| SmartScreenの警告が出る | 3章の警告を読んでください |
+
+## 12. 開発者向け情報・ライセンス
+
+- ソースからのビルド、テスト、CI、リポジトリの構成：[開発者向けガイド](docs/development.md)
+- Windowsインストーラーと配布パイプライン：[installer/README.md](installer/README.md)
+- 設計と受入の記録：[docs/](docs/)
+
+### ライセンス
+
+MemocampusのソースコードはMITライセンス（MIT License）で公開しています（[LICENSE](LICENSE)）。第三者の素材は、このライセンスの対象外です。
+
+- `assets/settings.svg`、`assets/cached.svg`、`assets/delete.svg`（と `extension/assets/` のコピー）は、Google Material Symbolsのアイコンで、Apache License 2.0で提供されています。全文は [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt)、出典は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) にあります。
+- `extension/` フォルダは、単独で配布できるように、同じ `LICENSE`、`LICENSES/Apache-2.0.txt`、`THIRD_PARTY_NOTICES.md` を含んでいます。
+- Native HostとMCPサーバーのプログラムに含まれる第三者ソフトウェアの表示は [NATIVE_THIRD_PARTY_NOTICES.md](NATIVE_THIRD_PARTY_NOTICES.md) にあります。
+- Memocampusのアイコンは、OpenAIの画像生成サービスで生成しました。アイコンはプロジェクトのMITライセンスで配布しています。
