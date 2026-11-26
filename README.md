@@ -290,3 +290,7 @@ MemocampusのソースコードはMITライセンス（MIT License）で公開�
 - `extension/` フォルダは、単独で配布できるように、同じ `LICENSE`、`LICENSES/Apache-2.0.txt`、`THIRD_PARTY_NOTICES.md` を含んでいます。
 - Native HostとMCPサーバーのプログラムに含まれる第三者ソフトウェアの表示は [NATIVE_THIRD_PARTY_NOTICES.md](NATIVE_THIRD_PARTY_NOTICES.md) にあります。
 - Memocampusのアイコンは、OpenAIの画像生成サービスで生成しました。アイコンはプロジェクトのMITライセンスで配布しています。
+
+## 名前の由来
+
+Memocampusは、「Memo（記録）」と、記憶に深く関わる脳の部位「Hippocampus（海馬）」を組み合わせた造語です。
