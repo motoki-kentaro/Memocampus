@@ -33,8 +33,9 @@ minutes more). If `perl` on `PATH` is not a native one, set `PERL` to it, e.g. `
 Node.js is only needed to run the extension tests (CI uses Node.js 24). No administrator rights are required.
 
 Build each crate **from its own directory**. The three crates that produce the shipped executables (`native-host`,
-`mcp-server`, `tray`) each have a `.cargo/config.toml` that links the C runtime statically (`+crt-static`); the library
-crates `visible-store` and `page-extract` have none. Cargo reads that file only when it runs inside the crate directory,
+`mcp-server`, `tray`) each have a `.cargo/config.toml` that links the C runtime statically (`+crt-static`). The library
+`visible-store` has the same file, because it ships inside the MCP server and so shares its OpenSSL / SQLCipher build
+in CI; `page-extract` has none. Cargo reads that file only when it runs inside the crate directory,
 so a build started from the repository root with `--manifest-path` skips it and produces executables that need
 `VCRUNTIME140.dll` (the installer build refuses them: `scripts/pe-imports.mjs --check`).
 

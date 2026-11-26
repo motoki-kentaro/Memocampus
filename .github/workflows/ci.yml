@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# Issue #93 S1: a new push to a pull request cancels that pull request's older, still running CI. Pushes to main and
+# manual runs get a group of their own (the run id), so they are never cancelled and never wait for one another.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   javascript:
     name: JavaScript (Node 24, Ubuntu)
