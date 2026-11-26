@@ -2,6 +2,12 @@
 
 **日本語** | [English](README.en.md)
 
+[![CI](https://github.com/motoki-kentaro/Memocampus/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/motoki-kentaro/Memocampus/actions/workflows/ci.yml?query=branch%3Amain)
+[![Rust Native](https://img.shields.io/badge/Rust%20Native-B7410E?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![MCP Server](https://img.shields.io/badge/MCP%20Server-000000?style=flat-square&logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io/)
+[![Chrome MV3](https://img.shields.io/badge/Chrome%20MV3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
+[![SQLCipher](https://img.shields.io/badge/SQLCipher-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://www.zetetic.net/sqlcipher/)
+
 Windows版Google Chromeで見たWebページ・画像・ページの原本を、あなたのPC上の「Vault」に記録して、あとから探せるようにするツールです。
 
 > [!IMPORTANT]

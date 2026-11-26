@@ -55,6 +55,45 @@ function sections(md) {
   return out;
 }
 const all = (md, re) => [...md.matchAll(re)].map((m) => m[1]);
+/** Linked badge images `[![alt](image)](link)`, in order (Issue #96). */
+const BADGE = /\[!\[([^\]]*)\]\(([^)\s]+)\)\]\(([^)\s]+)\)/g;
+const badges = (md) => [...md.matchAll(BADGE)].map(([, alt, image, link]) => ({ alt, image, link }));
+
+test("both READMEs show the same five badges after the language switch: live CI status, then four technologies", () => {
+  for (const md of [docs[JA], docs[EN]]) {
+    assert.deepEqual(badges(md).map((b) => b.alt), ["CI", "Rust Native", "MCP Server", "Chrome MV3", "SQLCipher"]);
+    // One paragraph (rendered side by side) right after the language switch, and no other image anywhere.
+    assert.match(intro(md), /^.*\]\(README(\.en)?\.md\).*\n\n(?:\[!\[[^\n]+\)\n){5}\n[^\n[]/m);
+    assert.equal((md.match(/!\[/g) ?? []).length, 5);
+    assert.doesNotMatch(md, /<img\b/i);
+  }
+  assert.deepEqual(badges(docs[EN]), badges(docs[JA]));
+  // CI: GitHub's own badge for the real workflow on main, so it shows whatever the latest run says.
+  const [ci, ...stack] = badges(docs[JA]);
+  assert.ok(existsSync(path.join(root, ".github/workflows/ci.yml")));
+  assert.equal(ci.image, "https://github.com/motoki-kentaro/Memocampus/actions/workflows/ci.yml/badge.svg?branch=main");
+  assert.equal(ci.link, "https://github.com/motoki-kentaro/Memocampus/actions/workflows/ci.yml?query=branch%3Amain");
+  // The four technologies: static Shields.io badges whose text is exactly their name, all flat-square, each linking
+  // to that technology's official page.
+  const OFFICIAL = {
+    "Rust Native": "https://www.rust-lang.org/",
+    "MCP Server": "https://modelcontextprotocol.io/",
+    "Chrome MV3": "https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3",
+    "SQLCipher": "https://www.zetetic.net/sqlcipher/",
+  };
+  assert.deepEqual(stack.map((b) => [b.alt, b.link]), Object.entries(OFFICIAL));
+  for (const b of stack) {
+    const m = /^https:\/\/img\.shields\.io\/badge\/([^?/]+)-[0-9A-F]{6}\?(.+)$/.exec(b.image);
+    assert.ok(m, `${b.alt}: ${b.image}`);
+    assert.equal(decodeURIComponent(m[1]), b.alt);
+    assert.match(m[2], /(^|&)style=flat-square(&|$)/);
+  }
+  // No badge states a result, a certification, a release, a platform, a license or other technologies.
+  for (const b of badges(docs[JA])) {
+    assert.doesNotMatch(`${b.alt} ${decodeURIComponent(b.image)}`,
+      /passing|passed|success|failing|tests?\b|certified|verified|secure|official|release|store|windows|x64|platform|license|local-first|node|typescript|\bv\d/i);
+  }
+});
 
 test("both READMEs open with the language switch to each other", () => {
   const firstLines = (md) => md.split("\n").slice(0, 4).join("\n");
@@ -120,7 +159,9 @@ test("the distribution status is 'under review, not public', and nothing present
       "/releases/", "プレリリース", "pre-release", "prerelease"]) {
       assert.ok(!md.toLowerCase().includes(banned), `${file} must not contain ${banned}`);
     }
-    const urls = [...md.matchAll(/https?:\/\/[^\s)>`]+/g)].map((m) => m[0]);
+    // The badges' own URLs are checked exactly by the badge test above; only the badge markup itself is left out here,
+    // so the same URLs anywhere else are still unexpected.
+    const urls = [...md.replace(BADGE, "").matchAll(/https?:\/\/[^\s)>`]+/g)].map((m) => m[0]);
     const allowed = [/^https:\/\/memocampus\.github\.io\/(en\/)?privacy\/$/, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/];
     for (const url of urls) assert.ok(allowed.some((re) => re.test(url)), `${file}: unexpected URL ${url}`);
   }

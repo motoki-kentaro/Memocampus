@@ -2,6 +2,12 @@
 
 [日本語](README.md) | **English**
 
+[![CI](https://github.com/motoki-kentaro/Memocampus/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/motoki-kentaro/Memocampus/actions/workflows/ci.yml?query=branch%3Amain)
+[![Rust Native](https://img.shields.io/badge/Rust%20Native-B7410E?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![MCP Server](https://img.shields.io/badge/MCP%20Server-000000?style=flat-square&logo=modelcontextprotocol&logoColor=white)](https://modelcontextprotocol.io/)
+[![Chrome MV3](https://img.shields.io/badge/Chrome%20MV3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
+[![SQLCipher](https://img.shields.io/badge/SQLCipher-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://www.zetetic.net/sqlcipher/)
+
 Memocampus records the web pages, images and page originals you view in Google Chrome on Windows into a "Vault" on your own PC, so that you can find them again later.
 
 > [!IMPORTANT]
