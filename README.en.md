@@ -290,3 +290,7 @@ The Memocampus source code is released under the MIT License ([LICENSE](LICENSE)
 - The `extension/` folder carries identical copies of `LICENSE`, `LICENSES/Apache-2.0.txt` and `THIRD_PARTY_NOTICES.md`, so it can be distributed on its own.
 - The notices for third-party software contained in the Native Host and MCP server programs are in [NATIVE_THIRD_PARTY_NOTICES.md](NATIVE_THIRD_PARTY_NOTICES.md).
 - The Memocampus icon was generated using OpenAI's image generation service. The icon assets are distributed under the project's MIT License.
+
+## Origin of the Name
+
+Memocampus is a coined word combining "Memo" and "Hippocampus," the part of the brain involved in memory.
