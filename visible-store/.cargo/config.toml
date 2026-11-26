@@ -1,0 +1,6 @@
+# visible-store is a library: it ships only inside memocampus-mcp.exe, which links the C runtime statically
+# (mcp-server/.cargo/config.toml). The same flag here makes its own dev, test, clippy and release builds match how it
+# ships, and lets a shared CARGO_TARGET_DIR (CI) reuse the OpenSSL / SQLCipher build of native-host and mcp-server
+# instead of compiling it again with different flags (Issue #93). Keep the flag identical to the other crates.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
