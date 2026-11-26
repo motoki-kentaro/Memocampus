@@ -17,6 +17,34 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Issue #93 S3-1: whether this run needs the Windows Rust job. Only a pull request that changes nothing but the
+  # READMEs, docs/ or tests/docs/ may skip it (scripts/ci/classify-changes.mjs); pushes and manual runs always run it,
+  # and so does any run where the decision cannot be made with certainty.
+  # Trust boundary: a pull_request run uses the pull request's own workflow and scripts, so a pull request can weaken
+  # this decision or the CI gate, and nothing here prevents that. Review every change to .github/ and scripts/ci/
+  # closely: the full run on the push to main finds such a change only after it is merged, never before.
+  changes:
+    name: Changes (does this run need Rust?)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.classify.outputs.rust }}
+      reason: ${{ steps.classify.outputs.reason }}
+    steps:
+      # For a pull request this is the merge commit (refs/pull/N/merge); depth 2 brings its two parents.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - id: classify
+        run: node scripts/ci/classify-changes.mjs
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
   javascript:
     name: JavaScript (Node 24, Ubuntu)
     runs-on: ubuntu-latest
@@ -34,6 +62,10 @@ jobs:
 
   rust:
     name: Rust (stable MSVC, Windows)
+    # Skipped only when a pull request's `changes` said rust=false. A failed or missing decision runs Rust; a cancelled
+    # run does not. The CI gate checks that the result matches the decision.
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.rust != 'false') }}
     runs-on: windows-latest
     # Issue #51 Slice B: SQLCipher with OpenSSL built from source (once for the dev profile and once
     # for release; the three crates share one target directory, so each is built once per job).
@@ -142,3 +174,26 @@ jobs:
             ${{ env.CARGO_TARGET_DIR }}
             ${{ steps.rust-cache-key.outputs.cargo-home }}\registry\index
             ${{ steps.rust-cache-key.outputs.cargo-home }}\registry\cache
+
+  # Issue #93 S3-1: the one check to require before merging. A job skipped by its `if:` counts as passed for a required
+  # check, so the Rust job itself must never be the required one. This gate runs whatever happened before it (always():
+  # a failed or cancelled job must still produce a failing gate, never a skipped one) and passes only when every job
+  # that had to run succeeded and Rust was skipped only where `changes` said so (scripts/ci/ci-gate.mjs).
+  ci-gate:
+    name: CI gate
+    needs: [changes, javascript, rust]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: node scripts/ci/ci-gate.mjs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          NEEDS: ${{ toJSON(needs) }}
