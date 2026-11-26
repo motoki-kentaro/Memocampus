@@ -24,7 +24,9 @@ const keyScript = read("scripts/ci/rust-cache-key.ps1");
 const pruneScript = read("scripts/ci/rust-cache-prune.ps1");
 
 // The Rust job's steps, each as its text (a step starts with "      - " at the job's step indent).
-const rustJob = ci.slice(ci.indexOf("\n  rust:\n"));
+const rustStart = ci.indexOf("\n  rust:\n");
+const rustEnd = ci.slice(rustStart + 1).search(/\n  [\w-]+:\n/);
+const rustJob = rustEnd < 0 ? ci.slice(rustStart) : ci.slice(rustStart, rustStart + 1 + rustEnd + 1);
 const steps = rustJob.slice(rustJob.indexOf("\n    steps:\n")).split(/\n(?=      - )/).slice(1);
 const stepWith = (re) => {
   const found = steps.filter((s) => re.test(s));
