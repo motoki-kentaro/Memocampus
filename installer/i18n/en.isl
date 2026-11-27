@@ -11,13 +11,13 @@
 [Messages]
 ; What "finished" means here: the Windows side only. The Chrome extension, choosing a vault and starting
 ; to remember are separate steps the user takes in Chrome; Setup never reports them as done.
-FinishedLabel=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is added by you in Chrome, and choosing a vault and starting to remember happen in the extension, only when you approve them there.
-FinishedLabelNoIcons=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is added by you in Chrome, and choosing a vault and starting to remember happen in the extension, only when you approve them there.
+FinishedLabel=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is added by you in Chrome, from the Chrome Web Store, and choosing a vault and starting to remember happen in the extension, only when you approve them there.
+FinishedLabelNoIcons=Setup has installed the [name] programs and its connection to Chrome on this computer.%n%nThat is all Setup does. The Chrome extension is added by you in Chrome, from the Chrome Web Store, and choosing a vault and starting to remember happen in the extension, only when you approve them there.
 
 [CustomMessages]
 ; The last page ([Run] descriptions).
 McLaunchTray=Start Memocampus now (its first start also turns on starting at logon; you can change that in the tray menu)
-McOpenStorePage=Open the Memocampus page in the Chrome Web Store (you add the extension yourself, in Chrome)
+McOpenStorePage=Open Memocampus in the Chrome Web Store (you add the extension yourself, in Chrome)
 
 ; Before anything is installed (PrepareToInstall) and before an uninstall (InitializeUninstall).
 McInvalidExtensionId=This installer was built with an invalid Chrome extension id.

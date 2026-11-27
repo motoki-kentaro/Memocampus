@@ -7,12 +7,12 @@
 
 [Messages]
 ; 「完了」はWindows側の作業だけを指す。拡張機能の追加、Vaultの選択、記録の開始は利用者がChromeで行う別の手順。
-FinishedLabel=[name] のプログラムと、Chrome との接続をこのコンピューターにインストールしました。%n%nセットアップが行うのはここまでです。Chrome 拡張機能はご自身で Chrome に追加してください。Vault の選択と記録の開始は、拡張機能の画面であなたが承認したときにだけ行われます。
-FinishedLabelNoIcons=[name] のプログラムと、Chrome との接続をこのコンピューターにインストールしました。%n%nセットアップが行うのはここまでです。Chrome 拡張機能はご自身で Chrome に追加してください。Vault の選択と記録の開始は、拡張機能の画面であなたが承認したときにだけ行われます。
+FinishedLabel=[name] のプログラムと、Chrome との接続をこのコンピューターにインストールしました。%n%nセットアップが行うのはここまでです。Chrome 拡張機能は、Chrome Web Store からご自身で Chrome に追加してください。Vault の選択と記録の開始は、拡張機能の画面であなたが承認したときにだけ行われます。
+FinishedLabelNoIcons=[name] のプログラムと、Chrome との接続をこのコンピューターにインストールしました。%n%nセットアップが行うのはここまでです。Chrome 拡張機能は、Chrome Web Store からご自身で Chrome に追加してください。Vault の選択と記録の開始は、拡張機能の画面であなたが承認したときにだけ行われます。
 
 [CustomMessages]
 McLaunchTray=Memocampus を今すぐ起動する（初回の起動で Windows ログオン時の起動も有効になります。トレイのメニュー「Windowsログオン時に起動」で変更できます）
-McOpenStorePage=Chrome ウェブストアの Memocampus のページを開く（拡張機能はご自身で Chrome に追加してください）
+McOpenStorePage=Chrome Web Store で Memocampus を開く（拡張機能はご自身で Chrome に追加してください）
 
 McInvalidExtensionId=このインストーラーは、無効な Chrome 拡張機能 ID でビルドされています。
 McTrayStillRunning=Memocampus が実行中のまま、時間内に終了しませんでした。何も変更していません。%n%n通知領域の Memocampus アイコンを右クリックして「終了」を選び、しばらく待ってから、もう一度実行してください。

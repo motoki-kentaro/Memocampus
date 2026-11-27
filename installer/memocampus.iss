@@ -135,9 +135,13 @@ Name: "{group}\Memocampus"; Filename: "{app}\memocampus-tray.exe"
 Filename: "{app}\memocampus-tray.exe"; Description: "{cm:McLaunchTray}"; Flags: nowait postinstall skipifsilent unchecked
 #ifdef StoreListing
 ; Opens the Chrome Web Store page in the default browser, only when ticked. Nothing is installed in
-; Chrome by Setup. The address is built from the same extension id the manifest trusts; a build
-; without /DStoreListing (every test build) has no such entry.
-Filename: "https://chromewebstore.google.com/detail/{#ChromeExtensionId}"; Description: "{cm:McOpenStorePage}"; Flags: shellexec postinstall skipifsilent unchecked
+; Chrome by Setup. The address is the published listing (Issue #100), built from the same extension id
+; the manifest trusts; a build without /DStoreListing (every test build) has no such entry.
+; It runs when the user clicks Finish, after the installation is complete and recorded: shellexec
+; hands the address to Windows as the user (postinstall runs as the original user; this installer
+; never has administrator rights), and a failure to open it (no browser, no network) can only show
+; Inno Setup's own error box; it cannot undo or fail the installation.
+Filename: "https://chromewebstore.google.com/detail/memocampus/{#ChromeExtensionId}"; Description: "{cm:McOpenStorePage}"; Flags: shellexec postinstall skipifsilent unchecked
 #endif
 #endif
 
