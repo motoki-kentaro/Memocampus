@@ -222,9 +222,8 @@ test("the distribution status: the extension is in the Store, the Windows instal
     const allowed = [/^https:\/\/memocampus\.github\.io\/(en\/)?privacy\/$/, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/];
     for (const url of urls) assert.ok(url === STORE_URL || allowed.some((re) => re.test(url)), `${file}: unexpected URL ${url}`);
   }
-  // The release version appears only as planned.
-  for (const line of docs[JA].split("\n").filter((l) => l.includes("0.8.0"))) assert.match(line, /予定/);
-  for (const line of docs[EN].split("\n").filter((l) => l.includes("0.8.0"))) assert.match(line, /planned/);
+  // The first public release is v0.1.0 (Issue #102); the old plan's 0.8.0 is not named as a release any more.
+  for (const file of [JA, EN]) assert.doesNotMatch(docs[file], /\bv?0\.8\.0\b/, `${file} names the old planned version`);
 });
 
 test("specification numbers agree with the code and between the languages", () => {

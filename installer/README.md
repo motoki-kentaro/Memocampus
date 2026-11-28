@@ -9,10 +9,17 @@ release pipeline builds and checks it (3B-4).
 ## Status
 
 Compiled with Inno Setup 7.1.1. The registration and lifecycle code is exercised by self-tests (below) against
-private registry keys and, for the tray routine, against real scratch tray processes. **The installer itself has not
-been run** (no isolated Windows user or VM was available), and no Chrome Web Store extension id exists yet, so no
-installer built here is a release build. `installer\E2E-ACCEPTANCE.md` lists every case that must be run, in an
-isolated environment, before v0.8.0 is made public; all of them are NOT RUN.
+private registry keys and, for the tray routine, against real scratch tray processes.
+
+The first public release of the Windows app is **v0.1.0** (Issue #102), the same version as the Chrome extension
+already published in the Chrome Web Store
+(`https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla`). Its extension id,
+`cdklofjfcjagkaclekmicliailmlnfla`, is recorded in `installer\release-gate.json`, so product builds can be made; the
+manual workflow has built them on GitHub. **No product installer has been accepted yet**: the only product build so far
+is the Chrome Web Store review pre-release `v0.1.0-review.1`, which predates the store link of Issue #100 and is not the
+release. `installer\E2E-ACCEPTANCE.md` lists every case that must pass, with evidence, in an isolated Windows 11
+environment before v0.1.0 is made public; apart from the partial A10 (the C runtime start, with the test build), all of
+them are NOT RUN. Windows 10 is not verified.
 
 ## What the installer does
 
@@ -314,7 +321,9 @@ No default; each part a plain number up to 65535, no suffix; `-Tag` (when given)
 Setup file's `FileVersion` is read back and must start with the version. The Inno AppId is untouched. The Chrome
 extension's version is its own `manifest.json` `version`: `scripts/package-extension.mjs --expect-version x.y.z` fails
 unless it matches, so a release run can demand the two agree, and a later extension-only release can leave the app
-version alone. **The repository's manifest says 0.1.0 today**; raising it to 0.8.0 is part of cutting the release.
+version alone. For v0.1.0 nothing is raised: the manifest, the three crates (`Cargo.toml`) and the release build input
+are all 0.1.0 (`-Version 0.1.0`, and `--expect-version 0.1.0` for the extension). Protocol, policy schema and settings
+version numbers are separate contracts and do not follow the product version.
 
 ### The two channels
 
@@ -326,8 +335,9 @@ version alone. **The repository's manifest says 0.1.0 today**; raising it to 0.8
 | Output | `dist\test\Memocampus-Setup-x64-INSTALLER-TEST.exe` + `NOT-FOR-DISTRIBUTION.txt` | `dist\product\Memocampus-Setup-x64.exe` |
 | CI artifact | `INSTALLER-TEST-NOT-FOR-DISTRIBUTION` (7 days) | `memocampus-windows-release-candidate` (30 days) |
 
-**The release gate** (`installer\release-gate.json`): `extensionId` is `null` until the Web Store item exists and the
-product owner records its real id there. While it is null `build.ps1 -Channel product` refuses to build ("the release
+**The release gate** (`installer\release-gate.json`): `extensionId` holds the published Web Store id,
+`cdklofjfcjagkaclekmicliailmlnfla`, recorded by the product owner (Issue #89). It was `null` until the Web Store item
+existed; with `null` (or a malformed, synthetic or made-up id) `build.ps1 -Channel product` refuses to build ("the release
 gate is closed"), so no product installer and no Web Store link can be made with a made-up id. Both channels also write
 `SHA256SUMS.txt` and `build-info.json` (version, channel, git commit, whether the working tree was modified, Inno
 version, `"signed": false`). A failed check or compile removes the output folder: nothing half-made is left to be picked up.
@@ -361,9 +371,19 @@ No hard-coded owner: nothing refers to the repository's owner, so it keeps worki
 **Inno Setup on the runner**: an existing `C:\Program Files\Inno Setup 7` is used (and `build.ps1` still insists on exactly
 7.1.1, read from the compiler's own output). If it is absent the job downloads the installer named by the repository
 variables `INNO_SETUP_URL` (https; `jrsoftware.org`, or the one exact official GitHub release file `https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe`, nothing else on GitHub) and `INNO_SETUP_SHA256`, compares the hash and only then runs
-it. Without those variables the job stops. **Neither the runner's contents nor those two values have been confirmed**:
-until the workflow has run once on GitHub, the build job is unproven. (Inno Setup's licence is "non-commercial use
-only" unless a commercial licence is bought: the compiler prints it. Check that this fits before a public release.)
+it. Without those variables the job stops. The `build` job has run on GitHub by hand (the review pre-release
+`v0.1.0-review.1` was built that way, product channel), so the bootstrap, the Rust build and the artifacts are proven on
+the runner; a run proves the build, not the installer's behaviour on Windows (`E2E-ACCEPTANCE.md`).
+
+**Inno Setup licence (open question, a release blocker until the product owner decides)**: the licence file shipped with
+7.1.1 (`license.txt`) grants use "for any purpose, including commercial applications" on its conditions (keep the
+copyright notices, do not misrepresent the origin, mark modified versions). Separately, the compiler of an unlicensed
+copy prints `Non-commercial use only` in its output (seen in a 7.1.1 compile), and the publisher's order page
+(`https://jrsoftware.org/isorder.php`) asks commercial users, defined there by annual revenue above USD 5000 with
+donations to open-source or freeware counted, to buy a commercial licence, while saying it is "not strictly required" and
+that non-commercial users are not asked to. Whether Memocampus's distribution counts as commercial use under that
+request is not something this repository can establish: the product owner decides it (buy a licence, or record why
+none is needed) before the public release.
 
 ### C runtime: no Visual C++ Redistributable (release blocker found on a clean VM)
 
@@ -396,16 +416,26 @@ tell testers to use "More info", then "Run anyway", only for a file whose SHA-25
 goes later: in `build.ps1`, after the compile and before the hash and `build-info.json` (sign, verify the signature,
 then hash the signed file), with the certificate coming from a protected store or secret in a separate, approved job.
 No key, certificate or signing service is referenced anywhere now, and no secret may be added to this repository.
+v0.1.0 is planned to ship unsigned; that is approved, or not, by the product owner just before the release. Users are
+never told to switch any Windows protection off (SmartScreen, Microsoft Defender or another).
 
-### Before v0.8.0 is made public (blockers)
+### Before v0.1.0 is made public (blockers)
 
-1. The real Chrome Web Store extension id, recorded in `installer\release-gate.json`.
-2. Every case of `installer\E2E-ACCEPTANCE.md` run in an isolated environment, with evidence (all NOT RUN today).
-3. `extension\manifest.json` version raised to the release (0.1.0 today) if the extension is released with the app.
-4. The workflow run once on GitHub (Inno Setup bootstrap, the Rust build in CI, the artifacts), and its result read.
-5. A decision on code signing, or an explicit decision to ship unsigned; and on the Inno Setup licence.
-6. Independent review (Codex) and the product owner's approval. Tag, GitHub Release and Web Store submission happen
-   only after that, by hand.
+Resolved: the Chrome Web Store extension id is recorded in `installer\release-gate.json` (Issue #89); the manual workflow
+has run on GitHub and built a product installer; the extension version is 0.1.0 in the Web Store and in
+`extension\manifest.json`, the app version for the release is 0.1.0 (no version is raised).
+
+Open:
+
+1. A release candidate built by `windows-dist.yml` (product channel, `0.1.0`) from a commit on `main`, after Issue #100.
+   The review pre-release `v0.1.0-review.1` is kept as it is and is not the release: its assets are never reused.
+2. Every case of `installer\E2E-ACCEPTANCE.md` run on **that** Setup file (same SHA-256) in an isolated Windows 11
+   environment, with evidence, under its release rule (all NOT RUN today apart from the partial A10). Windows 10 is not
+   verified.
+3. A decision to ship unsigned (or code signing), and on the Inno Setup licence (above).
+4. Independent review and the product owner's approval. Then, by hand: the annotated tag `v0.1.0` on the commit the
+   accepted release candidate was built from (its `build-info.json` `gitCommit`), never moved; the GitHub Release with
+   exactly the accepted files, not a rebuild. Nothing is resubmitted to the Chrome Web Store.
 
 ## Isolated installer test (not done yet)
 
@@ -426,8 +456,8 @@ with the existing development script under `com.memocampus.vault`, using the unp
 `-BinaryPath` set to the test build's installed `memocampus-native-host.exe` and `-ManifestPath` in a VM work folder,
 and remove it afterwards with `uninstall-native-host.ps1 -ManifestPath <same path>`. The exact steps are in
 `E2E-ACCEPTANCE.md` ("Temporary development registration"). That registration is a development one: it does not
-verify the installer's product registration, which needs the product build and the real Web Store id (A3, blocked
-until `release-gate.json` has the id).
+verify the installer's product registration, which needs the product build and the Web Store extension (A3: no longer
+blocked, since `release-gate.json` has the id, but NOT RUN).
 
 ```powershell
 ISCC.exe /DAppVersion=0.0.0 /DChromeExtensionId=<a test id> /DInstallerTestMode installer\memocampus.iss

@@ -1,15 +1,18 @@
 # Memocampus for Windows: real-installer acceptance gate (Issue #67, Slice 3B-4)
 
-**Status: NOT RUN unless the row says otherwise** (A3 is BLOCKED, A10 is PASS for the C runtime start
-only; see the rows). No product installer has been executed on any machine for Slices 3B-1 to 3B-4. The code has been compiled, unit-tested against private registry keys and real
+**Status: NOT RUN unless the row says otherwise** (A10 is PASS for the C runtime start only; see the rows).
+A3 is no longer blocked (the Chrome Web Store id `cdklofjfcjagkaclekmicliailmlnfla` is recorded in `installer\release-gate.json`, so
+product builds can be made) but it has not been run: it is NOT RUN, like every other row. No product installer has been executed on any machine for Slices 3B-1 to 3B-4. The code has been compiled, unit-tested against private registry keys and real
 scratch trays, and statically checked, but the Inno Setup engine's own behaviour (what runs when,
-exit codes, what `Abort` does in each event) has not been observed. **This gate must be passed before a
-public release of v0.8.0.** Nothing here may be written up as PASS until someone has run it and kept the
+exit codes, what `Abort` does in each event) has not been observed. **This gate must be passed before the
+public release of v0.1.0**, the first public release of the Windows app (Issue #102), run on the very Setup file that
+is to be published (same SHA-256), not on the review pre-release `v0.1.0-review.1`. Nothing here may be written up as PASS until someone has run it and kept the
 evidence.
 
 ## Where to run it
 
-In an isolated Windows 11 x64 environment that is **not** a development machine: a fresh VM (snapshot
+In an isolated Windows 11 x64 environment that is **not** a development machine (Windows 11 is the platform
+accepted for v0.1.0; Windows 10 is not verified, and nothing here may be recorded as proving it): a fresh VM (snapshot
 before each case), or a separate Windows user on a spare PC. **Never** on a machine whose real Chrome
 profile, vault (`%LOCALAPPDATA%\Memocampus`), development Native Messaging registrations or MCP
 clients matter. The test-mode installer (`/DInstallerTestMode`) does not make this safe on a real
@@ -23,7 +26,7 @@ Needed in the VM: Chrome (so the native messaging registration can be exercised)
 
 | Build | Native Messaging registration it writes | Can Chrome see it? | Proves |
 |---|---|---|---|
-| Product `Memocampus-Setup-x64.exe` | `HKCU\Software\Google\Chrome\NativeMessagingHosts\io.github.memocampus.vault`, `allowed_origins` = the Web Store id from `installer\release-gate.json` | yes, for the Web Store extension only | the installer's own product registration path (A3) |
+| Product `Memocampus-Setup-x64.exe` | `HKCU\Software\Google\Chrome\NativeMessagingHosts\io.github.memocampus.vault`, `allowed_origins` = the Web Store id from `installer\release-gate.json` (`cdklofjfcjagkaclekmicliailmlnfla`) | yes, for the Web Store extension only | the installer's own product registration path (A3) |
 | Test `...-INSTALLER-TEST.exe` | `HKCU\Software\MemocampusInstallerTest\NativeMessagingHosts\io.github.memocampus.vault`, `allowed_origins` = the synthetic id `abcdefghijklmnopabcdefghijklmnop` | **no, by design** | the installer's behaviour on private keys (A9 and the lifecycle cases) |
 
 The test build's registration is isolated on purpose (`installer\README.md`, "Isolated installer test"): Chrome
@@ -35,7 +38,7 @@ isolation is not relaxed for the acceptance run.
 
 ### Temporary development registration (disposable clean VM only, for A10)
 
-To let Chrome start the **installed test-build executable** before a Web Store id exists, the existing
+To let Chrome start the **installed test-build executable** (whose registration Chrome cannot see, by design), the existing
 development script registers it under the legacy development name. This is allowed only in a disposable clean VM
 that is reverted afterwards, never on a development machine or a real profile. It writes one key,
 `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.memocampus.vault`; the script refuses the product name
@@ -79,10 +82,10 @@ The result column is filled in by whoever ran the case: `PASS (date, who, eviden
 |---|-------|----------|--------|
 | A1 | Run the setup as a standard user (no administrator prompt) | Succeeds, no UAC prompt | NOT RUN |
 | A2 | Files | `%LOCALAPPDATA%\Programs\Memocampus` holds the three executables, the generated `io.github.memocampus.vault.json`, and the uninstaller; nothing under Program Files | NOT RUN |
-| A3 | Native Messaging | `HKCU\Software\Google\Chrome\NativeMessagingHosts\io.github.memocampus.vault` default value = the manifest path; manifest `path` = `memocampus-native-host.exe` in the install folder; `allowed_origins` = exactly `chrome-extension://<release id>/`; no dev / legacy key changed. Purpose: the installer's own product registration path, with the product build and the Web Store extension. Not provable with the test build or with the temporary development registration | BLOCKED (the Chrome Web Store id is not recorded yet: `installer\release-gate.json` `extensionId` is null, so no product build can be made; the release gate is not relaxed) |
-| A4 | Last page | Says Setup installed the programs and the Chrome connection, and that the extension, the vault and remembering are separate and approved in Chrome. Offers two **unticked** boxes: start Memocampus, open the Web Store page | NOT RUN |
+| A3 | Native Messaging | `HKCU\Software\Google\Chrome\NativeMessagingHosts\io.github.memocampus.vault` default value = the manifest path; manifest `path` = `memocampus-native-host.exe` in the install folder; `allowed_origins` = exactly `chrome-extension://<release id>/`, the release id being `cdklofjfcjagkaclekmicliailmlnfla` (`installer\release-gate.json`); no dev / legacy key changed. Purpose: the installer's own product registration path, with the product build and the Web Store extension (added from `https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla`; `chrome://extensions` shows that id). Not provable with the test build or with the temporary development registration | NOT RUN (no longer blocked: the id is recorded in `installer\release-gate.json` and product builds can be made; the release gate is not relaxed) |
+| A4 | Last page | Says Setup installed the programs and the Chrome connection, and that the extension, the vault and remembering are separate and approved in Chrome: the extension is added by the user, from the Chrome Web Store (`FinishedLabel` in `installer\i18n\en.isl` / `ja.isl`). Offers two **unticked** boxes: start Memocampus (`McLaunchTray`), and "Open Memocampus in the Chrome Web Store" / 「Chrome Web Store で Memocampus を開く」 (`McOpenStorePage`). In English and in Japanese | NOT RUN |
 | A5 | Tray box ticked | Tray starts once, as the user, no arguments; a second start (Start menu) exits quietly (already running) | NOT RUN |
-| A6 | Store box ticked | Default browser opens exactly `https://chromewebstore.google.com/detail/memocampus/<release id>` (the published listing); nothing is installed in Chrome. Box left unticked: no browser opens. No default browser or no network: the error (if any) does not undo the installation, which stays listed in "Apps" and registered | NOT RUN |
+| A6 | Store box ticked | Default browser opens exactly `https://chromewebstore.google.com/detail/memocampus/<release id>`, that is `https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla` (the published listing); nothing is installed in Chrome. Box left unticked: no browser opens. No default browser or no network: the error (if any) does not undo the installation, which stays listed in "Apps" and registered | NOT RUN |
 | A7 | Silent install (`/VERYSILENT`) | Neither the tray nor the browser is started | NOT RUN |
 | A8 | Data | `Vault`, `config.json`, `policy.json`, `tray-settings.json` (other than created by a ticked tray start), token and keys: unchanged / absent as before; MCP publication not approved | NOT RUN |
 | A9 | The test installer (`...-INSTALLER-TEST.exe`) | Has no Run section and no Store link; uses its own AppId, folder and private keys; real Chrome and Run keys untouched | NOT RUN |
@@ -159,6 +162,6 @@ refusal); they are partial evidence and are still to be run in the VM.
 
 ## Release rule
 
-The release candidate is publishable only when **every row of A to D and F is PASS with evidence, section E
+This rule applies to v0.1.0 unchanged. The release candidate is publishable only when **every row of A to D and F is PASS with evidence, section E
 is observed, and nobody has had to edit a result**. Any FAIL is a release blocker. This file is the
 checklist; the evidence lives wherever the PO keeps release records.
