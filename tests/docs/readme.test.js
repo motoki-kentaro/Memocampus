@@ -1,8 +1,10 @@
 // The user READMEs (Issue #86): README.md (Japanese) and README.en.md (English); docs/development.md for links.
 //
 // What this checks: the two languages have the same structure; links and anchors resolve; quoted screen labels
-// are the extension's and the tray's own text; the distribution status says "under review, not public" and no
-// known wording claims otherwise; specification numbers agree with the code's constants; and the safety
+// are the extension's and the tray's own text; the distribution status says the extension is in the Chrome Web Store
+// (one exact listing address, the one the product installer opens) and the Windows installer is not public yet, and
+// no known wording claims otherwise; the installation steps are the same in both languages; specification numbers
+// agree with the code's constants; and the safety
 // statements that users rely on are present, in the section they belong to.
 //
 // What it cannot check: whether a sentence is true. A statement can be reversed in words the patterns below do
@@ -135,35 +137,90 @@ test("each README links the privacy policy in its own language", () => {
   assert.ok(!docs[EN].includes("https://memocampus.github.io/privacy/"));
 });
 
-test("the distribution status is 'under review, not public', and nothing presents another as available", () => {
-  // The status notice before section 1, and the unconfirmed items in section 3.
-  assert.match(intro(docs[JA]), /審査中/);
-  assert.match(intro(docs[JA]), /まだ一般公開していません|公開前/);
-  assert.match(intro(docs[EN]), /under review/);
-  assert.match(intro(docs[EN]), /not been (released|published)|not (yet )?(released|published)/);
+// The published Chrome Web Store listing (Issue #100). Exactly this address, nothing derived or shortened. It must
+// also be what the product installer opens: its [Run] address with the release gate's extension id filled in.
+const STORE_ID = "cdklofjfcjagkaclekmicliailmlnfla";
+const STORE_URL = `https://chromewebstore.google.com/detail/memocampus/${STORE_ID}`;
+/** The `[text](url)` links whose url is exactly the Store listing. */
+const storeLinks = (md) => [...md.matchAll(/\[([^\]]+)\]\(([^)\s]+)\)/g)].filter(([, , url]) => url === STORE_URL).map(([, text]) => text);
+
+test("the extension is linked to its exact Chrome Web Store listing, the same address the product installer opens", () => {
+  const gate = JSON.parse(read("installer/release-gate.json"));
+  assert.equal(gate.extensionId, STORE_ID, "the release gate holds the published extension id");
+  const run = /^Filename: "(https:\/\/chromewebstore\.google\.com\/[^"]*)"; Description: "\{cm:McOpenStorePage\}"/m.exec(read("installer/memocampus.iss"));
+  assert.ok(run, "the installer offers the Store page on its last page");
+  assert.equal(run[1].replace("{#ChromeExtensionId}", gate.extensionId), STORE_URL);
+  for (const md of [docs[JA], docs[EN]]) {
+    // In the status notice and in the table of section 3, with a link text that says where it goes.
+    assert.equal(storeLinks(intro(md)).length, 1);
+    assert.equal(storeLinks(section(md, 3)).length, 1);
+    for (const text of storeLinks(md)) assert.match(text, /Chrome Web Store/);
+    // Any other Store address (another form of the listing, the old store, another id) is not allowed.
+    for (const [url] of md.matchAll(/https?:\/\/[^\s)>`]*(chromewebstore|chrome\.google\.com\/webstore)[^\s)>`]*/g)) assert.equal(url, STORE_URL);
+  }
+  assert.deepEqual(storeLinks(docs[EN]).length, storeLinks(docs[JA]).length);
+});
+
+test("section 3 gives the same installation steps in both languages: the Windows app, the extension from the Store, then section 4", () => {
+  // The numbered list of section 3 (its heading line, "3. ...", is not a step).
+  const steps = (md) => [...section(md, 3).replace(/^.*\n/, "").matchAll(/^(\d+)\. (.+)$/gm)].map((m) => m[2]);
+  const [ja1, ja2, ja3] = steps(docs[JA]);
+  const [en1, en2, en3] = steps(docs[EN]);
+  assert.equal(steps(docs[JA]).length, 3);
+  assert.equal(steps(docs[EN]).length, 3);
+  // 1: the installer, which installs only the Windows side and not the extension.
+  assert.match(ja1, /Windowsアプリのインストーラー[^。]*実行/);
+  assert.match(ja1, /Windows側の部品だけ[^。]*Chrome拡張機能は入れません/);
+  assert.match(en1, /installer of the Windows app/);
+  assert.match(en1, /only the Windows parts[^.]*does not install the Chrome extension/);
+  // 2: the user adds the extension from the Store; the installer's last-page choice only opens the page.
+  assert.match(ja2, /Chrome Web Store[^。]*Chromeに拡張機能を追加/);
+  assert.match(en2, /Chrome Web Store and add the extension to Chrome/);
+  // 3: the first-run setup, where the Vault and recording need the user.
+  assert.match(ja3, /\[4章\]\(#4-初回セットアップ\)/);
+  assert.match(en3, /\[section 4\]\(#4-initial-setup\)/);
+  // The two parts are separate and both needed, in the table and in section 2.
+  assert.match(section(docs[JA], 3), /2つの部品を別々に導入[^。]*。どちらか一方だけでは記録できません/);
+  assert.match(section(docs[EN], 3), /two parts, installed separately\. Neither can record on its own/);
+  // The installer's last-page choice is quoted with the installer's own text (up to its parenthesised note).
+  const isl = (lang) => /^McOpenStorePage=(.+?)(?:（| \()/m.exec(read(`installer/i18n/${lang}.isl`))[1];
+  assert.ok(ja2.includes(`「${isl("ja")}」`), `README.md quotes 「${isl("ja")}」`);
+  assert.ok(en2.includes(`"${isl("en")}"`), `README.en.md quotes "${isl("en")}"`);
+  assert.ok(section(docs[JA], 3).includes(`「${isl("ja")}」`) && section(docs[EN], 3).includes(`"${isl("en")}"`));
+});
+
+test("the distribution status: the extension is in the Store, the Windows installer is not public yet, and nothing claims otherwise", () => {
+  // The status notice before section 1, and the status and unconfirmed items in section 3.
+  assert.match(intro(docs[JA]), /Windowsアプリのインストーラーは、まだ一般公開していません/);
+  assert.match(intro(docs[EN]), /installer of the Windows app[^.]*has not been released to the public yet/);
+  assert.match(section(docs[JA], 3), /Windowsアプリのインストーラーは、まだ一般公開していません/);
+  assert.match(section(docs[EN], 3), /installer of the Windows app has not been released to the public yet/);
   assert.match(section(docs[JA], 3), /未確認/);
   assert.match(section(docs[EN], 3), /[Nn]ot confirmed/);
-  // Known wordings that would claim publication or approval. A claim in other words is not caught.
+  // The review is over: no "under review" status is left anywhere.
+  assert.doesNotMatch(docs[JA], /審査/);
+  assert.doesNotMatch(docs[EN], /under review|in review/i);
+  // Known wordings that would claim the installer is available, or that everything is confirmed. A claim in other
+  // words is not caught.
   const claims = {
-    [JA]: [/公開済み/, /承認済みです/, /審査に(通り|合格し)ました/, /公開しました/, /配信中/, /すべて確認済み/],
-    [EN]: [/has been (approved|published|released)/i, /(?<!\b(once|until|when|after|before|if) it )\bis (now )?(available|published) (in|on|from) the Chrome Web Store/i,
-      /\bnow (available|published)\b/i, /approved (in|by) the Chrome Web Store/i, /\ball (of it )?(has been )?confirmed\b/i],
+    [JA]: [/インストーラー[^。\n]*(公開済み|公開しました|公開しています|配布中|配信中|ダウンロードでき)/, /すべて確認済み/],
+    [EN]: [/installer[^.\n]*(has been (published|released)|is (now )?(available|published|released)|can (now )?be downloaded)/i,
+      /\ball (of it )?(has been )?confirmed\b/i],
   };
   for (const [file, patterns] of Object.entries(claims)) {
     for (const re of patterns) assert.doesNotMatch(docs[file], re, `${file} claims availability: ${re}`);
   }
   for (const file of [JA, EN]) {
     const md = docs[file];
-    // The Store listing is added after publication; the review pre-release is not mentioned for users at all.
-    for (const banned of ["chromewebstore.google.com", "chrome.google.com/webstore", "cdklofjfcjagkaclekmicliailmlnfla", "review.1",
-      "/releases/", "プレリリース", "pre-release", "prerelease"]) {
+    // No download address for the installer is made up; the review pre-release is not mentioned for users at all.
+    for (const banned of ["chrome.google.com/webstore", "review.1", "/releases/", "プレリリース", "pre-release", "prerelease"]) {
       assert.ok(!md.toLowerCase().includes(banned), `${file} must not contain ${banned}`);
     }
     // The badges' own URLs are checked exactly by the badge test above; only the badge markup itself is left out here,
-    // so the same URLs anywhere else are still unexpected.
+    // so the same URLs anywhere else are still unexpected. The Store listing is allowed as one exact address only.
     const urls = [...md.replace(BADGE, "").matchAll(/https?:\/\/[^\s)>`]+/g)].map((m) => m[0]);
     const allowed = [/^https:\/\/memocampus\.github\.io\/(en\/)?privacy\/$/, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/];
-    for (const url of urls) assert.ok(allowed.some((re) => re.test(url)), `${file}: unexpected URL ${url}`);
+    for (const url of urls) assert.ok(url === STORE_URL || allowed.some((re) => re.test(url)), `${file}: unexpected URL ${url}`);
   }
   // The release version appears only as planned.
   for (const line of docs[JA].split("\n").filter((l) => l.includes("0.8.0"))) assert.match(line, /予定/);
