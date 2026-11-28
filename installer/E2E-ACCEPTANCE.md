@@ -1,18 +1,22 @@
 # Memocampus for Windows: real-installer acceptance gate (Issue #67, Slice 3B-4)
 
-**Status: NOT RUN unless the row says otherwise** (A10 is PASS for the C runtime start only; see the rows).
-A3 is no longer blocked (the Chrome Web Store id `cdklofjfcjagkaclekmicliailmlnfla` is recorded in `installer\release-gate.json`, so
-product builds can be made) but it has not been run: it is NOT RUN, like every other row. No product installer has been executed on any machine for Slices 3B-1 to 3B-4. The code has been compiled, unit-tested against private registry keys and real
-scratch trays, and statically checked, but the Inno Setup engine's own behaviour (what runs when,
-exit codes, what `Abort` does in each event) has not been observed. **This gate must be passed before the
-public release of v0.1.0**, the first public release of the Windows app (Issue #102), run on the very Setup file that
-is to be published (same SHA-256), not on the review pre-release `v0.1.0-review.1`. Nothing here may be written up as PASS until someone has run it and kept the
-evidence.
+**Status: NOT RUN unless the row says otherwise** (A10 is PASS for the C runtime start only; see the rows). The
+product owner ran the product installer (the v0.1.0 release candidate) in an isolated Windows 11 x64 VM and reported
+what was confirmed, without recorded evidence, so no row has been recorded as PASS from that run: those reports are recorded as **PO-CONFIRMED** under
+"PO-confirmed observations" below, which is not PASS and not a direct verification; the rows they touch say so and
+stay NOT RUN. A3 is no longer blocked (the Chrome Web Store id `cdklofjfcjagkaclekmicliailmlnfla` is recorded in
+`installer\release-gate.json`, so product builds can be made). The code has been compiled, unit-tested against private
+registry keys and real scratch trays, and statically checked; the Inno Setup engine's own behaviour (what runs when,
+exit codes, what `Abort` does in each event) has not been observed directly. **The v0.1.0 release rule below must be
+met before the public release of v0.1.0**, the first public release of the Windows app (Issue #102), on the very Setup
+file that is to be published (same SHA-256), not on the review pre-release `v0.1.0-review.1`. Nothing here may be
+written up as PASS until someone has run it and kept the evidence.
 
 ## Where to run it
 
-In an isolated Windows 11 x64 environment that is **not** a development machine (Windows 11 is the platform
-accepted for v0.1.0; Windows 10 is not verified, and nothing here may be recorded as proving it): a fresh VM (snapshot
+In an isolated Windows 11 x64 environment that is **not** a development machine (Windows 11 x64 is the platform
+verified for v0.1.0; Windows 10 is not verified, and nothing here may be recorded as proving it; Windows Server is not
+supported, and no result obtained on it counts): a fresh VM (snapshot
 before each case), or a separate Windows user on a spare PC. **Never** on a machine whose real Chrome
 profile, vault (`%LOCALAPPDATA%\Memocampus`), development Native Messaging registrations or MCP
 clients matter. The test-mode installer (`/DInstallerTestMode`) does not make this safe on a real
@@ -76,20 +80,44 @@ the running `memocampus-*` processes. It is read-only.
 The result column is filled in by whoever ran the case: `PASS (date, who, evidence file)`,
 `FAIL (what)` or `NOT RUN`.
 
+**PO-CONFIRMED** is a different kind of record: the product owner's own report of what they saw, written as
+`PO-CONFIRMED (date, who, environment, evidence: <file> | none, statement only)`. It always says whether evidence
+exists. It is never written as PASS, never counted as a direct verification of a row, and covers only what the report
+names: the rest of a row it touches stays NOT RUN.
+
+## PO-confirmed observations (v0.1.0 release candidate)
+
+Reported by the product owner in Issue #102 (reported 2026-11-28; the date of the VM run is to be entered by the PO),
+for the release candidate `Memocampus-Setup-x64.exe`, SHA-256 `0a0bd02bd1daf4df0ed67e6f4fd20f28155088d2d145f6b1a15b6ba593146f5d` (run 46094619251,
+commit a0018f2663982e85fd9a24d412a22d5b7e0e07ba), in an isolated Windows 11 x64 VM. **Evidence: none attached
+(statement only)** unless a file is named here later. Nothing below is PASS.
+
+| # | What the PO confirmed | Rows it touches (in part only) | Not confirmed by it (stays NOT RUN) |
+|---|---|---|---|
+| O1 | The Setup file's SHA-256 equals the release candidate's | the precondition above | |
+| O2 | The installation succeeded | A1, A2 | no administrator prompt and a standard user (A1); the list of files (A2) |
+| O3 | The Web Store extension connected to the installed Native Host | A3, A10 | whether the VM had no Visual C++ runtime (A10); the tray and MCP start (A10) |
+| O4 | Browsing history was saved to the vault and found by search | outside these rows (Issue #69) | |
+| O5 | The Native Messaging registration names the official id, and `allowed_origins` matches it | A3 | that the dev and legacy registrations are unchanged (A3) |
+| O6 | The last page's checkboxes behaved as expected | A4, A6 | which choices were exercised; the texts in each language; that both start unticked (A4) |
+| O7 | Offline, the installation stayed complete | A6 | |
+| O8 | A silent install succeeded | A7, F8 | that neither the tray nor the browser was started (A7); the other language (F8) |
+| O9 | The uninstall succeeded | C4 | the files, shortcut and uninstaller removed (C4); the tray quit (C1); the registrations (C2, C3); **the data kept (C5)**; the extension kept (C6) |
+
 ## A. New installation
 
 | # | Check | Expected | Result |
 |---|-------|----------|--------|
-| A1 | Run the setup as a standard user (no administrator prompt) | Succeeds, no UAC prompt | NOT RUN |
-| A2 | Files | `%LOCALAPPDATA%\Programs\Memocampus` holds the three executables, the generated `io.github.memocampus.vault.json`, and the uninstaller; nothing under Program Files | NOT RUN |
-| A3 | Native Messaging | `HKCU\Software\Google\Chrome\NativeMessagingHosts\io.github.memocampus.vault` default value = the manifest path; manifest `path` = `memocampus-native-host.exe` in the install folder; `allowed_origins` = exactly `chrome-extension://<release id>/`, the release id being `cdklofjfcjagkaclekmicliailmlnfla` (`installer\release-gate.json`); no dev / legacy key changed. Purpose: the installer's own product registration path, with the product build and the Web Store extension (added from `https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla`; `chrome://extensions` shows that id). Not provable with the test build or with the temporary development registration | NOT RUN (no longer blocked: the id is recorded in `installer\release-gate.json` and product builds can be made; the release gate is not relaxed) |
-| A4 | Last page | Says Setup installed the programs and the Chrome connection, and that the extension, the vault and remembering are separate and approved in Chrome: the extension is added by the user, from the Chrome Web Store (`FinishedLabel` in `installer\i18n\en.isl` / `ja.isl`). Offers two **unticked** boxes: start Memocampus (`McLaunchTray`), and "Open Memocampus in the Chrome Web Store" / 「Chrome Web Store で Memocampus を開く」 (`McOpenStorePage`). In English and in Japanese | NOT RUN |
+| A1 | Run the setup as a standard user (no administrator prompt) | Succeeds, no UAC prompt | NOT RUN (PO-CONFIRMED in part: O2) |
+| A2 | Files | `%LOCALAPPDATA%\Programs\Memocampus` holds the three executables, the generated `io.github.memocampus.vault.json`, and the uninstaller; nothing under Program Files | NOT RUN (PO-CONFIRMED in part: O2) |
+| A3 | Native Messaging | `HKCU\Software\Google\Chrome\NativeMessagingHosts\io.github.memocampus.vault` default value = the manifest path; manifest `path` = `memocampus-native-host.exe` in the install folder; `allowed_origins` = exactly `chrome-extension://<release id>/`, the release id being `cdklofjfcjagkaclekmicliailmlnfla` (`installer\release-gate.json`); no dev / legacy key changed. Purpose: the installer's own product registration path, with the product build and the Web Store extension (added from `https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla`; `chrome://extensions` shows that id). Not provable with the test build or with the temporary development registration | NOT RUN (no longer blocked: the id is recorded in `installer\release-gate.json` and product builds can be made; the release gate is not relaxed; PO-CONFIRMED in part: O3, O5) |
+| A4 | Last page | Says Setup installed the programs and the Chrome connection, and that the extension, the vault and remembering are separate and approved in Chrome: the extension is added by the user, from the Chrome Web Store (`FinishedLabel` in `installer\i18n\en.isl` / `ja.isl`). Offers two **unticked** boxes: start Memocampus (`McLaunchTray`), and "Open Memocampus in the Chrome Web Store" / 「Chrome Web Store で Memocampus を開く」 (`McOpenStorePage`). In English and in Japanese | NOT RUN (PO-CONFIRMED in part: O6) |
 | A5 | Tray box ticked | Tray starts once, as the user, no arguments; a second start (Start menu) exits quietly (already running) | NOT RUN |
-| A6 | Store box ticked | Default browser opens exactly `https://chromewebstore.google.com/detail/memocampus/<release id>`, that is `https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla` (the published listing); nothing is installed in Chrome. Box left unticked: no browser opens. No default browser or no network: the error (if any) does not undo the installation, which stays listed in "Apps" and registered | NOT RUN |
-| A7 | Silent install (`/VERYSILENT`) | Neither the tray nor the browser is started | NOT RUN |
+| A6 | Store box ticked | Default browser opens exactly `https://chromewebstore.google.com/detail/memocampus/<release id>`, that is `https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla` (the published listing); nothing is installed in Chrome. Box left unticked: no browser opens. No default browser or no network: the error (if any) does not undo the installation, which stays listed in "Apps" and registered | NOT RUN (PO-CONFIRMED in part: O6, O7) |
+| A7 | Silent install (`/VERYSILENT`) | Neither the tray nor the browser is started | NOT RUN (PO-CONFIRMED in part: O8) |
 | A8 | Data | `Vault`, `config.json`, `policy.json`, `tray-settings.json` (other than created by a ticked tray start), token and keys: unchanged / absent as before; MCP publication not approved | NOT RUN |
 | A9 | The test installer (`...-INSTALLER-TEST.exe`) | Has no Run section and no Store link; uses its own AppId, folder and private keys; real Chrome and Run keys untouched | NOT RUN |
-| A10 | Clean Windows with no Visual C++ Redistributable | Purpose: the installed executables start without the Visual C++ runtime (C runtime linked statically). The tray starts from the Start menu with no `VCRUNTIME140.dll` error; Chrome launches the installed `memocampus-native-host.exe` and an MCP client launches `memocampus-mcp.exe` without a missing-DLL error. `node scripts\pe-imports.mjs --check` on the installed files reports no Visual C++ runtime DLL. With the test build, Chrome reaches the executable only through the temporary development registration above; that proves the executable starts, not the installer's product registration (A3, out of scope here) | PASS for the C runtime start (clean-VM run reported to the PO; Chrome connection made through the manual temporary development registration `com.memocampus.vault`; the product registration path is out of scope and stays with A3). Date, who and evidence file: to be entered from the PO's release record |
+| A10 | Clean Windows with no Visual C++ Redistributable | Purpose: the installed executables start without the Visual C++ runtime (C runtime linked statically). The tray starts from the Start menu with no `VCRUNTIME140.dll` error; Chrome launches the installed `memocampus-native-host.exe` and an MCP client launches `memocampus-mcp.exe` without a missing-DLL error. `node scripts\pe-imports.mjs --check` on the installed files reports no Visual C++ runtime DLL. With the test build, Chrome reaches the executable only through the temporary development registration above; that proves the executable starts, not the installer's product registration (A3, out of scope here) | PASS for the C runtime start (clean-VM run reported to the PO; Chrome connection made through the manual temporary development registration `com.memocampus.vault`; the product registration path is out of scope and stays with A3). Date, who and evidence file: to be entered from the PO's release record. Product build: PO-CONFIRMED in part (O3) |
 
 ## B. Update (old setup installed, then the new one)
 
@@ -111,7 +139,7 @@ The result column is filled in by whoever ran the case: `PASS (date, who, eviden
 | C1 | Tray running | Quit cooperatively, then removal proceeds | NOT RUN |
 | C2 | Native Messaging | Our registration value removed; key removed only if empty; manifest deleted only if it is exactly what the installer wrote | NOT RUN |
 | C3 | Run value | `MemocampusTray` removed only if it names exactly `{app}\memocampus-tray.exe`; `StartupApproved` untouched | NOT RUN |
-| C4 | Files | Executables, shortcut and uninstaller removed | NOT RUN |
+| C4 | Files | Executables, shortcut and uninstaller removed | NOT RUN (PO-CONFIRMED in part: O9) |
 | C5 | Data | Vault, settings, keys, token, backups, logs kept (uninstall removes the program, not the memory) | NOT RUN |
 | C6 | Chrome | Extension not removed; dev and legacy registrations unchanged | NOT RUN |
 
@@ -157,11 +185,38 @@ refusal); they are partial evidence and are still to be run in the VM.
 | F5 | In each language: the last page (A4), its two choices, and the refusals that can be provoked (D1 foreign registration, B3/B4 files in use, B5 tray that does not quit, D5 registration failure, D6 cleanup failure, B8 rollback) | Every text in the chosen language, complete, not cut off, no garbled characters; identifiers (`ROLLBACK_FAILED`, paths, host name) unchanged; the details under a Japanese message (the error or report lines) are English by design | NOT RUN in the VM. Development machine: D1 (foreign registration in the test build's private key) shown in Japanese and in English in *Preparing to Install*, nothing installed, the foreign value unchanged |
 | F6 | Update: install in Japanese, then run the new Setup on English Windows (or the reverse) | The dialog preselects the language of the installed copy (`UsePreviousLanguage`); the update behaves exactly as B1 to B8 | NOT RUN |
 | F7 | Uninstall after an install in each language | The uninstaller speaks the language of the last install or update, without a language dialog; its messages (C1, D6, kept entries) in that language | NOT RUN |
-| F8 | Silent install (`/VERYSILENT`) on each Windows | No language dialog, no prompt; the result is as A7 | NOT RUN |
+| F8 | Silent install (`/VERYSILENT`) on each Windows | No language dialog, no prompt; the result is as A7 | NOT RUN (PO-CONFIRMED in part: O8) |
 | F9 | The behaviour does not change with the language | For the same case, the same files, registrations, exit code and log decisions (`e2e-snapshot.ps1 -Compare` of a Japanese and an English run of A1, B6, C2) | NOT RUN (the Pascal self-tests pass the same checks in both languages; that is code, not the engine) |
 
 ## Release rule
 
-This rule applies to v0.1.0 unchanged. The release candidate is publishable only when **every row of A to D and F is PASS with evidence, section E
-is observed, and nobody has had to edit a result**. Any FAIL is a release blocker. This file is the
+### v0.1.0 (the first public release, Issue #102)
+
+Chosen by the product owner on the risk of a first release (2026-11-28): nobody updates from an earlier public
+version, so the update cases (B) are not needed for it; the fault, engine and language cases (D, E, F) are covered for
+v0.1.0 by the automated checks of the code. The release candidate is publishable only when **all** of these hold:
+
+| # | Requirement | Met by |
+|---|---|---|
+| R1 | The file published is the release candidate: SHA-256, `build-info.json` (product channel, `gitCommit` = the tagged commit, working tree not modified), the official extension id | the Slice 3 record and O1 |
+| R2 | A new installation on Windows 11 x64 completes, registers the host for the official id only, and the Web Store extension records and finds pages through it | PO-CONFIRMED O2, O3, O4, O5 |
+| R3 | The last page's choices work, the Store page opens only when ticked, and the installation stays complete offline | PO-CONFIRMED O6, O7, with the static contract (`verify-static.ps1`: unticked, postinstall, skipifsilent, the exact listing address) |
+| R4 | A silent install completes | PO-CONFIRMED O8, with the static contract (`skipifsilent`) |
+| R5 | The uninstall removes the program and keeps the user's data | PO-CONFIRMED O9 for the uninstall. **That the data is kept (C5) has not been checked directly on a real machine**: it rests on the static checks (the installer refers to no vault, policy, settings, token or data folder; the uninstall removes only its own registrations) and on the uninstall having succeeded. The product owner accepts this residual risk for v0.1.0 (2026-11-28) |
+| R6 | The automated gates are green and unchanged: CI (JavaScript, Rust, CI gate), `windows-dist.yml` (checks and the product build), `verify-static.ps1` with `-Negative` and `-Compile`, `verify-dist.ps1` with `-Negative`, the Pascal self-tests, and the release gate (`installer\release-gate.json`) | the release candidate's run and the CI of its commit |
+| R7 | The product owner's decisions just before publishing: shipping unsigned, and the Inno Setup licence | the product owner |
+
+Disclosed with the release (the release notes and the READMEs): the Setup program is unsigned (SmartScreen warns);
+Windows 11 x64 is the verified platform, Windows 10 is not verified and Windows Server is not supported; installing
+over an earlier build, the fault cases and the language detection have not been observed on a real installer; a user
+of the review build `v0.1.0-review.1` uninstalls it before installing v0.1.0.
+
+The rows not listed above stay NOT RUN; none is written as PASS. Any FAIL is a release blocker. This file is the
 checklist; the evidence lives wherever the PO keeps release records.
+
+### Later releases
+
+There is no rule that every row must pass. For each release the cases are chosen from what changed and the risk of
+it, and the choice and its reasons are recorded in that release's issue; this file is the catalogue to choose from. A
+chosen case is recorded as PASS (with evidence), PO-CONFIRMED (saying whether evidence exists) or FAIL. The automated
+gates of R6 are never relaxed.
