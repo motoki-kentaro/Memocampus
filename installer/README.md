@@ -15,11 +15,14 @@ The first public release of the Windows app is **v0.1.0** (Issue #102), the same
 already published in the Chrome Web Store
 (`https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla`). Its extension id,
 `cdklofjfcjagkaclekmicliailmlnfla`, is recorded in `installer\release-gate.json`, so product builds can be made; the
-manual workflow has built them on GitHub. **No product installer has been accepted yet**: the only product build so far
-is the Chrome Web Store review pre-release `v0.1.0-review.1`, which predates the store link of Issue #100 and is not the
-release. `installer\E2E-ACCEPTANCE.md` lists every case that must pass, with evidence, in an isolated Windows 11
-environment before v0.1.0 is made public; apart from the partial A10 (the C runtime start, with the test build), all of
-them are NOT RUN. Windows 10 is not verified.
+manual workflow has built them on GitHub. The v0.1.0 release candidate is `Memocampus-Setup-x64.exe`, SHA-256
+`0a0bd02bd1daf4df0ed67e6f4fd20f28155088d2d145f6b1a15b6ba593146f5d` (run 46094619251, commit
+a0018f2663982e85fd9a24d412a22d5b7e0e07ba); the review pre-release `v0.1.0-review.1` predates the store link of Issue
+#100 and is not the release. `installer\E2E-ACCEPTANCE.md` holds the acceptance cases and the release rule: for
+v0.1.0 a risk-based rule (R1 to R7) chosen by the product owner. The product owner ran the release candidate in an
+isolated Windows 11 x64 VM and reported what was confirmed; those reports are recorded as PO-CONFIRMED, which is not
+PASS and not a direct verification, and every row is still NOT RUN (A10: PASS for the C runtime start only, with the
+test build). Windows 11 x64 is the verified platform; Windows 10 is not verified; Windows Server is not supported.
 
 ## What the installer does
 
@@ -423,15 +426,18 @@ never told to switch any Windows protection off (SmartScreen, Microsoft Defender
 
 Resolved: the Chrome Web Store extension id is recorded in `installer\release-gate.json` (Issue #89); the manual workflow
 has run on GitHub and built a product installer; the extension version is 0.1.0 in the Web Store and in
-`extension\manifest.json`, the app version for the release is 0.1.0 (no version is raised).
+`extension\manifest.json`, the app version for the release is 0.1.0 (no version is raised). The release candidate was
+built by `windows-dist.yml` (product channel, `0.1.0`) from `main` after Issue #100 (Slice 3, above). The review
+pre-release `v0.1.0-review.1` is kept as it is and is not the release: its assets are never reused.
 
 Open:
 
-1. A release candidate built by `windows-dist.yml` (product channel, `0.1.0`) from a commit on `main`, after Issue #100.
-   The review pre-release `v0.1.0-review.1` is kept as it is and is not the release: its assets are never reused.
-2. Every case of `installer\E2E-ACCEPTANCE.md` run on **that** Setup file (same SHA-256) in an isolated Windows 11
-   environment, with evidence, under its release rule (all NOT RUN today apart from the partial A10). Windows 10 is not
-   verified.
+1. The v0.1.0 release rule of `installer\E2E-ACCEPTANCE.md` (R1 to R7), on **that** Setup file (same SHA-256). It
+   records the product owner's VM observations as PO-CONFIRMED, never as PASS, and states the residual risk the
+   product owner accepted: that the uninstall keeps the user's data (C5) has not been checked directly on a real
+   machine. Windows 11 x64 is the verified platform; Windows 10 is not verified; Windows Server is not supported.
+2. The release notes disclose what was not verified (the rule lists it) and tell users of the review build
+   `v0.1.0-review.1` to uninstall it before installing v0.1.0.
 3. A decision to ship unsigned (or code signing), and on the Inno Setup licence (above).
 4. Independent review and the product owner's approval. Then, by hand: the annotated tag `v0.1.0` on the commit the
    accepted release candidate was built from (its `build-info.json` `gitCommit`), never moved; the GitHub Release with
