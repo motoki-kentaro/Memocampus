@@ -11,7 +11,7 @@
 Memocampus records the web pages, images and page originals you view in Google Chrome on Windows into a "Vault" on your own PC, so that you can find them again later.
 
 > [!IMPORTANT]
-> The Chrome extension can be added from the [Memocampus page in the Chrome Web Store](https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla). The installer of the Windows app, which recording needs, has not been released to the public yet; how to get it will be added to this README when it is (section 3).
+> Memocampus v0.1.0 has been officially released. Get the installer of the Windows app from the [Memocampus v0.1.0 page in GitHub Releases](https://github.com/motoki-kentaro/Memocampus/releases/tag/v0.1.0), and the Chrome extension from the [Memocampus page in the Chrome Web Store](https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla). Recording needs both (section 3).
 
 ## 1. What Memocampus is
 
@@ -28,7 +28,7 @@ Privacy policy: <https://memocampus.github.io/en/privacy/>
 
 ## 2. Requirements
 
-- Windows 10 / 11 (x64). Actual operation has been checked only in a Windows 11 VM, not on Windows 10 (section 3).
+- Windows 10 / 11 (x64). Operation has been checked only on Windows 11 x64; Windows 10 is not verified. Windows Server is not supported (section 3).
 - Google Chrome 116 or later (Windows)
 - Both of these two parts are needed:
   - **The "Memocampus" Chrome extension**: the screens, and accepting what is recorded.
@@ -45,18 +45,19 @@ Memocampus has two parts, installed separately. Neither can record on its own (s
 | Part | Where to get it | Current status |
 |---|---|---|
 | Chrome extension "Memocampus" | [Memocampus page in the Chrome Web Store](https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla) | Published. You add it to Chrome yourself, in the store |
-| Windows app (Native Host, MCP server, tray) | The installer `Memocampus-Setup-x64.exe` | Will be provided with the release. Where to get it will be added to this README at that time |
+| Windows app (Native Host, MCP server, tray) | The installer `Memocampus-Setup-x64.exe` on the [Memocampus v0.1.0 page in GitHub Releases](https://github.com/motoki-kentaro/Memocampus/releases/tag/v0.1.0) | Published (v0.1.0). You run the installer yourself |
 
 ### Installation steps
 
-1. Run the installer of the Windows app. The installer installs only the Windows parts; it does not install the Chrome extension.
+1. Download `Memocampus-Setup-x64.exe` from the GitHub Releases page, check its SHA-256 (see the warning below), then run the installer of the Windows app. The installer installs only the Windows parts; it does not install the Chrome extension.
 2. Open the Memocampus page in the Chrome Web Store and add the extension to Chrome. If you tick "Open Memocampus in the Chrome Web Store" on the installer's last page, this page opens in your default browser when Setup finishes.
 3. Continue with the initial setup in [section 4](#4-initial-setup). A Vault is created and recording starts only when you do so in the extension.
 
-### Current status
+### Release status
 
-- The Chrome extension is published in the Chrome Web Store.
-- The installer of the Windows app has not been released to the public yet. It will be provided with the release, and where to get it will be added to this README at that time.
+- The current release is v0.1.0. The installer of the Windows app is published in GitHub Releases, and the Chrome extension in the Chrome Web Store.
+- The Windows app does not update itself. New versions are published in GitHub Releases (section 9).
+- If you installed the earlier review build `v0.1.0-review.1`, uninstall it first, then install v0.1.0.
 - How to build and try it from source is in the [developer guide](docs/development.md) (for developers).
 
 ### What the installer does
@@ -74,17 +75,19 @@ What the installer does **not** do: install the extension, create a Vault, start
 The last page has two choices ("Start Memocampus now" and "Open Memocampus in the Chrome Web Store"), both off by default. The store choice only opens the page; it does not install the extension. If the page cannot be opened, the installation stays complete. When the tray is started for the first time, starting the tray at Windows logon and starting the MCP server automatically are both turned on. You can change both in the tray's menu ("Start with Windows", "Start MCP server automatically"). Even while the MCP server runs, it returns nothing from the Vault to MCP clients until you approve MCP access for that Vault.
 
 > [!WARNING]
-> The current installer is not code-signed, so Windows SmartScreen may show a warning (unknown publisher). Run it only if where you got it and the file's SHA-256 match what is officially published.
+> The v0.1.0 installer is not code-signed, so Windows SmartScreen may show a warning (unknown publisher). Get it from the GitHub Releases page above, and run it only if the file's SHA-256 matches the value in `SHA256SUMS.txt` on the same page. PowerShell's `Get-FileHash .\Memocampus-Setup-x64.exe` shows the SHA-256.
 
 ### What has been confirmed
 
-- Confirmed: the project owner checked the following in an isolated Windows 11 VM:
-  - installing with the product installer built by GitHub Actions
-  - the Native Messaging Host being registered
-  - connecting from a test extension that reproduces the official extension ID
-  - saving to the Vault
-  - starting the MCP server
-- Not confirmed yet: an actual install from the Chrome Web Store, updating, uninstalling, operation on Windows 10, and the other acceptance items (`installer/E2E-ACCEPTANCE.md`).
+- Confirmed: the project owner ran the same v0.1.0 installer as the one published (identical SHA-256) in an isolated Windows 11 x64 VM and checked the following:
+  - the installation completing (a normal install and a silent install)
+  - the extension added from the Chrome Web Store connecting to the installed Native Host
+  - visits being saved to the Vault and found by search
+  - the registration of the connection with Chrome allowing only the official extension ID
+  - the choices on the last page working as expected, and the installation completing offline
+  - the uninstall completing
+  - the MCP server starting (checked with a product build earlier than v0.1.0)
+- Not confirmed yet: updating from an earlier build (installing over it), the Vault and settings being kept after an uninstall (they are kept by design; section 9), behaviour when something fails, the installer's choice of display language, operation on Windows 10, and the other acceptance items (`installer/E2E-ACCEPTANCE.md`).
 
 ## 4. Initial setup
 
@@ -250,7 +253,7 @@ An image is offered only when "Allow publishing to MCP" is on for one of its sav
 ## 9. Updating and uninstalling
 
 > [!NOTE]
-> This section describes the current design. Actual updating and uninstalling have not been confirmed yet (section 3).
+> This section describes the current design. The uninstall has been confirmed to complete, but actual updating, and the data being kept after an uninstall, have not been confirmed on a real machine yet (section 3).
 
 ### Updating
 
@@ -267,8 +270,8 @@ An image is offered only when "Allow publishing to MCP" is on for one of its sav
 
 ## 10. Known limitations
 
-- Only Google Chrome 116 or later on Windows 10 / 11 (x64) is supported. It does not work with other browsers or operating systems. It has not been checked on Windows 10 yet.
-- The installer of the Windows app has not been released to the public yet (section 3).
+- Only Google Chrome 116 or later on Windows 10 / 11 (x64) is supported. It does not work with other browsers or operating systems. It has not been checked on Windows 10 yet. Windows Server is not supported.
+- The Windows app does not update itself. To update, get the new version from GitHub Releases and run its installer (section 9).
 - The installer is not code-signed.
 - Vaults created by older versions (schema 9 or earlier) cannot be used or converted.
 - Images: images whose site forbids linking from other sites, images that need a login, and `blob:` URLs of a closed page may fail to save. Images above 50 megapixels cannot be copied or shown as thumbnails in the panel (exporting works).

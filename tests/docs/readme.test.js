@@ -1,9 +1,10 @@
 // The user READMEs (Issue #86): README.md (Japanese) and README.en.md (English); docs/development.md for links.
 //
 // What this checks: the two languages have the same structure; links and anchors resolve; quoted screen labels
-// are the extension's and the tray's own text; the distribution status says the extension is in the Chrome Web Store
-// (one exact listing address, the one the product installer opens) and the Windows installer is not public yet, and
-// no known wording claims otherwise; the installation steps are the same in both languages; specification numbers
+// are the extension's and the tray's own text; the distribution status says v0.1.0 is released: the extension is in
+// the Chrome Web Store (one exact listing address, the one the product installer opens) and the Windows installer is
+// on the v0.1.0 GitHub Release (one exact address), and no pre-release wording is left; the verified platforms and
+// the review-build advice are stated; the installation steps are the same in both languages; specification numbers
 // agree with the code's constants; and the safety
 // statements that users rely on are present, in the section they belong to.
 //
@@ -189,39 +190,68 @@ test("section 3 gives the same installation steps in both languages: the Windows
   assert.ok(section(docs[JA], 3).includes(`「${isl("ja")}」`) && section(docs[EN], 3).includes(`"${isl("en")}"`));
 });
 
-test("the distribution status: the extension is in the Store, the Windows installer is not public yet, and nothing claims otherwise", () => {
-  // The status notice before section 1, and the status and unconfirmed items in section 3.
-  assert.match(intro(docs[JA]), /Windowsアプリのインストーラーは、まだ一般公開していません/);
-  assert.match(intro(docs[EN]), /installer of the Windows app[^.]*has not been released to the public yet/);
-  assert.match(section(docs[JA], 3), /Windowsアプリのインストーラーは、まだ一般公開していません/);
-  assert.match(section(docs[EN], 3), /installer of the Windows app has not been released to the public yet/);
+// The v0.1.0 GitHub Release, where the Windows installer is published (Issue #102). Exactly this address.
+const RELEASE_URL = "https://github.com/motoki-kentaro/Memocampus/releases/tag/v0.1.0";
+const releaseLinks = (md) => [...md.matchAll(/\[([^\]]+)\]\(([^)\s]+)\)/g)].filter(([, , url]) => url === RELEASE_URL).map(([, text]) => text);
+
+test("the distribution status: v0.1.0 is released, the installer on its GitHub Release and the extension in the Store", () => {
+  for (const md of [docs[JA], docs[EN]]) {
+    // The Release is linked in the status notice and in the table of section 3, with a text naming GitHub Releases
+    // and the version, and the installer file is named next to it in the table.
+    assert.equal(releaseLinks(intro(md)).length, 1);
+    assert.equal(releaseLinks(section(md, 3)).length, 1);
+    for (const text of releaseLinks(md)) assert.match(text, /GitHub Releases.*v0\.1\.0|v0\.1\.0.*GitHub Releases/);
+    assert.ok(section(md, 3).split("\n").some((l) => l.startsWith("| ") && l.includes(`(${RELEASE_URL})`) && l.includes("`Memocampus-Setup-x64.exe`")),
+      "the table row of the Windows app names the installer and links the Release");
+    // The checksum file of the Release is how the user checks the download.
+    assert.match(section(md, 3), /`SHA256SUMS\.txt`/);
+    assert.match(section(md, 3), /`Get-FileHash \.\\Memocampus-Setup-x64\.exe`/);
+  }
+  assert.match(intro(docs[JA]), /Memocampus v0\.1\.0を正式に公開しました/);
+  assert.match(intro(docs[EN]), /Memocampus v0\.1\.0 has been officially released/);
+  assert.match(section(docs[JA], 3), /\| Windowsアプリ[^\n]*\| 公開中（v0\.1\.0）/);
+  assert.match(section(docs[EN], 3), /\| Windows app [^\n]*\| Published \(v0\.1\.0\)/);
   assert.match(section(docs[JA], 3), /未確認/);
   assert.match(section(docs[EN], 3), /[Nn]ot confirmed/);
-  // The review is over: no "under review" status is left anywhere.
-  assert.doesNotMatch(docs[JA], /審査/);
-  assert.doesNotMatch(docs[EN], /under review|in review/i);
-  // Known wordings that would claim the installer is available, or that everything is confirmed. A claim in other
-  // words is not caught.
-  const claims = {
-    [JA]: [/インストーラー[^。\n]*(公開済み|公開しました|公開しています|配布中|配信中|ダウンロードでき)/, /すべて確認済み/],
-    [EN]: [/installer[^.\n]*(has been (published|released)|is (now )?(available|published|released)|can (now )?be downloaded)/i,
-      /\ball (of it )?(has been )?confirmed\b/i],
+  // No pre-release wording is left: not public yet, to be added later, under review.
+  const stale = {
+    [JA]: [/まだ一般公開していません/, /公開(時|後)にこのREADME/, /追記します/, /公開に合わせて提供/, /審査/, /すべて確認済み/],
+    [EN]: [/not been released to the public/i, /will be added to this README/i, /will be provided with the release/i,
+      /under review|in review/i, /\ball (of it )?(has been )?confirmed\b/i],
   };
-  for (const [file, patterns] of Object.entries(claims)) {
-    for (const re of patterns) assert.doesNotMatch(docs[file], re, `${file} claims availability: ${re}`);
+  for (const [file, patterns] of Object.entries(stale)) {
+    for (const re of patterns) assert.doesNotMatch(docs[file], re, `${file} still says: ${re}`);
   }
+  // Users of the review build uninstall it before installing v0.1.0 (as the release notes say); that is the only
+  // place the review build is named.
+  assert.match(section(docs[JA], 3), /`v0\.1\.0-review\.1` をインストールしている場合は、先にそれをアンインストールしてから、v0\.1\.0をインストール/);
+  assert.match(section(docs[EN], 3), /If you installed the earlier review build `v0\.1\.0-review\.1`, uninstall it first, then install v0\.1\.0/);
   for (const file of [JA, EN]) {
     const md = docs[file];
-    // No download address for the installer is made up; the review pre-release is not mentioned for users at all.
-    for (const banned of ["chrome.google.com/webstore", "review.1", "/releases/", "プレリリース", "pre-release", "prerelease"]) {
+    assert.equal(md.split("review.1").length - 1, 1, `${file} names the review build once`);
+    // No other download address is made up: the Release and the Store listing are each allowed as one exact address.
+    for (const banned of ["chrome.google.com/webstore", "プレリリース", "pre-release", "prerelease"]) {
       assert.ok(!md.toLowerCase().includes(banned), `${file} must not contain ${banned}`);
     }
+    assert.ok(!md.split(RELEASE_URL).join("").includes("/releases/"), `${file} links no other release address`);
     // The badges' own URLs are checked exactly by the badge test above; only the badge markup itself is left out here,
-    // so the same URLs anywhere else are still unexpected. The Store listing is allowed as one exact address only.
+    // so the same URLs anywhere else are still unexpected.
     const urls = [...md.replace(BADGE, "").matchAll(/https?:\/\/[^\s)>`]+/g)].map((m) => m[0]);
     const allowed = [/^https:\/\/memocampus\.github\.io\/(en\/)?privacy\/$/, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/];
-    for (const url of urls) assert.ok(url === STORE_URL || allowed.some((re) => re.test(url)), `${file}: unexpected URL ${url}`);
+    for (const url of urls) assert.ok(url === STORE_URL || url === RELEASE_URL || allowed.some((re) => re.test(url)), `${file}: unexpected URL ${url}`);
   }
+  // The verified platforms, as the release notes say: Windows 11 x64 verified, Windows 10 not, Windows Server unsupported.
+  assert.match(section(docs[JA], 2), /動作を確認したのはWindows 11 x64だけで、Windows 10は未検証です。Windows Serverはサポート対象外です/);
+  assert.match(section(docs[EN], 2), /checked only on Windows 11 x64; Windows 10 is not verified\. Windows Server is not supported/);
+  assert.match(section(docs[JA], 10), /Windows 10では、まだ実際に確認していません。Windows Serverはサポート対象外です/);
+  assert.match(section(docs[EN], 10), /not been checked on Windows 10 yet\. Windows Server is not supported/);
+  // What was confirmed names the published installer; updating and the data kept after an uninstall stay unconfirmed.
+  assert.match(section(docs[JA], 3), /公開したものと同じv0\.1\.0のインストーラー（SHA-256が同一）/);
+  assert.match(section(docs[EN], 3), /same v0\.1\.0 installer as the one published \(identical SHA-256\)/);
+  assert.match(section(docs[JA], 3), /未確認：以前のビルドからの更新[^\n]*アンインストール後にVaultや設定が残ること/);
+  assert.match(section(docs[EN], 3), /Not confirmed yet: updating from an earlier build[^\n]*the Vault and settings being kept after an uninstall/);
+  assert.match(section(docs[JA], 9), /実際の更新と、アンインストール後にデータが残ることは、まだ実機で確認していません/);
+  assert.match(section(docs[EN], 9), /actual updating, and the data being kept after an uninstall, have not been confirmed/);
   // The first public release is v0.1.0 (Issue #102); the old plan's 0.8.0 is not named as a release any more.
   for (const file of [JA, EN]) assert.doesNotMatch(docs[file], /\bv?0\.8\.0\b/, `${file} names the old planned version`);
 });

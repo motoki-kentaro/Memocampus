@@ -11,7 +11,7 @@
 Windows版Google Chromeで見たWebページ・画像・ページの原本を、あなたのPC上の「Vault」に記録して、あとから探せるようにするツールです。
 
 > [!IMPORTANT]
-> Chrome拡張機能は、[Chrome Web StoreのMemocampusのページ](https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla)から追加できます。記録に必要なWindowsアプリのインストーラーは、まだ一般公開していません。公開後にこのREADMEへ入手方法を追記します（3章）。
+> Memocampus v0.1.0を正式に公開しました。Windowsアプリのインストーラーは[GitHub ReleasesのMemocampus v0.1.0のページ](https://github.com/motoki-kentaro/Memocampus/releases/tag/v0.1.0)から、Chrome拡張機能は[Chrome Web StoreのMemocampusのページ](https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla)から入手できます。記録には両方が必要です（3章）。
 
 ## 1. Memocampusとは
 
@@ -28,7 +28,7 @@ Windows版Google Chromeで見たWebページ・画像・ページの原本を、
 
 ## 2. 動作環境
 
-- Windows 10 / 11（x64）。実際の動作を確認したのはWindows 11のVMだけで、Windows 10では確認していません（3章）。
+- Windows 10 / 11（x64）。動作を確認したのはWindows 11 x64だけで、Windows 10は未検証です。Windows Serverはサポート対象外です（3章）。
 - Google Chrome 116以降（Windows版）
 - 次の2つの部品が両方必要です。
   - **Chrome拡張機能「Memocampus」**：画面と記録の受け付けを担います。
@@ -45,18 +45,19 @@ Memocampusは、次の2つの部品を別々に導入します。どちらか一
 | 部品 | 入手先 | 現在の状況 |
 |---|---|---|
 | Chrome拡張機能「Memocampus」 | [Chrome Web StoreのMemocampusのページ](https://chromewebstore.google.com/detail/memocampus/cdklofjfcjagkaclekmicliailmlnfla) | 公開中。Chromeへの追加は、あなたがストアで行います |
-| Windowsアプリ（Native Host・MCPサーバー・トレイ） | インストーラー `Memocampus-Setup-x64.exe` | 正式版の公開に合わせて提供します。入手先は公開時にこのREADMEへ追記します |
+| Windowsアプリ（Native Host・MCPサーバー・トレイ） | [GitHub ReleasesのMemocampus v0.1.0のページ](https://github.com/motoki-kentaro/Memocampus/releases/tag/v0.1.0)のインストーラー `Memocampus-Setup-x64.exe` | 公開中（v0.1.0）。インストーラーの実行は、あなたが行います |
 
 ### 導入の手順
 
-1. Windowsアプリのインストーラーを実行します。インストーラーが入れるのはWindows側の部品だけで、Chrome拡張機能は入れません。
+1. GitHub Releasesのページから `Memocampus-Setup-x64.exe` をダウンロードし、SHA-256を確かめてから（下の警告）、Windowsアプリのインストーラーを実行します。インストーラーが入れるのはWindows側の部品だけで、Chrome拡張機能は入れません。
 2. Chrome Web StoreのMemocampusのページを開き、Chromeに拡張機能を追加します。インストーラーの最後の画面で「Chrome Web Store で Memocampus を開く」にチェックを入れると、セットアップの終了時に既定のブラウザでこのページが開きます。
 3. [4章](#4-初回セットアップ)の初回セットアップに進みます。Vaultの作成と記録の開始は、拡張機能の画面であなたが操作したときにだけ行われます。
 
-### 現在の状況
+### 公開の状況
 
-- Chrome拡張機能は、Chrome Web Storeで公開しています。
-- Windowsアプリのインストーラーは、まだ一般公開していません。正式版の公開に合わせて提供し、入手先は公開時にこのREADMEへ追記します。
+- 現在の正式版はv0.1.0です。Windowsアプリのインストーラーは GitHub Releases で、Chrome拡張機能は Chrome Web Store で公開しています。
+- Windowsアプリは自動では更新しません。新しいバージョンは GitHub Releases で公開します（9章）。
+- 以前に配布した確認用のビルド `v0.1.0-review.1` をインストールしている場合は、先にそれをアンインストールしてから、v0.1.0をインストールしてください。
 - ソースコードから自分でビルドして試す方法は、[開発者向けガイド](docs/development.md)にあります（開発者向けです）。
 
 ### インストーラーが行うこと
@@ -74,17 +75,19 @@ Memocampusは、次の2つの部品を別々に導入します。どちらか一
 最後の画面には選択肢が2つ（「Memocampus を今すぐ起動する」と「Chrome Web Store で Memocampus を開く」）あり、どちらも初期状態ではオフです。ストアのページを開く選択肢は、ページを開くだけで、拡張機能をインストールしません。ページを開けなかった場合も、インストールは完了したままです。トレイを初めて起動すると、Windowsログオン時にトレイを起動する設定と、MCPサーバーを自動で起動する設定がオンになります。どちらもトレイのメニュー（「Windowsログオン時に起動」「MCPサーバを自動起動」）で変更できます。MCPサーバーが起動していても、Vaultの「MCPへの公開」を承認するまで、Vaultの内容はMCPクライアントに返しません。
 
 > [!WARNING]
-> 現在のインストーラーにはコード署名がありません。そのため、Windows SmartScreenの警告（発行元が不明）が表示される場合があります。入手先とファイルのSHA-256が公式に案内されたものと一致する場合にだけ実行してください。
+> v0.1.0のインストーラーにはコード署名がありません。そのため、Windows SmartScreenの警告（発行元が不明）が表示される場合があります。GitHub Releasesの上記のページから入手し、ファイルのSHA-256が同じページの `SHA256SUMS.txt` に書かれた値と一致する場合にだけ実行してください。SHA-256は、PowerShellの `Get-FileHash .\Memocampus-Setup-x64.exe` で表示できます。
 
 ### 確認済みの範囲
 
-- 確認済み：プロジェクトオーナーが隔離したWindows 11のVMで、次を確認しました。
-  - GitHub Actionsでビルドした製品版インストーラーでインストールできること
-  - Native Messaging Hostが登録されること
-  - 正式な拡張機能IDを再現したテスト用の拡張機能から接続できること
-  - Vaultに保存できること
-  - MCPサーバーが起動すること
-- 未確認：Chrome Web Storeからの実際のインストール、更新、アンインストール、Windows 10での動作、そのほかの受入項目（`installer/E2E-ACCEPTANCE.md`）。
+- 確認済み：プロジェクトオーナーが、公開したものと同じv0.1.0のインストーラー（SHA-256が同一）を隔離したWindows 11 x64のVMで実行し、次を確認しました。
+  - インストールが完了すること（通常のインストールと、サイレントインストール）
+  - Chrome Web Storeから追加した拡張機能が、インストールしたNative Hostに接続できること
+  - 閲覧履歴がVaultに保存され、検索で見つかること
+  - Chromeとの接続の登録が、正式な拡張機能IDだけを許可していること
+  - 最後の画面の選択肢が期待どおりに動き、オフラインでもインストールが完了すること
+  - アンインストールが完了すること
+  - MCPサーバーが起動すること（v0.1.0より前の製品版ビルドで確認）
+- 未確認：以前のビルドからの更新（上書きインストール）、アンインストール後にVaultや設定が残ること（設計上は残ります。9章）、異常時の動作、インストーラーの表示言語の選択、Windows 10での動作、そのほかの受入項目（`installer/E2E-ACCEPTANCE.md`）。
 
 ## 4. 初回セットアップ
 
@@ -250,7 +253,7 @@ MCP（Model Context Protocol）に対応したAIクライアントから、Vault
 ## 9. 更新とアンインストール
 
 > [!NOTE]
-> この章は現在の設計に基づく説明です。実際の更新とアンインストールは、まだ確認していません（3章）。
+> この章は現在の設計に基づく説明です。アンインストールが完了することは確認しましたが、実際の更新と、アンインストール後にデータが残ることは、まだ実機で確認していません（3章）。
 
 ### 更新
 
@@ -267,8 +270,8 @@ MCP（Model Context Protocol）に対応したAIクライアントから、Vault
 
 ## 10. 既知の制限
 
-- 対応しているのは、Windows 10 / 11（x64）版のGoogle Chrome 116以降だけです。ほかのブラウザやOSでは動作しません。Windows 10では、まだ実際に確認していません。
-- Windowsアプリのインストーラーは、まだ一般公開していません（3章）。
+- 対応しているのは、Windows 10 / 11（x64）版のGoogle Chrome 116以降だけです。ほかのブラウザやOSでは動作しません。Windows 10では、まだ実際に確認していません。Windows Serverはサポート対象外です。
+- Windowsアプリは自動では更新しません。新しいバージョンは、GitHub Releasesから入手してインストーラーを実行し直してください（9章）。
 - インストーラーにコード署名がありません。
 - 古いバージョンで作成したVault（スキーマ9以前）は使えません。変換もできません。
 - 画像：ほかのサイトからの直リンクを禁止している画像、ログインが必要な画像、閉じたページの `blob:` URLは、保存できない場合があります。5000万画素を超える画像は、パネルでのコピーとサムネイル表示ができません（書き出しはできます）。
